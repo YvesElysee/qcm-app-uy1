@@ -46,10 +46,10 @@ export default function Schedule() {
                 </div>
                 <h3 className="font-black text-gray-800 text-lg">{quiz.ue || quiz.id}</h3>
                 <p className="text-gray-500 text-sm mt-1">
-                    {past ? '✅ Terminé — ' : '📅 Prévu le '}
+                    {past ? 'Terminé — ' : 'Prévu le '}
                     <span className="font-semibold text-gray-700">{formatDate(quiz.launchTime)}</span>
                 </p>
-                {quiz.endTime && <p className="text-gray-400 text-xs mt-0.5">⏳ Heure de fin : {formatDate(quiz.endTime)}</p>}
+                {quiz.endTime && <p className="text-gray-400 text-xs mt-0.5">Heure de fin : {formatDate(quiz.endTime)}</p>}
             </div>
             <div className="flex gap-2 flex-shrink-0">
                 {past ? (

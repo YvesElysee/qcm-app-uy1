@@ -105,7 +105,7 @@ export default function AdminPanel() {
           if (q.Question) await addDoc(questionsRef, q);
         }
         setImporting(false);
-        alert("✅ Questions importées !");
+        alert("Questions importées !");
       }
     });
   };
@@ -117,7 +117,7 @@ export default function AdminPanel() {
     if (endTime) data.endTime = new Date(endTime).getTime();
     if (timePerQuestion) data.timePerQuestion = parseInt(timePerQuestion);
     await setDoc(doc(db, "quizzes", ue), data, { merge: true });
-    alert("✅ Quiz programmé avec succès !");
+    alert("Quiz programmé avec succès !");
     fetchHistory();
     fetchUpcoming();
   };
@@ -413,8 +413,8 @@ export default function AdminPanel() {
                       <p className="text-sm text-gray-500">{q.filiere} — {q.niveau} — S{q.semestre}</p>
                     </div>
                     <div className="text-right">
-                      <p className="text-sm font-bold text-blue-700">📅 {formatDate(q.launchTime)}</p>
-                      {q.endTime && <p className="text-xs text-gray-400">⏳ Fin : {formatDate(q.endTime)}</p>}
+                      <p className="text-sm font-bold text-blue-700">{formatDate(q.launchTime)}</p>
+                      {q.endTime && <p className="text-xs text-gray-400">Fin : {formatDate(q.endTime)}</p>}
                     </div>
                   </div>
                 ))}

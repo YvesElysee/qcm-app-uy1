@@ -6,8 +6,6 @@ import {
   onSnapshot, query, where, setDoc, deleteDoc, serverTimestamp
 } from 'firebase/firestore';
 
-// Shuffle déterministe basé sur un seed (nom de l'étudiant) pour que les questions
-// soient aléatoires mais cohérentes en cas de rechargement
 function seededShuffle(arr, seed) {
   const a = [...arr];
   let h = 0;
@@ -28,6 +26,8 @@ export default function QuizSession() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [score, setScore] = useState(0);
   const [answers, setAnswers] = useState([]);
+  const [selectedAnswer, setSelectedAnswer] = useState(null);
+  const [toast, setToast] = useState('');
 
   const [phase, setPhase] = useState('loading');
   const [countdown, setCountdown] = useState(null);
@@ -39,9 +39,14 @@ export default function QuizSession() {
 
   const [quizMeta, setQuizMeta] = useState(null);
   const submitted = useRef(false);
+  const timerRef = useRef(null);
+  const selectedAnswerRef = useRef(null);
+
   const user = JSON.parse(localStorage.getItem('userSession')) || { name: 'Anonyme' };
-  const sessionId = useRef(`${user.name}_${Date.now()}`).current;
-  const storageKey = STORAGE_KEY(quizId, user.name);
+  // Clean le nom pour servir de seed robuste
+  const safeName = user.name ? user.name.trim() : 'Anonyme';
+  const sessionId = useRef(`${safeName}_${Date.now()}`).current;
+  const storageKey = STORAGE_KEY(quizId, safeName);
 
   // ── Chargement initial ─────────────────────────────────────────────────
   useEffect(() => {
@@ -51,12 +56,10 @@ export default function QuizSession() {
       const meta = metaDoc.data();
       setQuizMeta(meta);
 
-      // Vérifier s'il y a une progression sauvegardée
       const saved = localStorage.getItem(storageKey);
       if (saved) {
         try {
           const { qs, idx, sc, ans, quizSession } = JSON.parse(saved);
-          // Vérifie que la session enregistrée correspond bien au même lancement
           if (qs && quizSession === (meta.launchTime || 0)) {
             setQuestions(qs);
             setCurrentIndex(idx);
@@ -73,10 +76,10 @@ export default function QuizSession() {
         } catch (_) { /* ignore */ }
       }
 
-      // Chargement frais
       const qSnap = await getDocs(collection(db, `quizzes/${quizId}/questions`));
       const raw = qSnap.docs.map(d => d.data());
-      const qs = seededShuffle(raw, user.name); // ordre aléatoire propre au participant
+      // On shuffle aléatoirement mais de façon déterministe
+      const qs = seededShuffle(raw, safeName);
       setQuestions(qs);
 
       const now = Date.now();
@@ -116,32 +119,124 @@ export default function QuizSession() {
   useEffect(() => {
     if (phase !== 'quiz') return;
     const presenceRef = doc(db, `quizzes/${quizId}/sessions`, sessionId);
-    setDoc(presenceRef, { name: user.name, ts: serverTimestamp() });
+    setDoc(presenceRef, { name: safeName, ts: serverTimestamp(), currentAnswers: answers }, { merge: true });
     const unsubscribe = onSnapshot(collection(db, `quizzes/${quizId}/sessions`), snap => setParticipants(snap.size));
     return () => { unsubscribe(); deleteDoc(presenceRef); };
-  }, [phase, quizId]);
+  }, [phase, quizId, answers]);
 
   // ── Soumission automatique à endTime ──────────────────────────────────
   useEffect(() => {
     if (phase !== 'quiz' || !quizMeta?.endTime) return;
     const msLeft = quizMeta.endTime - Date.now();
-    if (msLeft <= 0) { submitQuiz(score, answers); return; }
-    const timeout = setTimeout(() => submitQuiz(score, answers), msLeft);
+    if (msLeft <= 0) {
+      if (!submitted.current) submitQuiz(score, answers);
+      return;
+    }
+    const timeout = setTimeout(() => {
+      if (!submitted.current) submitQuiz(score, answers);
+    }, msLeft);
     return () => clearTimeout(timeout);
-  }, [phase, quizMeta]);
+  }, [phase, quizMeta, score, answers]);
 
   // ── Timer par question ────────────────────────────────────────────────
   useEffect(() => {
     if (phase !== 'quiz' || !quizMeta?.timePerQuestion || quizMeta.timePerQuestion <= 0) return;
-    setTimeLeft(quizMeta.timePerQuestion * 1000);
-    const interval = setInterval(() => {
+
+    if (timeLeft === null) {
+      setTimeLeft(quizMeta.timePerQuestion * 1000);
+    }
+
+    timerRef.current = setInterval(() => {
       setTimeLeft(prev => {
-        if (prev <= 500) { clearInterval(interval); handleAnswer(null, true); return 0; }
+        if (prev === null) return null;
+        if (prev <= 500) {
+          clearInterval(timerRef.current);
+          return 0;
+        }
         return prev - 500;
       });
     }, 500);
-    return () => clearInterval(interval);
+
+    return () => clearInterval(timerRef.current);
   }, [phase, currentIndex, quizMeta]);
+
+  useEffect(() => {
+    if (timeLeft === 0 && phase === 'quiz') {
+      confirmAnswer(true);
+    }
+  }, [timeLeft]);
+
+  // ── Soumission finale du quiz ─────────────────────────────────────────
+  const submitQuiz = useCallback(async (finalScore, finalAnswers) => {
+    if (submitted.current) return;
+    submitted.current = true;
+    localStorage.removeItem(storageKey);
+    setPhase('finished');
+
+    const histKey = `qcm_history_${safeName}`;
+    const existing = JSON.parse(localStorage.getItem(histKey) || '[]');
+    const entry = {
+      quizId,
+      filiere: quizMeta?.filiere || user.filiere || '',
+      niveau: quizMeta?.niveau || user.niveau || '',
+      score: finalScore,
+      total: questions.length,
+      date: new Date().toISOString(),
+      sessionTimestamp: quizMeta?.launchTime || 0
+    };
+    const updated = [entry, ...existing.filter(e => !(e.quizId === quizId && e.sessionTimestamp === entry.sessionTimestamp))];
+    localStorage.setItem(histKey, JSON.stringify(updated.slice(0, 50)));
+
+    await addDoc(collection(db, "results"), {
+      name: safeName,
+      ue: quizId,
+      filiere: quizMeta?.filiere || '',
+      niveau: quizMeta?.niveau || '',
+      score: finalScore,
+      total: questions.length,
+      answers: finalAnswers,
+      sessionTimestamp: quizMeta?.launchTime || 0,
+      date: new Date().toISOString()
+    });
+  }, [quizId, safeName, questions.length, quizMeta, storageKey]);
+
+  // ── Validation de la réponse courante ─────────────────────────────────
+  const handleOptionClick = (opt) => {
+    setSelectedAnswer(opt);
+    selectedAnswerRef.current = opt;
+  };
+
+  const confirmAnswer = useCallback(async (forcedTimeout = false) => {
+    if (phase !== 'quiz') return;
+    const q = questions[currentIndex];
+
+    // NETTOYAGE: on évite les bugs d'espaces invisibles \r du CSV
+    const cleanCorrect = q?.ReponseCorrecte ? q.ReponseCorrecte.trim() : "";
+    const cleanSelected = selectedAnswerRef.current ? selectedAnswerRef.current.trim() : "";
+
+    const isCorrect = cleanSelected && cleanSelected === cleanCorrect;
+    const newScore = isCorrect ? score + 1 : score;
+    const newAnswers = [...answers, cleanSelected || null];
+
+    setScore(newScore);
+    setAnswers(newAnswers);
+    setSelectedAnswer(null);
+    selectedAnswerRef.current = null;
+
+    if (!forcedTimeout && cleanSelected) {
+      setToast('Enregistre sur le serveur');
+      setTimeout(() => setToast(''), 2500);
+    }
+
+    if (currentIndex + 1 < questions.length) {
+      setCurrentIndex(i => i + 1);
+      if (quizMeta?.timePerQuestion) {
+        setTimeLeft(quizMeta.timePerQuestion * 1000);
+      }
+    } else {
+      submitQuiz(newScore, newAnswers);
+    }
+  }, [currentIndex, questions, score, answers, submitQuiz, quizMeta, phase]);
 
   // ── Classement session courante ───────────────────────────────────────
   useEffect(() => {
@@ -159,59 +254,10 @@ export default function QuizSession() {
     return () => unsubscribe();
   }, [phase, quizId, quizMeta]);
 
-  // ── Soumission du quiz ────────────────────────────────────────────────
-  const submitQuiz = useCallback(async (finalScore, finalAnswers) => {
-    if (submitted.current) return;
-    submitted.current = true;
-    localStorage.removeItem(storageKey); // Nettoyer la progression sauvegardée
-    setPhase('finished');
-
-    // Sauvegarder dans l'historique personnel (localStorage)
-    const histKey = `qcm_history_${user.name}`;
-    const existing = JSON.parse(localStorage.getItem(histKey) || '[]');
-    const entry = {
-      quizId,
-      filiere: quizMeta?.filiere || user.filiere || '',
-      niveau: quizMeta?.niveau || user.niveau || '',
-      score: finalScore,
-      total: questions.length,
-      date: new Date().toISOString(),
-      sessionTimestamp: quizMeta?.launchTime || 0
-    };
-    const updated = [entry, ...existing.filter(e => !(e.quizId === quizId && e.sessionTimestamp === entry.sessionTimestamp))];
-    localStorage.setItem(histKey, JSON.stringify(updated.slice(0, 50)));
-
-    await addDoc(collection(db, "results"), {
-      name: user.name,
-      ue: quizId,
-      filiere: quizMeta?.filiere || '',
-      niveau: quizMeta?.niveau || '',
-      score: finalScore,
-      total: questions.length,
-      answers: finalAnswers,
-      sessionTimestamp: quizMeta?.launchTime || 0,
-      date: new Date().toISOString()
-    });
-  }, [quizId, user.name, questions.length, quizMeta, storageKey]);
-
-  const handleAnswer = useCallback((selectedOption, autoSkip = false) => {
-    const q = questions[currentIndex];
-    const isCorrect = !autoSkip && selectedOption === q?.ReponseCorrecte;
-    const newScore = isCorrect ? score + 1 : score;
-    const newAnswers = [...answers, autoSkip ? null : selectedOption];
-    setScore(newScore);
-    setAnswers(newAnswers);
-    if (currentIndex + 1 < questions.length) {
-      setCurrentIndex(i => i + 1);
-    } else {
-      submitQuiz(newScore, newAnswers);
-    }
-  }, [currentIndex, questions, score, answers, submitQuiz]);
-
   const sendFeedback = async () => {
     if (!feedbackMsg.trim()) return;
     await addDoc(collection(db, "feedback"), {
-      name: user.name,
+      name: safeName,
       ue: quizId,
       filiere: quizMeta?.filiere || '',
       niveau: quizMeta?.niveau || '',
@@ -235,14 +281,14 @@ export default function QuizSession() {
   const timerColor = timerPct > 50 ? 'bg-green-500' : timerPct > 20 ? 'bg-yellow-500' : 'bg-red-500';
 
   // ──────────────────────────────────────────────────────────────────────
-  // PHASES
+  // RENDUS
   // ──────────────────────────────────────────────────────────────────────
 
   if (phase === 'loading') return (
     <div className="min-h-screen flex items-center justify-center bg-slate-900">
       <div className="text-white text-center">
         <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-        <p className="text-slate-300">Chargement de l'épreuve...</p>
+        <p className="text-slate-300">Chargement de l'epreuve...</p>
       </div>
     </div>
   );
@@ -252,13 +298,13 @@ export default function QuizSession() {
       <div className="max-w-sm w-full text-center">
         <h1 className="text-2xl font-black mb-1 text-blue-400">Salle d'attente</h1>
         <p className="text-slate-400 mb-2 text-sm">{quizId}</p>
-        <p className="text-slate-400 mb-8 text-sm">L'évaluation démarre dans :</p>
+        <p className="text-slate-400 mb-8 text-sm">L'evaluation demarre dans :</p>
         <div className="text-7xl font-mono bg-slate-800 px-8 py-6 rounded-2xl shadow-2xl border border-slate-700 tracking-wider mb-6">
           {fmtMs(countdown)}
         </div>
         <div className="flex items-center justify-center gap-2 text-emerald-400 animate-pulse font-semibold text-sm">
           <span className="h-2.5 w-2.5 rounded-full bg-emerald-400"></span>
-          Synchronisation en temps réel active
+          Synchronisation en temps reel active
         </div>
         <Link to="/schedule" className="mt-8 inline-block text-slate-500 hover:text-slate-300 text-sm transition">Emploi du temps</Link>
       </div>
@@ -266,8 +312,8 @@ export default function QuizSession() {
   );
 
   if (phase === 'finished') {
-    const myEntry = leaderboard.find(e => e.name === user.name);
-    const myRank = leaderboard.findIndex(e => e.name === user.name) + 1;
+    const myEntry = leaderboard.find(e => e.name === safeName);
+    const myRank = leaderboard.findIndex(e => e.name === safeName) + 1;
     const myNote = myEntry ? ((myEntry.score / myEntry.total) * 20).toFixed(2) : '—';
     const participation = leaderboard.length;
 
@@ -277,7 +323,7 @@ export default function QuizSession() {
           {/* Score card */}
           <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl p-8 text-center mb-5">
             <h1 className="text-2xl font-black mb-1">Epreuve terminee</h1>
-            <p className="opacity-80 mb-4 text-sm">{user.name}</p>
+            <p className="opacity-80 mb-4 text-sm">{safeName}</p>
             <div className="grid grid-cols-3 gap-4">
               <div className="bg-white/10 rounded-xl p-3">
                 <div className="text-2xl font-black">{score}/{questions.length}</div>
@@ -310,14 +356,14 @@ export default function QuizSession() {
             <h2 className="text-base font-bold text-gray-700 mb-3">Laisser un message a l'administrateur</h2>
             {feedbackSent ? (
               <div className="text-green-600 font-semibold text-sm bg-green-50 border border-green-200 rounded-lg p-3">
-                Message envoye avec succes. Merci pour votre retour.
+                Message envoye avec succes.
               </div>
             ) : (
               <div className="flex gap-2">
                 <textarea
                   className="flex-1 border-2 border-gray-100 rounded-lg p-3 text-sm outline-none focus:border-blue-400 transition resize-none"
                   rows={3}
-                  placeholder="Appreciations, suggestions, critiques sur ce QCM..."
+                  placeholder="Appreciations, suggestions, critiques..."
                   value={feedbackMsg}
                   onChange={e => setFeedbackMsg(e.target.value)}
                 />
@@ -332,12 +378,12 @@ export default function QuizSession() {
           {/* Classement session courante */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
             <div className="flex items-center justify-between mb-4 border-b pb-3">
-              <h2 className="text-lg font-bold text-gray-800">Classement — Session en cours</h2>
-              <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-bold animate-pulse">{participation} participants</span>
+              <h2 className="text-lg font-bold text-gray-800">Classement de la session</h2>
+              <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-bold">{participation} participants</span>
             </div>
             <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
               {leaderboard.map((entry, index) => {
-                const isMe = entry.name === user.name;
+                const isMe = entry.name === safeName;
                 const entryNote = entry.total ? ((entry.score / entry.total) * 20).toFixed(1) : '—';
                 return (
                   <div key={index} className={`flex justify-between items-center p-3 rounded-xl border-2 transition ${isMe ? 'bg-blue-50 border-blue-400' : 'bg-gray-50 border-gray-100'}`}>
@@ -370,8 +416,8 @@ export default function QuizSession() {
     <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-6">
       <div className="bg-white p-8 rounded-xl shadow-lg text-center max-w-md border border-orange-200">
         <h2 className="text-2xl font-bold mt-4 text-orange-600">Epreuve non disponible</h2>
-        <p className="text-gray-500 mt-2">Le quiz <strong>{quizId}</strong> n'est pas encore configure.</p>
-        <Link to="/" className="mt-4 inline-block text-blue-600 hover:underline">Retour a l'accueil</Link>
+        <p className="text-gray-500 mt-2">Le quiz n'est pas encore configure.</p>
+        <Link to="/" className="mt-4 inline-block text-blue-600 hover:underline">Retour</Link>
       </div>
     </div>
   );
@@ -379,13 +425,17 @@ export default function QuizSession() {
   const q = questions[currentIndex];
   const progress = (currentIndex / questions.length) * 100;
 
+  // Melanger les options de facon deterministe pour l'affichage
+  const validOptions = ['OptA', 'OptB', 'OptC', 'OptD'].map(k => q[k]).filter(v => typeof v === 'string' && v.trim() !== '');
+  const shuffledOptions = seededShuffle(validOptions, safeName + "_" + currentIndex);
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
-      {/* Top bar */}
+      {/* Barre du haut (participants / progression) */}
       <div className="bg-white border-b shadow-sm px-4 py-3 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2.5 py-1 rounded-full">{quizId}</span>
-          <span className="text-gray-500 text-sm font-semibold">{user.name}</span>
+          <span className="text-gray-500 text-sm font-semibold">{safeName}</span>
         </div>
         <div className="flex items-center gap-3">
           <span className="flex items-center gap-1.5 text-xs text-gray-500 bg-gray-100 px-2.5 py-1 rounded-full">
@@ -408,7 +458,9 @@ export default function QuizSession() {
         <div className="bg-white px-4 py-2 border-b">
           <div className="flex items-center justify-between mb-1">
             <span className="text-xs text-gray-500 font-semibold">Temps restant</span>
-            <span className={`text-sm font-black font-mono ${timerPct <= 20 ? 'text-red-600 animate-pulse' : 'text-gray-700'}`}>{fmtMs(timeLeft)}</span>
+            <span className={`text-sm font-black font-mono ${timerPct <= 20 ? 'text-red-600 animate-pulse' : 'text-gray-700'}`}>
+              {fmtMs(timeLeft)}
+            </span>
           </div>
           <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
             <div className={`h-2 rounded-full transition-all duration-500 ${timerColor}`} style={{ width: `${timerPct}%` }}></div>
@@ -416,19 +468,37 @@ export default function QuizSession() {
         </div>
       )}
 
+      {/* Toast : Serveur Enregistre */}
+      {toast && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-green-600 text-white font-bold text-xs px-4 py-2 rounded-full shadow-lg z-50 animate-bounce">
+          {toast}
+        </div>
+      )}
+
       {/* Question */}
-      <div className="flex-1 flex flex-col items-center pt-10 px-4 pb-12">
+      <div className="flex-1 flex flex-col items-center pt-8 px-4 pb-20">
         <div className="w-full max-w-3xl bg-white p-8 rounded-2xl shadow-lg border border-gray-100">
           <h2 className="text-xl font-bold mb-8 text-gray-800 leading-relaxed">{q.Question}</h2>
-          <div className="grid grid-cols-1 gap-3">
-            {['OptA', 'OptB', 'OptC', 'OptD'].map(opt => (
-              q[opt] && (
-                <button key={opt} onClick={() => handleAnswer(q[opt])}
-                  className="w-full text-left p-4 border-2 border-gray-100 rounded-xl hover:bg-blue-50 hover:border-blue-400 hover:shadow-sm transition font-semibold text-gray-700 active:scale-[0.99]">
-                  {q[opt]}
+          <div className="grid grid-cols-1 gap-3 mb-8">
+            {shuffledOptions.map(opt => {
+              const isSelected = selectedAnswer === opt;
+              return (
+                <button key={opt} onClick={() => handleOptionClick(opt)}
+                  className={`w-full text-left p-4 border-2 rounded-xl transition font-semibold active:scale-[0.99]
+                    ${isSelected ? 'bg-blue-50 border-blue-500 text-blue-800 shadow-sm' : 'border-gray-100 text-gray-700 hover:bg-gray-50 hover:border-gray-300'}`}>
+                  {opt}
                 </button>
-              )
-            ))}
+              );
+            })}
+          </div>
+
+          <div className="flex justify-end">
+            <button
+              onClick={() => confirmAnswer(false)}
+              disabled={!selectedAnswer}
+              className="bg-blue-600 text-white px-8 py-3 rounded-xl font-bold shadow-lg hover:bg-blue-700 transition disabled:opacity-50 disabled:shadow-none">
+              Valider et Suivant
+            </button>
           </div>
         </div>
       </div>
