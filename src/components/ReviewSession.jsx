@@ -18,18 +18,31 @@ function seededShuffle(arr, seed) {
 export default function ReviewSession() {
     const { quizId } = useParams();
     const [questions, setQuestions] = useState([]);
-    const [answers, setAnswers] = useState([]);
+    const [answers, setAnswers] = useState([]); // { selected, correct, isOk }[]
     const [score, setScore] = useState(null);
     const [total, setTotal] = useState(null);
     const [loading, setLoading] = useState(true);
+
     const user = JSON.parse(localStorage.getItem('userSession')) || { name: 'Anonyme' };
-    const safeName = user.name ? user.name.trim() : 'Anonyme';
+    const safeName = (user.name || 'Anonyme').trim();
 
     useEffect(() => {
         const load = async () => {
-            // 1. Charger les questions dans le MÊME ordre aléatoire que pendant le QCM
             const qSnap = await getDocs(collection(db, `quizzes/${quizId}/questions`));
-            const raw = qSnap.docs.map(d => d.data());
+            const raw = qSnap.docs.map(d => {
+                const data = d.data();
+                // Normaliser ReponseCorrecte (lettre → texte) identique à QuizSession
+                const rc = (data.ReponseCorrecte || '').trim().toUpperCase();
+                if (['A', 'B', 'C', 'D'].includes(rc)) {
+                    data.ReponseCorrecte = (data['Opt' + rc] || rc).trim();
+                } else {
+                    data.ReponseCorrecte = (data.ReponseCorrecte || '').trim();
+                }
+                ['Question', 'OptA', 'OptB', 'OptC', 'OptD'].forEach(k => {
+                    if (data[k]) data[k] = data[k].trim();
+                });
+                return data;
+            });
             const qs = seededShuffle(raw, safeName);
 
             const rSnap = await getDocs(query(
@@ -59,11 +72,11 @@ export default function ReviewSession() {
         </div>
     );
 
-    if (questions.length === 0 || score === null) return (
+    if (!questions.length || score === null) return (
         <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-            <div className="bg-white p-8 rounded-xl shadow text-center max-w-sm border border-gray-200">
-                <h2 className="text-xl font-bold mt-4 text-gray-700">Aucun resultat trouve</h2>
-                <p className="text-gray-500 mt-2 text-sm">Vous n'avez pas passe ce QCM ou vous n'etes pas connecte avec le meme nom exact.</p>
+            <div className="bg-white p-8 rounded-xl shadow text-center max-w-sm border">
+                <h2 className="text-xl font-bold text-gray-700 mb-2">Aucun resultat trouve</h2>
+                <p className="text-gray-500 text-sm">Connectez-vous avec le meme nom exact utilise lors du QCM.</p>
                 <Link to="/schedule" className="mt-4 inline-block text-blue-600 font-bold hover:underline">Retour a l'emploi du temps</Link>
             </div>
         </div>
@@ -76,16 +89,16 @@ export default function ReviewSession() {
             <div className="max-w-3xl mx-auto">
                 <Link to="/schedule" className="text-blue-600 font-bold hover:underline text-sm">Retour a l'emploi du temps</Link>
 
-                {/* Recap card */}
+                {/* En-tête résumé */}
                 <div className="bg-gradient-to-r from-indigo-600 to-blue-600 text-white rounded-2xl p-8 my-6 text-center shadow-lg">
                     <h1 className="text-2xl font-black mb-1">Correction — {quizId}</h1>
                     <p className="opacity-80 mb-6 text-sm">{safeName}</p>
                     <div className="flex justify-center gap-8">
-                        <div className="bg-white/10 p-4 rounded-xl">
+                        <div className="bg-white/10 p-4 rounded-xl min-w-24">
                             <div className="text-4xl font-black">{score}/{total}</div>
                             <div className="text-xs font-bold opacity-75 mt-2 uppercase tracking-wider">Score</div>
                         </div>
-                        <div className="bg-white/10 p-4 rounded-xl">
+                        <div className="bg-white/10 p-4 rounded-xl min-w-24">
                             <div className="text-4xl font-black">{note}/20</div>
                             <div className="text-xs font-bold opacity-75 mt-2 uppercase tracking-wider">Note</div>
                         </div>
@@ -93,53 +106,68 @@ export default function ReviewSession() {
                 </div>
 
                 {/* Questions */}
-                <div className="space-y-4">
+                <div className="space-y-5">
                     {questions.map((q, i) => {
-                        const given = answers[i] !== undefined ? answers[i] : null;
-                        // Nettoyage (.trim()) complet des chaines pour la comparaison
-                        const correct = q.ReponseCorrecte ? q.ReponseCorrecte.trim() : "";
-                        const cleanGiven = given ? given.trim() : "";
+                        const ans = answers[i];
+                        // Support de l'ancienne structure (string) et nouvelle structure ({selected, correct, isOk})
+                        const isNewFormat = ans && typeof ans === 'object';
+                        const givenText = isNewFormat ? (ans.selected || '') : (ans || '');
+                        const correctText = isNewFormat ? (ans.correct || q.ReponseCorrecte || '') : (q.ReponseCorrecte || '');
+                        const isOk = isNewFormat ? ans.isOk : (givenText.trim() !== '' && givenText.trim() === correctText.trim());
+                        const notAnswered = !givenText.trim();
 
-                        const isOk = cleanGiven && cleanGiven === correct;
-                        const notAnswered = !cleanGiven;
-
-                        // Recréer le même ordre d'options que pendant l'épreuve !
-                        const validOptions = ['OptA', 'OptB', 'OptC', 'OptD'].map(k => q[k]).filter(v => typeof v === 'string' && v.trim() !== '');
-                        const shuffledOptions = seededShuffle(validOptions, safeName + "_" + i);
+                        // Ordre des options identique au quiz (même seed)
+                        const validOptions = ['OptA', 'OptB', 'OptC', 'OptD']
+                            .map(k => q[k]).filter(v => typeof v === 'string' && v.trim() !== '');
+                        const shuffledOptions = seededShuffle(validOptions, safeName + '_' + i);
 
                         return (
-                            <div key={i} className={`bg-white rounded-xl shadow-sm border-l-4 p-6 ${isOk ? 'border-green-500' : notAnswered ? 'border-gray-300' : 'border-red-500'}`}>
-                                <div className="flex items-start justify-between gap-4 mb-4">
-                                    <span className="bg-gray-100 text-gray-600 text-xs font-bold px-3 py-1 rounded-full shrink-0">Question {i + 1}</span>
-                                    {notAnswered && <span className="text-gray-400 text-xs font-bold uppercase tracking-wider">Sans reponse</span>}
+                            <div key={i} className={`bg-white rounded-xl shadow-sm border-l-4 overflow-hidden ${isOk ? 'border-green-500' : notAnswered ? 'border-gray-300' : 'border-red-500'}`}>
+                                {/* En-tête question */}
+                                <div className="flex items-center justify-between px-6 pt-5 pb-3">
+                                    <span className={`text-xs font-black uppercase tracking-wider px-2.5 py-1 rounded-full ${isOk ? 'bg-green-100 text-green-700' : notAnswered ? 'bg-gray-100 text-gray-500' : 'bg-red-100 text-red-700'}`}>
+                                        {isOk ? 'Correct' : notAnswered ? 'Sans reponse' : 'Incorrect'} — Q{i + 1}
+                                    </span>
+                                    <span className={`font-extrabold text-sm ${isOk ? 'text-green-600' : 'text-red-600'}`}>
+                                        {isOk ? '+1 pt' : '0 pt'}
+                                    </span>
                                 </div>
-                                <h3 className="font-bold text-gray-800 mb-6 leading-relaxed">{q.Question}</h3>
 
-                                <div className="flex flex-col gap-2">
-                                    {shuffledOptions.map(val => {
-                                        const cleanVal = val.trim();
-                                        const isCorrectChoice = cleanVal === correct;
-                                        const isGivenWrong = cleanVal === cleanGiven && !isOk;
-                                        const isGivenCorrect = cleanVal === cleanGiven && isOk;
+                                <div className="px-6 pb-6">
+                                    <h3 className="font-bold text-gray-800 mb-5 leading-relaxed">{q.Question}</h3>
 
-                                        let cls = 'p-4 rounded-xl text-sm border-2 transition '
+                                    <div className="flex flex-col gap-2">
+                                        {shuffledOptions.map(val => {
+                                            const cleanVal = val.trim();
+                                            const isCorrectOpt = cleanVal === correctText.trim();
+                                            const isGivenOpt = cleanVal === givenText.trim();
 
-                                        if (isGivenCorrect) {
-                                            cls += 'bg-green-50 border-green-500 text-green-900 font-bold';
-                                        } else if (isGivenWrong) {
-                                            cls += 'bg-red-50 border-red-400 text-red-800 font-bold';
-                                        } else if (isCorrectChoice) {
-                                            cls += 'bg-green-50 border-green-500 text-green-800 font-bold';
-                                        } else {
-                                            cls += 'bg-gray-50 border-gray-100 text-gray-500 font-medium';
-                                        }
+                                            let cls = 'p-4 rounded-xl text-sm border-2 transition font-medium ';
+                                            let label = null;
 
-                                        return (
-                                            <div key={val} className={cls}>
-                                                {val}
-                                            </div>
-                                        );
-                                    })}
+                                            if (isOk && isGivenOpt) {
+                                                cls += 'bg-green-50 border-green-500 text-green-900 font-bold';
+                                                label = <span className="ml-2 text-xs bg-green-600 text-white px-1.5 py-0.5 rounded-full font-bold">Votre reponse</span>;
+                                            } else if (!isOk && isGivenOpt) {
+                                                cls += 'bg-red-50 border-red-400 text-red-900 font-bold';
+                                                label = <span className="ml-2 text-xs bg-red-600 text-white px-1.5 py-0.5 rounded-full font-bold">Votre reponse</span>;
+                                            } else if (!isOk && isCorrectOpt) {
+                                                cls += 'bg-green-50 border-green-500 text-green-900 font-bold';
+                                                label = <span className="ml-2 text-xs bg-green-600 text-white px-1.5 py-0.5 rounded-full font-bold">Bonne reponse</span>;
+                                            } else {
+                                                cls += 'bg-gray-50 border-gray-100 text-gray-400';
+                                            }
+
+                                            return (
+                                                <div key={val} className={cls}>
+                                                    <div className="flex items-center flex-wrap gap-1">
+                                                        <span>{val}</span>
+                                                        {label}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
                                 </div>
                             </div>
                         );

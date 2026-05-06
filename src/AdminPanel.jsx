@@ -99,13 +99,32 @@ export default function AdminPanel() {
     setImporting(true);
     Papa.parse(file, {
       header: true,
+      skipEmptyLines: true,
       complete: async (results) => {
         const questionsRef = collection(db, `quizzes/${ue}/questions`);
+        // 1. Supprimer toutes les anciennes questions (eviter le chevauchement)
+        const existing = await getDocs(questionsRef);
+        for (const d of existing.docs) await deleteDoc(d.ref);
+        // 2. Importer en normalisant ReponseCorrecte lettre->texte
+        let count = 0;
         for (let q of results.data) {
-          if (q.Question) await addDoc(questionsRef, q);
+          if (!q.Question) continue;
+          const rc = (q.ReponseCorrecte || '').trim().toUpperCase();
+          if (['A', 'B', 'C', 'D'].includes(rc)) {
+            q.ReponseCorrecte = (q['Opt' + rc] || rc).trim();
+          } else {
+            q.ReponseCorrecte = (q.ReponseCorrecte || '').trim();
+          }
+          // Nettoyer les espaces parasites sur toutes les options
+          ['OptA', 'OptB', 'OptC', 'OptD', 'Question'].forEach(k => {
+            if (q[k]) q[k] = q[k].trim();
+          });
+          await addDoc(questionsRef, q);
+          count++;
         }
         setImporting(false);
-        alert("Questions importées !");
+        e.target.value = '';
+        alert(count + ' questions importees avec succes (anciennes supprimees)');
       }
     });
   };
