@@ -39,7 +39,7 @@ export default function Login() {
                         </svg>
                     </div>
                     <h1 className="text-2xl font-black text-gray-800">Accès Administrateur</h1>
-                    <p className="text-gray-500 text-sm mt-1">Portail QCM — UY1</p>
+                    <p className="text-gray-500 text-sm mt-1">Portail QCM UY1</p>
                 </div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">Mot de passe :</label>
                 <input

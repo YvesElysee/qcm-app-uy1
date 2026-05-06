@@ -8,7 +8,7 @@ import {
   query, where, deleteDoc, orderBy
 } from 'firebase/firestore';
 
-const TABS = ['Créer Quiz', 'Gérer UEs', 'Historique', 'Emploi du temps'];
+const TABS = ['Créer Quiz', 'Gérer UEs', 'Historique', 'Emploi du temps', 'Messages'];
 
 const FILIERES_DEFAULT = ['Informatique', 'Mathématiques', 'Physique'];
 const NIVEAUX_DEFAULT = ['L1', 'L2', 'L3', 'M1', 'M2'];
@@ -43,6 +43,12 @@ export default function AdminPanel() {
   // ── Tab 4 : Emploi du temps ───────────────────
   const [upcoming, setUpcoming] = useState([]);
 
+  // ── Tab 5 : Messages ─────────────────────────
+  const [feedbacks, setFeedbacks] = useState([]);
+  const [fbFiliere, setFbFiliere] = useState('');
+  const [fbNiveau, setFbNiveau] = useState('');
+  const [loadingFb, setLoadingFb] = useState(false);
+
   useEffect(() => {
     fetchHistory();
     fetchUes();
@@ -64,6 +70,25 @@ export default function AdminPanel() {
     const snap = await getDocs(query(collection(db, "quizzes"), orderBy("launchTime", "asc")));
     const now = Date.now();
     setUpcoming(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(q => q.launchTime > now));
+  };
+
+  const fetchFeedbacks = async () => {
+    setLoadingFb(true);
+    let q;
+    if (fbFiliere && fbNiveau) {
+      q = query(collection(db, "feedback"), where("filiere", "==", fbFiliere), where("niveau", "==", fbNiveau));
+    } else if (fbFiliere) {
+      q = query(collection(db, "feedback"), where("filiere", "==", fbFiliere));
+    } else if (fbNiveau) {
+      q = query(collection(db, "feedback"), where("niveau", "==", fbNiveau));
+    } else {
+      q = query(collection(db, "feedback"), orderBy("date", "desc"));
+    }
+    const snap = await getDocs(q);
+    const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    data.sort((a, b) => new Date(b.date) - new Date(a.date));
+    setFeedbacks(data);
+    setLoadingFb(false);
   };
 
   // ─── Tab 1 handlers ───────────────────────────
@@ -395,6 +420,48 @@ export default function AdminPanel() {
                 ))}
               </div>
             }
+          </div>
+        )}
+
+        {/* ── Onglet 5 : Messages ── */}
+        {activeTab === 4 && (
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+            <h2 className="text-lg font-bold text-gray-700 border-b pb-2 mb-4">Messages des etudiants</h2>
+            <div className="flex gap-3 mb-4 flex-wrap">
+              <select className="flex-1 min-w-32 p-2.5 border-2 border-gray-100 rounded-lg outline-none focus:border-blue-500 text-sm" value={fbFiliere} onChange={e => setFbFiliere(e.target.value)}>
+                <option value="">Toutes filieres</option>
+                {filieres.map(f => <option key={f}>{f}</option>)}
+              </select>
+              <select className="flex-1 min-w-24 p-2.5 border-2 border-gray-100 rounded-lg outline-none focus:border-blue-500 text-sm" value={fbNiveau} onChange={e => setFbNiveau(e.target.value)}>
+                <option value="">Tous niveaux</option>
+                {niveaux.map(n => <option key={n}>{n}</option>)}
+              </select>
+              <button onClick={fetchFeedbacks} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-blue-700 transition">
+                Filtrer
+              </button>
+            </div>
+            {loadingFb ? (
+              <p className="text-gray-400 text-sm text-center py-8 animate-pulse">Chargement...</p>
+            ) : feedbacks.length === 0 ? (
+              <p className="text-gray-400 italic text-center py-8">Aucun message — cliquez sur "Filtrer" pour charger</p>
+            ) : (
+              <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
+                {feedbacks.map(fb => (
+                  <div key={fb.id} className="bg-gray-50 rounded-xl border border-gray-100 p-4">
+                    <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-gray-800 text-sm">{fb.name}</span>
+                        <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">{fb.ue}</span>
+                        {fb.filiere && <span className="bg-gray-100 text-gray-600 text-xs px-2 py-0.5 rounded-full">{fb.filiere}</span>}
+                        {fb.niveau && <span className="bg-gray-100 text-gray-600 text-xs px-2 py-0.5 rounded-full">{fb.niveau}</span>}
+                      </div>
+                      <span className="text-xs text-gray-400">{new Date(fb.date).toLocaleString('fr-FR')}</span>
+                    </div>
+                    <p className="text-gray-700 text-sm leading-relaxed">{fb.message}</p>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -6,6 +6,22 @@ import {
   onSnapshot, query, where, setDoc, deleteDoc, serverTimestamp
 } from 'firebase/firestore';
 
+// Shuffle déterministe basé sur un seed (nom de l'étudiant) pour que les questions
+// soient aléatoires mais cohérentes en cas de rechargement
+function seededShuffle(arr, seed) {
+  const a = [...arr];
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (Math.imul(31, h) + seed.charCodeAt(i)) | 0;
+  for (let i = a.length - 1; i > 0; i--) {
+    h = (Math.imul(h, 1664525) + 1013904223) | 0;
+    const j = Math.abs(h) % (i + 1);
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+const STORAGE_KEY = (quizId, name) => `qcm_progress_${quizId}_${name}`;
+
 export default function QuizSession() {
   const { quizId } = useParams();
   const [questions, setQuestions] = useState([]);
@@ -13,33 +29,58 @@ export default function QuizSession() {
   const [score, setScore] = useState(0);
   const [answers, setAnswers] = useState([]);
 
-  const [phase, setPhase] = useState('loading'); // loading | waiting | quiz | finished
-  const [countdown, setCountdown] = useState(null); // ms avant le lancement
-  const [timeLeft, setTimeLeft] = useState(null);   // ms pour la question en cours
+  const [phase, setPhase] = useState('loading');
+  const [countdown, setCountdown] = useState(null);
+  const [timeLeft, setTimeLeft] = useState(null);
   const [leaderboard, setLeaderboard] = useState([]);
   const [participants, setParticipants] = useState(0);
+  const [feedbackMsg, setFeedbackMsg] = useState('');
+  const [feedbackSent, setFeedbackSent] = useState(false);
 
   const [quizMeta, setQuizMeta] = useState(null);
   const submitted = useRef(false);
   const user = JSON.parse(localStorage.getItem('userSession')) || { name: 'Anonyme' };
   const sessionId = useRef(`${user.name}_${Date.now()}`).current;
+  const storageKey = STORAGE_KEY(quizId, user.name);
 
   // ── Chargement initial ─────────────────────────────────────────────────
   useEffect(() => {
     const init = async () => {
-      const qSnap = await getDocs(collection(db, `quizzes/${quizId}/questions`));
-      let qs = qSnap.docs.map(d => d.data());
-      qs = qs.sort(() => 0.5 - Math.random());
-      setQuestions(qs);
-
       const metaDoc = await getDoc(doc(db, "quizzes", quizId));
       if (!metaDoc.exists()) { setPhase('finished'); return; }
       const meta = metaDoc.data();
       setQuizMeta(meta);
 
+      // Vérifier s'il y a une progression sauvegardée
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        try {
+          const { qs, idx, sc, ans, quizSession } = JSON.parse(saved);
+          // Vérifie que la session enregistrée correspond bien au même lancement
+          if (qs && quizSession === (meta.launchTime || 0)) {
+            setQuestions(qs);
+            setCurrentIndex(idx);
+            setScore(sc);
+            setAnswers(ans);
+            const now = Date.now();
+            if (meta.launchTime && meta.launchTime > now) {
+              setPhase('waiting');
+            } else {
+              setPhase('quiz');
+            }
+            return;
+          }
+        } catch (_) { /* ignore */ }
+      }
+
+      // Chargement frais
+      const qSnap = await getDocs(collection(db, `quizzes/${quizId}/questions`));
+      const raw = qSnap.docs.map(d => d.data());
+      const qs = seededShuffle(raw, user.name); // ordre aléatoire propre au participant
+      setQuestions(qs);
+
       const now = Date.now();
       if (meta.launchTime && meta.launchTime > now) {
-        // Salle d'attente
         setPhase('waiting');
       } else {
         setPhase('quiz');
@@ -48,36 +89,36 @@ export default function QuizSession() {
     init();
   }, [quizId]);
 
+  // ── Sauvegarder la progression ────────────────────────────────────────
+  useEffect(() => {
+    if (phase !== 'quiz' || questions.length === 0) return;
+    localStorage.setItem(storageKey, JSON.stringify({
+      qs: questions,
+      idx: currentIndex,
+      sc: score,
+      ans: answers,
+      quizSession: quizMeta?.launchTime || 0
+    }));
+  }, [currentIndex, score, phase]);
+
   // ── Compte à rebours salle d'attente ──────────────────────────────────
   useEffect(() => {
     if (phase !== 'waiting' || !quizMeta?.launchTime) return;
     const interval = setInterval(() => {
       const dist = quizMeta.launchTime - Date.now();
-      if (dist <= 0) {
-        clearInterval(interval);
-        setCountdown(0);
-        setPhase('quiz');
-      } else {
-        setCountdown(dist);
-      }
+      if (dist <= 0) { clearInterval(interval); setCountdown(0); setPhase('quiz'); }
+      else setCountdown(dist);
     }, 500);
     return () => clearInterval(interval);
   }, [phase, quizMeta]);
 
-  // ── Enregistrement de la présence en temps réel ───────────────────────
+  // ── Présence en temps réel ────────────────────────────────────────────
   useEffect(() => {
     if (phase !== 'quiz') return;
     const presenceRef = doc(db, `quizzes/${quizId}/sessions`, sessionId);
     setDoc(presenceRef, { name: user.name, ts: serverTimestamp() });
-
-    const unsubscribe = onSnapshot(collection(db, `quizzes/${quizId}/sessions`), snap => {
-      setParticipants(snap.size);
-    });
-
-    return () => {
-      unsubscribe();
-      deleteDoc(presenceRef);
-    };
+    const unsubscribe = onSnapshot(collection(db, `quizzes/${quizId}/sessions`), snap => setParticipants(snap.size));
+    return () => { unsubscribe(); deleteDoc(presenceRef); };
   }, [phase, quizId]);
 
   // ── Soumission automatique à endTime ──────────────────────────────────
@@ -95,54 +136,71 @@ export default function QuizSession() {
     setTimeLeft(quizMeta.timePerQuestion * 1000);
     const interval = setInterval(() => {
       setTimeLeft(prev => {
-        if (prev <= 500) {
-          clearInterval(interval);
-          // Passer à la question suivante automatiquement
-          handleAnswer(null, true);
-          return 0;
-        }
+        if (prev <= 500) { clearInterval(interval); handleAnswer(null, true); return 0; }
         return prev - 500;
       });
     }, 500);
     return () => clearInterval(interval);
   }, [phase, currentIndex, quizMeta]);
 
-  // ── Classement en direct ──────────────────────────────────────────────
+  // ── Classement session courante ───────────────────────────────────────
   useEffect(() => {
-    if (phase !== 'finished') return;
-    const q = query(collection(db, "results"), where("ue", "==", quizId));
+    if (phase !== 'finished' || !quizMeta) return;
+    const sessionTimestamp = quizMeta.launchTime || 0;
+    const q = query(collection(db, "results"),
+      where("ue", "==", quizId),
+      where("sessionTimestamp", "==", sessionTimestamp)
+    );
     const unsubscribe = onSnapshot(q, snap => {
       let data = snap.docs.map(d => d.data());
       data.sort((a, b) => b.score - a.score);
       setLeaderboard(data);
     });
     return () => unsubscribe();
-  }, [phase, quizId]);
+  }, [phase, quizId, quizMeta]);
 
   // ── Soumission du quiz ────────────────────────────────────────────────
   const submitQuiz = useCallback(async (finalScore, finalAnswers) => {
     if (submitted.current) return;
     submitted.current = true;
+    localStorage.removeItem(storageKey); // Nettoyer la progression sauvegardée
     setPhase('finished');
+
+    // Sauvegarder dans l'historique personnel (localStorage)
+    const histKey = `qcm_history_${user.name}`;
+    const existing = JSON.parse(localStorage.getItem(histKey) || '[]');
+    const entry = {
+      quizId,
+      filiere: quizMeta?.filiere || user.filiere || '',
+      niveau: quizMeta?.niveau || user.niveau || '',
+      score: finalScore,
+      total: questions.length,
+      date: new Date().toISOString(),
+      sessionTimestamp: quizMeta?.launchTime || 0
+    };
+    const updated = [entry, ...existing.filter(e => !(e.quizId === quizId && e.sessionTimestamp === entry.sessionTimestamp))];
+    localStorage.setItem(histKey, JSON.stringify(updated.slice(0, 50)));
+
     await addDoc(collection(db, "results"), {
       name: user.name,
       ue: quizId,
+      filiere: quizMeta?.filiere || '',
+      niveau: quizMeta?.niveau || '',
       score: finalScore,
       total: questions.length,
       answers: finalAnswers,
+      sessionTimestamp: quizMeta?.launchTime || 0,
       date: new Date().toISOString()
     });
-  }, [quizId, user.name, questions.length]);
+  }, [quizId, user.name, questions.length, quizMeta, storageKey]);
 
   const handleAnswer = useCallback((selectedOption, autoSkip = false) => {
     const q = questions[currentIndex];
     const isCorrect = !autoSkip && selectedOption === q?.ReponseCorrecte;
     const newScore = isCorrect ? score + 1 : score;
     const newAnswers = [...answers, autoSkip ? null : selectedOption];
-
     setScore(newScore);
     setAnswers(newAnswers);
-
     if (currentIndex + 1 < questions.length) {
       setCurrentIndex(i => i + 1);
     } else {
@@ -150,7 +208,20 @@ export default function QuizSession() {
     }
   }, [currentIndex, questions, score, answers, submitQuiz]);
 
-  // ── Helpers UI ────────────────────────────────────────────────────────
+  const sendFeedback = async () => {
+    if (!feedbackMsg.trim()) return;
+    await addDoc(collection(db, "feedback"), {
+      name: user.name,
+      ue: quizId,
+      filiere: quizMeta?.filiere || '',
+      niveau: quizMeta?.niveau || '',
+      message: feedbackMsg.trim(),
+      date: new Date().toISOString()
+    });
+    setFeedbackSent(true);
+  };
+
+  // ── Helpers ───────────────────────────────────────────────────────────
   const fmtMs = (ms) => {
     if (!ms || ms < 0) return '00:00';
     const h = Math.floor(ms / 3600000);
@@ -159,12 +230,14 @@ export default function QuizSession() {
     if (h > 0) return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
     return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   };
-
-  const timerPercent = (timeLeft && quizMeta?.timePerQuestion)
+  const timerPct = (timeLeft && quizMeta?.timePerQuestion)
     ? Math.max(0, (timeLeft / (quizMeta.timePerQuestion * 1000)) * 100) : 100;
-  const timerColor = timerPercent > 50 ? 'bg-green-500' : timerPercent > 20 ? 'bg-yellow-500' : 'bg-red-500';
+  const timerColor = timerPct > 50 ? 'bg-green-500' : timerPct > 20 ? 'bg-yellow-500' : 'bg-red-500';
 
-  // ── PHASES ────────────────────────────────────────────────────────────
+  // ──────────────────────────────────────────────────────────────────────
+  // PHASES
+  // ──────────────────────────────────────────────────────────────────────
+
   if (phase === 'loading') return (
     <div className="min-h-screen flex items-center justify-center bg-slate-900">
       <div className="text-white text-center">
@@ -187,7 +260,7 @@ export default function QuizSession() {
           <span className="h-2.5 w-2.5 rounded-full bg-emerald-400"></span>
           Synchronisation en temps réel active
         </div>
-        <Link to="/schedule" className="mt-8 inline-block text-slate-500 hover:text-slate-300 text-sm transition">← Emploi du temps</Link>
+        <Link to="/schedule" className="mt-8 inline-block text-slate-500 hover:text-slate-300 text-sm transition">Emploi du temps</Link>
       </div>
     </div>
   );
@@ -201,9 +274,10 @@ export default function QuizSession() {
     return (
       <div className="min-h-screen bg-gray-50 py-10 px-4">
         <div className="max-w-3xl mx-auto">
-          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl p-8 text-center mb-6">
-            <h1 className="text-3xl font-black mb-1">Épreuve terminée !</h1>
-            <p className="opacity-80 mb-4">{user.name}</p>
+          {/* Score card */}
+          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl p-8 text-center mb-5">
+            <h1 className="text-2xl font-black mb-1">Epreuve terminee</h1>
+            <p className="opacity-80 mb-4 text-sm">{user.name}</p>
             <div className="grid grid-cols-3 gap-4">
               <div className="bg-white/10 rounded-xl p-3">
                 <div className="text-2xl font-black">{score}/{questions.length}</div>
@@ -218,22 +292,49 @@ export default function QuizSession() {
                 <div className="text-xs opacity-75 mt-1">Rang</div>
               </div>
             </div>
-            <p className="text-xs opacity-60 mt-3">{participation} participant(s) au total</p>
+            <p className="text-xs opacity-60 mt-3">{participation} participant(s) dans cette session</p>
           </div>
 
-          <div className="flex gap-3 mb-6">
-            <Link to={`/review/${quizId}`} className="flex-1 bg-indigo-600 text-white py-3 rounded-xl font-bold text-center hover:bg-indigo-700 transition shadow">
-              📖 Relire ma copie
+          {/* Actions */}
+          <div className="flex gap-3 mb-5">
+            <Link to={`/review/${quizId}`} className="flex-1 bg-indigo-600 text-white py-3 rounded-xl font-bold text-center hover:bg-indigo-700 transition shadow text-sm">
+              Relire ma copie
             </Link>
-            <Link to="/schedule" className="flex-1 bg-white border-2 border-gray-100 text-gray-700 py-3 rounded-xl font-bold text-center hover:border-blue-300 transition shadow-sm">
-              📅 Emploi du temps
+            <Link to="/schedule" className="flex-1 bg-white border-2 border-gray-100 text-gray-700 py-3 rounded-xl font-bold text-center hover:border-blue-300 transition shadow-sm text-sm">
+              Emploi du temps
             </Link>
           </div>
 
+          {/* Feedback */}
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-5">
+            <h2 className="text-base font-bold text-gray-700 mb-3">Laisser un message a l'administrateur</h2>
+            {feedbackSent ? (
+              <div className="text-green-600 font-semibold text-sm bg-green-50 border border-green-200 rounded-lg p-3">
+                Message envoye avec succes. Merci pour votre retour.
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <textarea
+                  className="flex-1 border-2 border-gray-100 rounded-lg p-3 text-sm outline-none focus:border-blue-400 transition resize-none"
+                  rows={3}
+                  placeholder="Appreciations, suggestions, critiques sur ce QCM..."
+                  value={feedbackMsg}
+                  onChange={e => setFeedbackMsg(e.target.value)}
+                />
+                <button onClick={sendFeedback} disabled={!feedbackMsg.trim()}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-xl font-bold text-sm hover:bg-blue-700 transition disabled:opacity-50 self-end">
+                  Envoyer
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Classement session courante */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-            <h2 className="text-xl font-bold mb-4 text-gray-800 border-b pb-3 flex items-center gap-2">
-              🏆 Classement en direct <span className="text-sm bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-normal animate-pulse">{participation} participants</span>
-            </h2>
+            <div className="flex items-center justify-between mb-4 border-b pb-3">
+              <h2 className="text-lg font-bold text-gray-800">Classement — Session en cours</h2>
+              <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-bold animate-pulse">{participation} participants</span>
+            </div>
             <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
               {leaderboard.map((entry, index) => {
                 const isMe = entry.name === user.name;
@@ -256,6 +357,7 @@ export default function QuizSession() {
                   </div>
                 );
               })}
+              {leaderboard.length === 0 && <p className="text-gray-400 text-sm text-center py-4">En attente des resultats...</p>}
             </div>
           </div>
         </div>
@@ -267,16 +369,15 @@ export default function QuizSession() {
   if (questions.length === 0) return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-6">
       <div className="bg-white p-8 rounded-xl shadow-lg text-center max-w-md border border-orange-200">
-        <span className="text-5xl">🕒</span>
-        <h2 className="text-2xl font-bold mt-4 text-orange-600">Épreuve non disponible</h2>
-        <p className="text-gray-500 mt-2">Le quiz <strong>{quizId}</strong> n'est pas encore configuré.</p>
-        <Link to="/" className="mt-4 inline-block text-blue-600 hover:underline">← Retour à l'accueil</Link>
+        <h2 className="text-2xl font-bold mt-4 text-orange-600">Epreuve non disponible</h2>
+        <p className="text-gray-500 mt-2">Le quiz <strong>{quizId}</strong> n'est pas encore configure.</p>
+        <Link to="/" className="mt-4 inline-block text-blue-600 hover:underline">Retour a l'accueil</Link>
       </div>
     </div>
   );
 
   const q = questions[currentIndex];
-  const progress = ((currentIndex) / questions.length) * 100;
+  const progress = (currentIndex / questions.length) * 100;
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
@@ -307,10 +408,10 @@ export default function QuizSession() {
         <div className="bg-white px-4 py-2 border-b">
           <div className="flex items-center justify-between mb-1">
             <span className="text-xs text-gray-500 font-semibold">Temps restant</span>
-            <span className={`text-sm font-black font-mono ${timerPercent <= 20 ? 'text-red-600 animate-pulse' : 'text-gray-700'}`}>{fmtMs(timeLeft)}</span>
+            <span className={`text-sm font-black font-mono ${timerPct <= 20 ? 'text-red-600 animate-pulse' : 'text-gray-700'}`}>{fmtMs(timeLeft)}</span>
           </div>
           <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-            <div className={`h-2 rounded-full transition-all duration-500 ${timerColor}`} style={{ width: `${timerPercent}%` }}></div>
+            <div className={`h-2 rounded-full transition-all duration-500 ${timerColor}`} style={{ width: `${timerPct}%` }}></div>
           </div>
         </div>
       )}
@@ -318,12 +419,12 @@ export default function QuizSession() {
       {/* Question */}
       <div className="flex-1 flex flex-col items-center pt-10 px-4 pb-12">
         <div className="w-full max-w-3xl bg-white p-8 rounded-2xl shadow-lg border border-gray-100">
-          <h2 className="text-2xl font-bold mb-8 text-gray-800 leading-relaxed">{q.Question}</h2>
+          <h2 className="text-xl font-bold mb-8 text-gray-800 leading-relaxed">{q.Question}</h2>
           <div className="grid grid-cols-1 gap-3">
             {['OptA', 'OptB', 'OptC', 'OptD'].map(opt => (
               q[opt] && (
                 <button key={opt} onClick={() => handleAnswer(q[opt])}
-                  className="w-full text-left p-5 border-2 border-gray-100 rounded-xl hover:bg-blue-50 hover:border-blue-400 hover:shadow-sm transition font-semibold text-gray-700 active:scale-[0.99]">
+                  className="w-full text-left p-4 border-2 border-gray-100 rounded-xl hover:bg-blue-50 hover:border-blue-400 hover:shadow-sm transition font-semibold text-gray-700 active:scale-[0.99]">
                   {q[opt]}
                 </button>
               )
