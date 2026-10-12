@@ -25,6 +25,7 @@ export default function ReviewSession() {
 
     const user = JSON.parse(localStorage.getItem('userSession')) || { name: 'Anonyme' };
     const safeName = (user.name || 'Anonyme').trim();
+    const userEmail = (user.email || '').trim().toLowerCase();
 
     useEffect(() => {
         const load = async () => {
@@ -47,12 +48,17 @@ export default function ReviewSession() {
 
             const rSnap = await getDocs(query(
                 collection(db, "results"),
-                where("ue", "==", quizId),
-                where("name", "==", safeName)
+                where("ue", "==", quizId)
             ));
 
-            if (!rSnap.empty) {
-                const sorted = rSnap.docs.map(d => d.data()).sort((a, b) => new Date(b.date) - new Date(a.date));
+            const matching = rSnap.docs.map(d => d.data()).filter(r => {
+                const rEmail = (r.email || '').toLowerCase();
+                const rName = (r.name || '').trim();
+                return (userEmail && rEmail === userEmail) || (safeName && rName === safeName);
+            });
+
+            if (matching.length > 0) {
+                const sorted = matching.sort((a, b) => new Date(b.date) - new Date(a.date));
                 const result = sorted[0];
                 setAnswers(result.answers || []);
                 setScore(result.score);
@@ -64,7 +70,7 @@ export default function ReviewSession() {
             setLoading(false);
         };
         load();
-    }, [quizId, safeName]);
+    }, [quizId, safeName, userEmail]);
 
     if (loading) return (
         <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -87,7 +93,9 @@ export default function ReviewSession() {
     return (
         <div className="min-h-screen bg-gray-50 py-10 px-4">
             <div className="max-w-3xl mx-auto">
-                <Link to="/schedule" className="text-blue-600 font-bold hover:underline text-sm">Retour a l'emploi du temps</Link>
+                <Link to="/" className="text-blue-600 font-bold hover:underline text-xs flex items-center gap-1 mb-2">
+                    ← Retour à mon espace
+                </Link>
 
                 {/* En-tête résumé */}
                 <div className="bg-gradient-to-r from-indigo-600 to-blue-600 text-white rounded-2xl p-8 my-6 text-center shadow-lg">

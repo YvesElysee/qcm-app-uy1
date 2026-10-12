@@ -47,11 +47,15 @@ export default function QuizSession() {
 
   const user = JSON.parse(localStorage.getItem('userSession')) || { name: 'Anonyme' };
   const safeName = (user.name || 'Anonyme').trim();
-  const sessionId = useRef(`${safeName}_${Date.now()}`).current;
+  const userEmail = (user.email || '').trim().toLowerCase();
+  const urlParams = new URLSearchParams(window.location.search);
+  const isMakeupMode = urlParams.get('mode') === 'rattrapage' || !!user.isMakeup;
+  const [makeupEndTime, setMakeupEndTime] = useState(null);
+  const sessionIdRef = useRef(null);
   const storageKey = STORAGE_KEY(quizId, safeName);
 
   // ── Chargement des questions ─────────────────────────────────────────
-  const loadFresh = useCallback(async (meta) => {
+  const loadFresh = useCallback(async () => {
     const qSnap = await getDocs(collection(db, `quizzes/${quizId}/questions`));
     const raw = qSnap.docs.map(d => {
       const data = d.data();
@@ -78,6 +82,13 @@ export default function QuizSession() {
       const meta = metaDoc.data();
       setQuizMeta(meta);
 
+      if (meta.endTime && meta.launchTime) {
+        const duration = meta.endTime - meta.launchTime;
+        if ((isMakeupMode || Date.now() > meta.endTime) && duration > 0) {
+          setMakeupEndTime(Date.now() + duration);
+        }
+      }
+
       // Reprise d'une session sauvegardée
       const saved = localStorage.getItem(storageKey);
       if (saved) {
@@ -91,15 +102,15 @@ export default function QuizSession() {
             setPhase(meta.launchTime && meta.launchTime > Date.now() ? 'waiting' : 'quiz');
             return;
           }
-        } catch (_) { /* ignore */ }
+        } catch { /* ignore */ }
       }
 
-      const qs = await loadFresh(meta);
+      const qs = await loadFresh();
       setQuestions(qs);
       setPhase(meta.launchTime && meta.launchTime > Date.now() ? 'waiting' : 'quiz');
     };
     init();
-  }, [quizId]);
+  }, [quizId, loadFresh, storageKey, isMakeupMode]);
 
   // ── Sauvegarde de progression ────────────────────────────────────────
   useEffect(() => {
@@ -108,15 +119,20 @@ export default function QuizSession() {
       qs: questions, idx: currentIndex, sc: score, ans: answers,
       quizSession: quizMeta?.launchTime || 0
     }));
-  }, [currentIndex, score, phase]);
+  }, [currentIndex, score, phase, answers, questions, quizMeta?.launchTime, storageKey]);
 
   // ── Salle d'attente ─────────────────────────────────────────────────
   useEffect(() => {
     if (phase !== 'waiting' || !quizMeta?.launchTime) return;
     const iv = setInterval(() => {
       const dist = quizMeta.launchTime - Date.now();
-      if (dist <= 0) { clearInterval(iv); setCountdown(0); setPhase('quiz'); }
-      else setCountdown(dist);
+      if (dist <= 0) {
+        clearInterval(iv);
+        setCountdown(0);
+        setPhase('quiz');
+      } else {
+        setCountdown(dist);
+      }
     }, 500);
     return () => clearInterval(iv);
   }, [phase, quizMeta]);
@@ -124,62 +140,17 @@ export default function QuizSession() {
   // ── Présence participants ────────────────────────────────────────────
   useEffect(() => {
     if (phase !== 'quiz') return;
-    const ref = doc(db, `quizzes/${quizId}/sessions`, sessionId);
-    setDoc(ref, { name: safeName, ts: serverTimestamp() });
-    const unsub = onSnapshot(collection(db, `quizzes/${quizId}/sessions`), s => setParticipants(s.size));
-    return () => { unsub(); deleteDoc(ref); };
-  }, [phase, quizId]);
-
-  // ── Timer par question ───────────────────────────────────────────────
-  useEffect(() => {
-    if (phase !== 'quiz' || !quizMeta?.timePerQuestion || quizMeta.timePerQuestion <= 0) return;
-    if (feedbackState) return; // ne pas relancer le timer pendant le feedback
-
-    setTimeLeft(quizMeta.timePerQuestion * 1000);
-    clearInterval(timerInterval.current);
-    timerInterval.current = setInterval(() => {
-      setTimeLeft(prev => {
-        if (prev === null || prev <= 500) {
-          clearInterval(timerInterval.current);
-          return 0;
-        }
-        return prev - 500;
-      });
-    }, 500);
-    return () => clearInterval(timerInterval.current);
-  }, [phase, currentIndex, quizMeta, feedbackState]);
-
-  useEffect(() => {
-    if (timeLeft === 0 && phase === 'quiz' && !feedbackState) {
-      handleValidate(true);
+    if (sessionIdRef.current === null) {
+      sessionIdRef.current = `${safeName}_${Date.now()}`;
     }
-  }, [timeLeft]);
+    const sid = sessionIdRef.current;
+    const ref = doc(db, `quizzes/${quizId}/sessions`, sid);
+    setDoc(ref, { name: safeName, ts: serverTimestamp() }).catch(() => {});
+    const unsub = onSnapshot(collection(db, `quizzes/${quizId}/sessions`), s => setParticipants(s.size));
+    return () => { unsub(); deleteDoc(ref).catch(() => {}); };
+  }, [phase, quizId, safeName]);
 
-  // ── Soumission à endTime ─────────────────────────────────────────────
-  useEffect(() => {
-    if (phase !== 'quiz' || !quizMeta?.endTime) return;
-    const msLeft = quizMeta.endTime - Date.now();
-    if (msLeft <= 0) { if (!submitted.current) finalSubmit(score, answers); return; }
-    const t = setTimeout(() => { if (!submitted.current) finalSubmit(score, answers); }, msLeft);
-    return () => clearTimeout(t);
-  }, [phase, quizMeta]);
-
-  // ── Classement ──────────────────────────────────────────────────────
-  useEffect(() => {
-    if (phase !== 'finished' || !quizMeta) return;
-    const sessionTimestamp = quizMeta.launchTime || 0;
-    const q = query(collection(db, "results"),
-      where("ue", "==", quizId),
-      where("sessionTimestamp", "==", sessionTimestamp)
-    );
-    const unsub = onSnapshot(q, snap => {
-      const data = snap.docs.map(d => d.data()).sort((a, b) => b.score - a.score);
-      setLeaderboard(data);
-    });
-    return () => unsub();
-  }, [phase, quizId, quizMeta]);
-
-  // ── Submit final ─────────────────────────────────────────────────────
+  // ── Validation (manuelle ou auto-timer) ─────────────────────────────
   const finalSubmit = useCallback(async (finalScore, finalAnswers) => {
     if (submitted.current) return;
     submitted.current = true;
@@ -199,22 +170,20 @@ export default function QuizSession() {
     ));
 
     await addDoc(collection(db, "results"), {
-      name: safeName, ue: quizId,
-      filiere: quizMeta?.filiere || '', niveau: quizMeta?.niveau || '',
-      score: finalScore, total: questions.length,
+      name: safeName,
+      email: userEmail,
+      ue: quizId,
+      filiere: quizMeta?.filiere || '',
+      niveau: quizMeta?.niveau || '',
+      score: finalScore,
+      total: questions.length,
       answers: finalAnswers,
       sessionTimestamp: quizMeta?.launchTime || 0,
+      isMakeup: isMakeupMode,
       date: new Date().toISOString()
     });
-  }, [quizId, safeName, questions.length, quizMeta, storageKey]);
+  }, [quizId, safeName, userEmail, questions.length, quizMeta, storageKey, isMakeupMode]);
 
-  // ── Sélection d'une option ───────────────────────────────────────────
-  const handleOptionClick = (opt) => {
-    if (feedbackState) return; // bloqué pendant le feedback
-    setSelectedOption(opt);
-  };
-
-  // ── Validation (manuelle ou auto-timer) ─────────────────────────────
   const handleValidate = useCallback((forced = false) => {
     if (feedbackState) return;
     clearInterval(timerInterval.current);
@@ -246,15 +215,88 @@ export default function QuizSession() {
     }, 1800);
   }, [feedbackState, currentIndex, questions, score, answers, selectedOption, quizMeta, finalSubmit]);
 
-  const sendFeedback = async () => {
-    if (!feedbackMsg.trim()) return;
-    await addDoc(collection(db, "feedback"), {
-      name: safeName, ue: quizId,
-      filiere: quizMeta?.filiere || '', niveau: quizMeta?.niveau || '',
-      message: feedbackMsg.trim(), date: new Date().toISOString()
+  // ── Timer par question ───────────────────────────────────────────────
+  useEffect(() => {
+    if (phase !== 'quiz' || !quizMeta?.timePerQuestion || quizMeta.timePerQuestion <= 0) return;
+    if (feedbackState) return; // ne pas relancer le timer pendant le feedback
+
+    clearInterval(timerInterval.current);
+    const ms = quizMeta.timePerQuestion * 1000;
+    timerInterval.current = setInterval(() => {
+      setTimeLeft(prev => {
+        const next = (prev === null ? ms : prev) - 500;
+        if (next <= 0) {
+          clearInterval(timerInterval.current);
+          return 0;
+        }
+        return next;
+      });
+    }, 500);
+    return () => clearInterval(timerInterval.current);
+  }, [phase, currentIndex, quizMeta, feedbackState]);
+
+  useEffect(() => {
+    if (timeLeft === 0 && phase === 'quiz' && !feedbackState) {
+      const id = setTimeout(() => handleValidate(true), 0);
+      return () => clearTimeout(id);
+    }
+  }, [timeLeft, phase, feedbackState, handleValidate]);
+
+  // ── Soumission à endTime (Officielle ou Rattrapage) ───────────────────
+  useEffect(() => {
+    if (phase !== 'quiz') return;
+    const effectiveEndTime = makeupEndTime || (!isMakeupMode && quizMeta?.endTime > Date.now() ? quizMeta.endTime : null);
+    if (!effectiveEndTime) return;
+
+    const msLeft = effectiveEndTime - Date.now();
+    if (msLeft <= 0) {
+      if (!submitted.current) finalSubmit(score, answers);
+      return;
+    }
+    const t = setTimeout(() => {
+      if (!submitted.current) finalSubmit(score, answers);
+    }, msLeft);
+    return () => clearTimeout(t);
+  }, [phase, quizMeta, makeupEndTime, isMakeupMode, score, answers, finalSubmit]);
+
+  // ── Classement ──────────────────────────────────────────────────────
+  useEffect(() => {
+    if (phase !== 'finished' || !quizMeta) return;
+    const sessionTimestamp = quizMeta.launchTime || 0;
+    const q = query(collection(db, "results"),
+      where("ue", "==", quizId),
+      where("sessionTimestamp", "==", sessionTimestamp)
+    );
+    const unsub = onSnapshot(q, snap => {
+      const data = snap.docs.map(d => d.data()).sort((a, b) => b.score - a.score);
+      setLeaderboard(data);
     });
-    setFeedbackSent(true);
-  };
+    return () => unsub();
+  }, [phase, quizId, quizMeta]);
+
+  // ── Submit final ─────────────────────────────────────────────────────
+
+
+  // ── Sélection d'une option ───────────────────────────────────────────
+  const handleOptionClick = useCallback((opt) => {
+    if (feedbackState) return; // bloqué pendant le feedback
+    setSelectedOption(opt);
+  }, [feedbackState]);
+
+  // ── Validation (manuelle ou auto-timer) ─────────────────────────────
+  const sendFeedback = useCallback(async () => {
+    if (!feedbackMsg.trim()) return;
+    try {
+      await addDoc(collection(db, "feedback"), {
+        name: safeName, ue: quizId,
+        filiere: quizMeta?.filiere || '', niveau: quizMeta?.niveau || '',
+        message: feedbackMsg.trim(), date: new Date().toISOString()
+      });
+      setFeedbackSent(true);
+    } catch (e) {
+      console.error(e);
+    }
+  }, [feedbackMsg, safeName, quizId, quizMeta]);
 
   // ── Utils ────────────────────────────────────────────────────────────
   const fmtMs = (ms) => {

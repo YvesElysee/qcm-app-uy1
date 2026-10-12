@@ -1,0 +1,60 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Règles minimales de sécurité - À ADAPTER AVANT MISE EN PROD
+
+    // UEs : lecture publique (noms d'UEs pour formulaire)
+    match /ues/{ueId} {
+      allow read: if true;
+      allow write: if false; // À restreindre aux admins via Auth Custom Claims
+    }
+
+    // Quizzes : métadonnées lisibles, écriture réservée aux admins
+    match /quizzes/{quizId} {
+      allow read: if true;
+      allow write: if false; // À sécuriser avec Firebase Auth (admin)
+      
+      // Questions d'un quiz
+      match /questions/{qId} {
+        allow read: if true;
+        allow write: if false; // Admin uniquement
+      }
+      
+      // Sessions temps réel (participants) - écriture temporaire
+      match /sessions/{sId} {
+        allow read: if true;
+        allow create, delete: if true; // À restreindre en prod
+        allow update: if false;
+      }
+    }
+
+    // Résultats : lecture restreinte, écriture autorisée aux participants
+    match /results/{rId} {
+      allow read: if true; // Affichage classement - à ajuster si données sensibles
+      allow create: if true; // Enregistrement résultat étudiant
+      allow update, delete: if false;
+    }
+
+    // Feedbacks étudiants & suggestions
+    match /feedback/{fId} {
+      allow read: if true; // Lecture pour admin et étudiant
+      allow create: if true; // Envoi feedback autorisé
+      allow update, delete: if true; // Gestion par admin
+    }
+
+    // Utilisateurs (Authentification personnalisée sans Firebase Auth)
+    match /users/{userId} {
+      allow read, write: if true;
+    }
+
+    // Récupération de mot de passe (codes de réinitialisation)
+    match /password_resets/{resetId} {
+      allow read, write: if true;
+    }
+
+    // Paramètres système (ex: configuration SMTP)
+    match /settings/{settingId} {
+      allow read, write: if true;
+    }
+  }
+}
