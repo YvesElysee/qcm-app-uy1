@@ -101,12 +101,7 @@ export default function ForgotPasswordPage() {
               Campus ID
             </span>
           </div>
-          <div className="flex items-center gap-space-xs px-3 py-1 rounded-full bg-surface-container-lowest/10 backdrop-blur-md">
-            <span className="w-2 h-2 rounded-full bg-secondary-container animate-pulse" />
-            <span className="font-label-uppercase text-label-uppercase uppercase text-primary-fixed">
-              SSO Gateway Active
-            </span>
-          </div>
+
         </header>
         <main className="relative z-10 w-full flex-1 flex flex-col items-center justify-center py-margin px-margin-sm sm:px-gutter">
           <div className="flex flex-col w-full items-center justify-center">
