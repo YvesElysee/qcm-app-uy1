@@ -93,7 +93,7 @@ export default function ReviewSession() {
     return (
         <div className="min-h-screen bg-gray-50 py-10 px-4">
             <div className="max-w-3xl mx-auto">
-                <Link to="/" className="text-blue-600 font-bold hover:underline text-xs flex items-center gap-1 mb-2">
+                <Link to="/dashboard" className="text-blue-600 font-bold hover:underline text-xs flex items-center gap-1 mb-2">
                     ← Retour à mon espace
                 </Link>
 

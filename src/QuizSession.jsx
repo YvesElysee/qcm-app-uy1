@@ -420,7 +420,7 @@ export default function QuizSession() {
       <div className="bg-white p-8 rounded-xl shadow-lg text-center max-w-md border border-orange-200">
         <h2 className="text-2xl font-bold mt-4 text-orange-600">Epreuve non disponible</h2>
         <p className="text-gray-500 mt-2">Le quiz n'est pas encore configure.</p>
-        <Link to="/" className="mt-4 inline-block text-blue-600 hover:underline">Retour</Link>
+        <Link to="/dashboard" className="mt-4 inline-block text-blue-600 hover:underline">Retour</Link>
       </div>
     </div>
   );

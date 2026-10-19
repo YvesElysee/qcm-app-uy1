@@ -131,7 +131,7 @@ export default function Schedule() {
             )
           ) : (
             <Link
-              to="/"
+              to="/dashboard"
               className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-xs font-black transition shadow-sm"
             >
               Rejoindre l'espace
@@ -146,7 +146,7 @@ export default function Schedule() {
     <div className="min-h-screen bg-slate-100 p-4 md:p-8">
       <div className="max-w-4xl mx-auto space-y-6">
         <div className="flex items-center justify-between">
-          <Link to="/" className="text-blue-600 hover:underline text-xs font-bold flex items-center gap-1">
+          <Link to="/dashboard" className="text-blue-600 hover:underline text-xs font-bold flex items-center gap-1">
             ← Retour à mon espace
           </Link>
           {user && (

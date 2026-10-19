@@ -4,7 +4,10 @@ import QuizSession from './QuizSession';
 import Login from './components/Login';
 import Schedule from './components/Schedule';
 import ReviewSession from './components/ReviewSession';
-import StudentAuth from './components/StudentAuth';
+import LandingPage from './pages/LandingPage';
+import LoginPage from './pages/LoginPage';
+import RegisterPage from './pages/RegisterPage';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import StudentDashboard from './components/StudentDashboard';
 import ContactAdmin from './components/ContactAdmin';
 import { getCurrentUser } from './services/authService';
@@ -26,13 +29,16 @@ export default function App() {
   return (
     <Router>
       <Routes>
+        {/* Page d'accueil publique */}
+        <Route path="/" element={<LandingPage />} />
+
         {/* Espace Étudiant Principal (Tableau de bord protégé) */}
-        <Route path="/" element={<RequireStudent><StudentDashboard /></RequireStudent>} />
+        <Route path="/dashboard" element={<RequireStudent><StudentDashboard /></RequireStudent>} />
 
         {/* Authentification Étudiant (Sans Firebase Auth) */}
-        <Route path="/login" element={<StudentAuth defaultTab="login" />} />
-        <Route path="/register" element={<StudentAuth defaultTab="register" />} />
-        <Route path="/forgot-password" element={<StudentAuth defaultTab="forgot" />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
 
         {/* Sessions d'Évaluation & Emploi du Temps */}
         <Route path="/quiz/:quizId" element={<RequireStudent><QuizSession /></RequireStudent>} />
