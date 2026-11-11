@@ -26,5 +26,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-.firebase/
-qcm-app-*.json
+
+# Base de données SQLite locale
+data/
+*.db
+*.db-shm
+*.db-wal

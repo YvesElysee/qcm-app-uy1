@@ -1,8 +1,25 @@
 /**
- * Serveur API pour l'envoi d'emails via le protocole SMTP Google (Gmail)
- * Utilise l'adresse Gmail et le mot de passe d'application à 16 caractères fourni par Google.
+ * Service d'envoi d'emails via le protocole SMTP Google (Gmail).
+ * Utilise l'adresse Gmail et le mot de passe d'application à 16 caractères
+ * fourni par Google (https://myaccount.google.com/apppasswords).
+ *
+ * La configuration est lue depuis la table `settings` (saisie par l'admin
+ * dans le panneau), avec repli sur les variables d'environnement SMTP_EMAIL /
+ * SMTP_APP_PASSWORD du fichier .env.
  */
 import nodemailer from 'nodemailer';
+import { getSetting } from './db.js';
+
+/**
+ * Récupère la configuration SMTP active (base puis .env)
+ */
+export function getSmtpConfig() {
+  const stored = getSetting('smtp') || {};
+  return {
+    email: stored.email || process.env.SMTP_EMAIL || '',
+    appPassword: (stored.appPassword || process.env.SMTP_APP_PASSWORD || '').replace(/\s+/g, '')
+  };
+}
 
 /**
  * Crée un transporteur Nodemailer configuré pour Gmail SMTP
@@ -21,11 +38,11 @@ export function createGmailTransporter(user, pass) {
 }
 
 /**
- * Handler d'envoi du code de réinitialisation
+ * Envoie le code de réinitialisation par email.
+ * Retourne { success, error? } — identique à l'ancien handler.
  */
-export async function handleSendResetCode({ email, code, name, smtpEmail, smtpPassword }) {
-  const user = smtpEmail || process.env.SMTP_EMAIL || process.env.VITE_SMTP_EMAIL;
-  const pass = smtpPassword || process.env.SMTP_APP_PASSWORD || process.env.VITE_SMTP_APP_PASSWORD;
+export async function sendResetCodeEmail({ email, code, name }) {
+  const { email: user, appPassword: pass } = getSmtpConfig();
 
   if (!user || !pass) {
     return {
@@ -37,9 +54,9 @@ export async function handleSendResetCode({ email, code, name, smtpEmail, smtpPa
   const transporter = createGmailTransporter(user, pass);
 
   const htmlContent = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; rounded-2xl; background-color: #ffffff;">
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
       <div style="text-align: center; margin-bottom: 24px;">
-        <h2 style="color: #2563eb; margin: 0; font-size: 24px;">Portail QCM — Université de Yaoundé 1</h2>
+        <h2 style="color: #2563eb; margin: 0; font-size: 24px;">Portail QCM — UY1</h2>
         <p style="color: #64748b; font-size: 14px; margin-top: 4px;">Récupération de mot de passe</p>
       </div>
       <div style="background-color: #f8fafc; border-radius: 12px; padding: 20px; margin-bottom: 20px;">
@@ -61,7 +78,7 @@ export async function handleSendResetCode({ email, code, name, smtpEmail, smtpPa
       </p>
       <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
       <p style="color: #cbd5e1; font-size: 11px; text-align: center; margin: 0;">
-        Université de Yaoundé 1 — Plateforme Téléévaluation 2026
+        UY1 — Plateforme Téléévaluation 2026
       </p>
     </div>
   `;
@@ -76,17 +93,18 @@ export async function handleSendResetCode({ email, code, name, smtpEmail, smtpPa
     });
     return { success: true };
   } catch (err) {
-    console.error("Erreur lors de l'envoi d'email SMTP :", err);
+    console.error('Erreur lors de l\'envoi d\'email SMTP :', err);
     return { success: false, error: err.message };
   }
 }
 
 /**
- * Handler de test de connexion SMTP
+ * Teste la connexion SMTP et envoie un email de test (panneau admin).
+ * Retourne { success, message?, error? } — identique à l'ancien handler.
  */
-export async function handleTestSmtp({ smtpEmail, smtpPassword, testRecipient }) {
+export async function testSmtpConnection({ smtpEmail, smtpPassword, testRecipient }) {
   if (!smtpEmail || !smtpPassword) {
-    return { success: false, error: "Adresse email et mot de passe d'application requis." };
+    return { success: false, error: 'Adresse email et mot de passe d\'application requis.' };
   }
 
   const transporter = createGmailTransporter(smtpEmail, smtpPassword);
@@ -99,8 +117,8 @@ export async function handleTestSmtp({ smtpEmail, smtpPassword, testRecipient })
     await transporter.sendMail({
       from: `"Portail QCM UY1" <${smtpEmail}>`,
       to: testRecipient || smtpEmail,
-      subject: "Test de configuration SMTP Google — Portail QCM UY1",
-      text: "Félicitations ! Votre configuration SMTP Google avec mot de passe d'application à 16 caractères fonctionne correctement.",
+      subject: 'Test de configuration SMTP Google — Portail QCM UY1',
+      text: 'Félicitations ! Votre configuration SMTP Google avec mot de passe d\'application à 16 caractères fonctionne correctement.',
       html: `
         <div style="font-family: sans-serif; padding: 20px; border: 1px solid #22c55e; border-radius: 8px;">
           <h2 style="color: #16a34a;">Test SMTP Google Réussi !</h2>

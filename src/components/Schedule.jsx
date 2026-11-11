@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react';
-import { db } from '../firebase';
-import { collection, getDocs, query, orderBy } from 'firebase/firestore';
+import { api } from '../services/api';
 import { Link } from 'react-router-dom';
 import { getCurrentUser } from '../services/authService';
+import usePageTitle from '../hooks/usePageTitle';
+import Icon from './ui/icons.jsx';
 
 export default function Schedule() {
+  usePageTitle('Emploi du temps');
+
   const [upcomingQuizzes, setUpcomingQuizzes] = useState([]);
   const [pastQuizzes, setPastQuizzes] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -24,22 +27,15 @@ export default function Schedule() {
   useEffect(() => {
     const fetchAll = async () => {
       try {
-        const snapshot = await getDocs(query(collection(db, "quizzes"), orderBy("launchTime", "asc")));
-        const all = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        const data = await api('/quizzes?sort=asc');
+        const all = data.quizzes;
         const now = Date.now();
         setUpcomingQuizzes(all.filter(q => q.launchTime && q.launchTime > now));
         setPastQuizzes(all.filter(q => q.launchTime && q.launchTime <= now).reverse());
 
         if (user) {
-          const userEmail = (user.email || '').toLowerCase();
-          const userName = (user.name || '').trim();
-          const rSnap = await getDocs(collection(db, "results"));
-          const res = rSnap.docs.map(d => d.data()).filter(r => {
-            const rEmail = (r.email || '').toLowerCase();
-            const rName = (r.name || '').trim();
-            return (userEmail && rEmail === userEmail) || (userName && rName === userName);
-          });
-          setMyResults(res);
+          const rData = await api('/results/mine', { auth: 'student' }).catch(() => ({ results: [] }));
+          setMyResults(rData.results);
         }
       } catch (err) {
         console.warn("Erreur chargement emploi du temps :", err);
@@ -66,48 +62,50 @@ export default function Schedule() {
   });
 
   const badgeColor = (f) => {
-    if (f === 'Informatique') return 'bg-blue-100 text-blue-700';
-    if (f === 'Mathématiques') return 'bg-purple-100 text-purple-700';
-    if (f === 'Physique') return 'bg-orange-100 text-orange-700';
-    return 'bg-gray-100 text-gray-700';
+    if (f === 'Informatique') return 'bg-blue-500/15 text-blue-300';
+    if (f === 'Mathématiques') return 'bg-purple-500/15 text-purple-300';
+    if (f === 'Physique') return 'bg-amber-500/15 text-amber-300';
+    return 'bg-slate-800 text-slate-300';
   };
 
   const QuizCard = ({ quiz, past }) => {
     const hasTaken = passedUes.has(quiz.id || quiz.ue);
     return (
-      <div className={`bg-white rounded-2xl shadow-sm border-l-4 p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 transition hover:shadow-md ${past ? (hasTaken ? 'border-emerald-500' : 'border-red-400') : 'border-blue-500'}`}>
+      <div className={`bg-slate-900 rounded-2xl border border-slate-800 border-l-4 p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 transition hover:border-slate-700 ${past ? (hasTaken ? 'border-l-emerald-500' : 'border-l-red-500') : 'border-l-blue-500'}`}>
         <div>
           <div className="flex items-center gap-2 mb-1 flex-wrap">
             <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-full ${badgeColor(quiz.filiere)}`}>
               {quiz.filiere}
             </span>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
               {quiz.niveau}
             </span>
             {quiz.semestre && (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-700">
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300">
                 S{quiz.semestre}
               </span>
             )}
             {past && (
               hasTaken ? (
-                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-                  ✓ Épreuve passée
+                <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300">
+                  <Icon name="check-circle" size={11} />
+                  Épreuve passée
                 </span>
               ) : (
-                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-red-100 text-red-700">
-                  ⚠️ Évaluation manquée
+                <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full bg-red-500/15 text-red-300">
+                  <Icon name="alert" size={11} />
+                  Évaluation manquée
                 </span>
               )
             )}
           </div>
-          <h3 className="font-black text-gray-800 text-lg">{quiz.ue || quiz.id}</h3>
-          <p className="text-gray-500 text-xs mt-1">
+          <h3 className="font-black text-white text-lg">{quiz.ue || quiz.id}</h3>
+          <p className="text-slate-400 text-xs mt-1">
             {past ? 'Session officielle : ' : 'Prévu le : '}
-            <strong className="text-gray-700">{formatDate(quiz.launchTime)}</strong>
+            <strong className="text-slate-200">{formatDate(quiz.launchTime)}</strong>
             {quiz.timePerQuestion ? ` • ${quiz.timePerQuestion}s par question` : ''}
           </p>
-          {quiz.endTime && <p className="text-gray-400 text-[11px] mt-0.5">Clôture : {formatDate(quiz.endTime)}</p>}
+          {quiz.endTime && <p className="text-slate-500 text-[11px] mt-0.5">Clôture : {formatDate(quiz.endTime)}</p>}
         </div>
 
         <div className="flex gap-2 flex-shrink-0">
@@ -115,26 +113,37 @@ export default function Schedule() {
             hasTaken ? (
               <Link
                 to={`/review/${quiz.id || quiz.ue}`}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition shadow-sm"
+                className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl text-xs font-bold transition"
               >
+                <Icon name="eye" size={14} />
                 Relire ma copie
               </Link>
             ) : (
               user && (
                 <Link
                   to={`/quiz/${quiz.id || quiz.ue}?mode=rattrapage`}
-                  className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl text-xs font-black transition shadow-sm"
+                  className="inline-flex items-center gap-1.5 bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-xl text-xs font-black transition"
                 >
+                  <Icon name="refresh" size={14} />
                   Rattraper l'épreuve
                 </Link>
               )
             )
+          ) : user ? (
+            <Link
+              to="/dashboard"
+              className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-xs font-black transition"
+            >
+              <Icon name="arrow-right" size={14} />
+              Rejoindre depuis mon espace
+            </Link>
           ) : (
             <Link
-              to="/"
-              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-xs font-black transition shadow-sm"
+              to="/login"
+              className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-xs font-black transition"
             >
-              Rejoindre l'espace
+              <Icon name="lock" size={14} />
+              Se connecter pour rejoindre
             </Link>
           )}
         </div>
@@ -143,35 +152,41 @@ export default function Schedule() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 p-4 md:p-8">
+    <div className="flex-1 bg-slate-950 p-4 md:p-8">
       <div className="max-w-4xl mx-auto space-y-6">
-        <div className="flex items-center justify-between">
-          <Link to="/" className="text-blue-600 hover:underline text-xs font-bold flex items-center gap-1">
-            ← Retour à mon espace
-          </Link>
-          {user && (
-            <div className="text-xs text-gray-500">
-              Connecté : <strong>{user.name}</strong> ({user.filiere} • {user.niveau})
-            </div>
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          {user ? (
+            <Link to="/dashboard" className="text-blue-400 hover:text-blue-300 text-xs font-bold flex items-center gap-1.5 transition">
+              <Icon name="arrow-left" size={14} />
+              Retour à mon espace
+            </Link>
+          ) : (
+            <Link to="/" className="text-blue-400 hover:text-blue-300 text-xs font-bold flex items-center gap-1.5 transition">
+              <Icon name="arrow-left" size={14} />
+              Retour à l'accueil
+            </Link>
           )}
+          <span className="text-xs text-slate-500">
+            {user ? `${user.filiere} • ${user.niveau}` : 'Consultation publique'}
+          </span>
         </div>
 
         <div>
-          <h1 className="text-2xl font-black text-gray-800">Emploi du Temps — Évaluations QCM</h1>
-          <p className="text-xs text-gray-500 mt-0.5">Portail Officiel • Université de Yaoundé 1</p>
+          <h1 className="text-2xl font-black text-white">Emploi du Temps — Évaluations QCM</h1>
+          <p className="text-xs text-slate-400 mt-0.5">Portail Officiel • UY1</p>
         </div>
 
         {/* Barre de Filtres */}
-        <div className="bg-white rounded-2xl shadow-sm p-4 border border-gray-200 flex gap-3 flex-wrap items-center">
+        <div className="bg-slate-900 rounded-2xl p-4 border border-slate-800 flex gap-3 flex-wrap items-center">
           {/* Si utilisateur connecté, filière fixe avec badge (Point 3) */}
           {user ? (
-            <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 px-3 py-2 rounded-xl text-xs">
-              <span className="text-gray-500">Filière (liée à votre compte) :</span>
-              <strong className="text-blue-700 font-extrabold">{user.filiere}</strong>
+            <div className="flex items-center gap-2 bg-blue-950/50 border border-blue-900/60 px-3 py-2 rounded-xl text-xs">
+              <span className="text-slate-400">Filière (liée à votre compte) :</span>
+              <strong className="text-blue-300 font-extrabold">{user.filiere}</strong>
             </div>
           ) : (
             <select
-              className="flex-1 min-w-32 p-2.5 border-2 border-gray-100 rounded-xl text-xs outline-none focus:border-blue-500"
+              className="flex-1 min-w-32 p-2.5 border border-slate-800 bg-slate-950 text-slate-200 rounded-xl text-xs outline-none focus:border-blue-600 transition"
               value={filter.filiere}
               onChange={e => setFilter(f => ({ ...f, filiere: e.target.value }))}
             >
@@ -186,9 +201,9 @@ export default function Schedule() {
 
           {/* Sélecteur de niveau au sein de la filière */}
           <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-500 font-bold">Niveau :</span>
+            <span className="text-xs text-slate-400 font-bold">Niveau :</span>
             <select
-              className="p-2 border-2 border-gray-100 rounded-xl text-xs outline-none focus:border-blue-500 font-bold"
+              className="p-2 border border-slate-800 bg-slate-950 text-slate-200 rounded-xl text-xs outline-none focus:border-blue-600 transition font-bold"
               value={filter.niveau}
               onChange={e => setFilter(f => ({ ...f, niveau: e.target.value }))}
             >
@@ -203,19 +218,19 @@ export default function Schedule() {
         </div>
 
         {loading ? (
-          <div className="text-center py-20 text-gray-400 text-xs animate-pulse">
+          <div className="text-center py-20 text-slate-500 text-xs animate-pulse">
             Chargement de l'emploi du temps...
           </div>
         ) : (
           <div className="space-y-8">
             {/* Prochains QCM */}
             <section>
-              <h2 className="text-sm font-black text-gray-700 uppercase tracking-wider mb-3 flex items-center gap-2">
+              <h2 className="text-sm font-black text-slate-300 uppercase tracking-wider mb-3 flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>
                 Prochaines Évaluations ({filtered(upcomingQuizzes).length})
               </h2>
               {filtered(upcomingQuizzes).length === 0 ? (
-                <div className="text-center py-8 bg-white rounded-2xl text-gray-400 text-xs border border-dashed border-gray-200">
+                <div className="text-center py-8 bg-slate-900 rounded-2xl text-slate-500 text-xs border border-dashed border-slate-800">
                   Aucune évaluation programmée à venir pour ces critères.
                 </div>
               ) : (
@@ -227,11 +242,12 @@ export default function Schedule() {
 
             {/* QCM Passés */}
             <section>
-              <h2 className="text-sm font-black text-gray-700 uppercase tracking-wider mb-3">
-                📚 Évaluations Passées ({filtered(pastQuizzes).length})
+              <h2 className="text-sm font-black text-slate-300 uppercase tracking-wider mb-3 flex items-center gap-2">
+                <Icon name="book" size={15} className="text-blue-400" />
+                Évaluations Passées ({filtered(pastQuizzes).length})
               </h2>
               {filtered(pastQuizzes).length === 0 ? (
-                <div className="text-center py-8 bg-white rounded-2xl text-gray-400 text-xs border border-dashed border-gray-200">
+                <div className="text-center py-8 bg-slate-900 rounded-2xl text-slate-500 text-xs border border-dashed border-slate-800">
                   Aucune évaluation passée enregistrée.
                 </div>
               ) : (

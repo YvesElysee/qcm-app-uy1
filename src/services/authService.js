@@ -1,29 +1,16 @@
-import { db } from '../firebase';
-import {
-  collection, doc, getDoc, setDoc, getDocs,
-  query, where, updateDoc
-} from 'firebase/firestore';
-import { sendResetCodeEmail } from './emailService';
+import { api, saveSession, updateLocalSession, getSession } from './api';
 
 /**
- * Hache un mot de passe en SHA-256
+ * Authentification étudiant — délègue désormais tout au backend Node.js.
+ * Les signatures restent identiques à l'époque Firestore pour ne pas
+ * modifier la logique des composants.
+ *
+ * Sécurité : les mots de passe ne sont plus hachés côté navigateur,
+ * ils sont vérifiés par le serveur (scrypt) qui délivre un jeton de session.
  */
-export async function hashPassword(password) {
-  const msgBuffer = new TextEncoder().encode(password + "_uy1_qcm_salt_2026");
-  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-}
 
 /**
- * Normalise un ID basé sur l'email
- */
-export function sanitizeEmailDocId(email) {
-  return email.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_');
-}
-
-/**
- * Enregistre un nouvel étudiant dans Firestore
+ * Enregistre un nouvel étudiant via l'API
  */
 export async function registerStudent({
   name,
@@ -34,8 +21,8 @@ export async function registerStudent({
   anneeAcademique,
   dateNaissance
 }) {
-  const cleanEmail = email.trim().toLowerCase();
-  const cleanName = name.trim();
+  const cleanEmail = String(email || '').trim().toLowerCase();
+  const cleanName = String(name || '').trim();
 
   if (!cleanEmail || !password || !cleanName) {
     throw new Error("Veuillez renseigner les champs obligatoires (Nom, Email, Mot de passe).");
@@ -45,46 +32,23 @@ export async function registerStudent({
     throw new Error("Le mot de passe doit comporter au moins 6 caractères.");
   }
 
-  // Vérifier si l'email existe déjà
-  const docId = sanitizeEmailDocId(cleanEmail);
-  const userRef = doc(db, "users", docId);
-  const existing = await getDoc(userRef);
+  const data = await api('/auth/register', {
+    method: 'POST',
+    auth: null,
+    body: {
+      name: cleanName,
+      email: cleanEmail,
+      password,
+      filiere,
+      niveau,
+      anneeAcademique,
+      dateNaissance
+    }
+  });
 
-  if (existing.exists()) {
-    throw new Error("Un compte existe déjà avec cette adresse email.");
-  }
-
-  // Hachage du mot de passe
-  const passwordHash = await hashPassword(password);
-
-  const userData = {
-    id: docId,
-    name: cleanName,
-    email: cleanEmail,
-    passwordHash,
-    filiere: filiere || 'Informatique',
-    niveau: niveau || 'L1',
-    anneeAcademique: anneeAcademique || '2025-2026',
-    dateNaissance: dateNaissance || '',
-    createdAt: new Date().toISOString(),
-    lastLogin: new Date().toISOString()
-  };
-
-  await setDoc(userRef, userData);
-
-  // Sauvegarde de la session locale
-  const session = {
-    uid: docId,
-    name: userData.name,
-    email: userData.email,
-    filiere: userData.filiere,
-    niveau: userData.niveau,
-    anneeAcademique: userData.anneeAcademique,
-    dateNaissance: userData.dateNaissance
-  };
-  localStorage.setItem('userSession', JSON.stringify(session));
-  localStorage.setItem('qcm_last_name', userData.name);
-
+  // Sauvegarde de la session locale (avec le jeton)
+  const session = { ...data.user, token: data.token };
+  saveSession(session);
   return session;
 }
 
@@ -92,50 +56,25 @@ export async function registerStudent({
  * Connecte un étudiant avec son email et mot de passe
  */
 export async function loginStudent(email, password) {
-  const cleanEmail = email.trim().toLowerCase();
-  const docId = sanitizeEmailDocId(cleanEmail);
-  const userRef = doc(db, "users", docId);
-  let userSnap = await getDoc(userRef);
+  const cleanEmail = String(email || '').trim().toLowerCase();
 
-  // Si non trouvé par doc ID, tentative par requête where
-  if (!userSnap.exists()) {
-    const qSnap = await getDocs(query(collection(db, "users"), where("email", "==", cleanEmail)));
-    if (qSnap.empty) {
-      throw new Error("Adresse email ou mot de passe incorrect.");
-    }
-    userSnap = qSnap.docs[0];
-  }
+  const data = await api('/auth/login', {
+    method: 'POST',
+    auth: null,
+    body: { email: cleanEmail, password }
+  });
 
-  const userData = userSnap.data();
-  const inputHash = await hashPassword(password);
-
-  if (inputHash !== userData.passwordHash) {
-    throw new Error("Adresse email ou mot de passe incorrect.");
-  }
-
-  // Mettre à jour lastLogin
-  await updateDoc(userSnap.ref, { lastLogin: new Date().toISOString() }).catch(() => {});
-
-  const session = {
-    uid: userSnap.id,
-    name: userData.name,
-    email: userData.email,
-    filiere: userData.filiere,
-    niveau: userData.niveau,
-    anneeAcademique: userData.anneeAcademique,
-    dateNaissance: userData.dateNaissance || ''
-  };
-
-  localStorage.setItem('userSession', JSON.stringify(session));
-  localStorage.setItem('qcm_last_name', userData.name);
-
+  const session = { ...data.user, token: data.token };
+  saveSession(session);
   return session;
 }
 
 /**
- * Déconnecte l'étudiant
+ * Déconnecte l'étudiant (révoque le jeton côté serveur)
  */
 export function logoutStudent() {
+  // Révocation best-effort (fire & forget), puis nettoyage local immédiat
+  api('/auth/logout', { method: 'POST', auth: 'student' }).catch(() => {});
   localStorage.removeItem('userSession');
 }
 
@@ -143,100 +82,51 @@ export function logoutStudent() {
  * Récupère l'utilisateur actuellement connecté
  */
 export function getCurrentUser() {
-  try {
-    const s = localStorage.getItem('userSession');
-    return s ? JSON.parse(s) : null;
-  } catch {
-    return null;
-  }
+  return getSession();
 }
 
 /**
- * Met à jour le profil de l'étudiant
+ * Met à jour le profil de l'étudiant connecté (nom, date de naissance)
  */
 export async function updateStudentProfile(email, updates) {
-  const docId = sanitizeEmailDocId(email);
-  const userRef = doc(db, "users", docId);
-  await updateDoc(userRef, {
-    ...updates,
-    updatedAt: new Date().toISOString()
-  });
-
-  const cur = getCurrentUser();
-  if (cur && cur.email.toLowerCase() === email.toLowerCase()) {
-    const updated = { ...cur, ...updates };
-    localStorage.setItem('userSession', JSON.stringify(updated));
-    if (updates.name) localStorage.setItem('qcm_last_name', updates.name);
-  }
+  void email; // l'identité est désormais déduite du jeton côté serveur
+  const data = await api('/auth/profile', { method: 'PUT', auth: 'student', body: updates });
+  updateLocalSession(data.user);
+  return data.user;
 }
 
 /**
- * Étape 1 : Demande un code de réinitialisation de mot de passe
+ * Change le mot de passe de l'étudiant connecté (depuis le profil)
+ */
+export async function changeStudentPassword(email, oldPassword, newPassword) {
+  void email;
+  await api('/auth/change-password', {
+    method: 'POST',
+    auth: 'student',
+    body: { oldPassword, newPassword }
+  });
+  return { success: true };
+}
+
+/**
+ * Étape 1 : Demande un code de réinitialisation de mot de passe.
+ * Le code est généré ET envoyé par le serveur (SMTP Google).
  */
 export async function requestPasswordReset(email) {
-  const cleanEmail = email.trim().toLowerCase();
-  const docId = sanitizeEmailDocId(cleanEmail);
-  const userSnap = await getDoc(doc(db, "users", docId));
-
-  if (!userSnap.exists()) {
-    throw new Error("Aucun compte associé à cette adresse email.");
-  }
-
-  const userData = userSnap.data();
-
-  // Génération d'un code aléatoire à 6 chiffres
-  const code = Math.floor(100000 + Math.random() * 900000).toString();
-  const resetId = `${docId}_${Date.now()}`;
-
-  // Sauvegarde dans Firestore (valable 15 minutes)
-  await setDoc(doc(db, "password_resets", resetId), {
-    email: cleanEmail,
-    code,
-    expiresAt: Date.now() + 15 * 60 * 1000,
-    used: false,
-    createdAt: new Date().toISOString()
-  });
-
-  // Envoi de l'email via le service SMTP Google (Gmail avec mot de passe d'application à 16 caractères)
-  const sendResult = await sendResetCodeEmail(cleanEmail, code, userData.name);
-
-  return {
-    success: true,
-    resetId,
-    email: cleanEmail,
-    emailSent: sendResult.success,
-    simulationCode: sendResult.simulationCode,
-    message: sendResult.success
-      ? "Un code de confirmation a été envoyé à votre adresse email."
-      : "Code de récupération généré avec succès."
-  };
+  const cleanEmail = String(email || '').trim().toLowerCase();
+  return api('/auth/forgot-password', { method: 'POST', body: { email: cleanEmail } });
 }
 
 /**
  * Étape 2 : Vérifie le code à 6 chiffres
  */
 export async function verifyResetCode(email, code) {
-  const cleanEmail = email.trim().toLowerCase();
-  const cleanCode = code.trim();
-
-  const q = query(
-    collection(db, "password_resets"),
-    where("email", "==", cleanEmail),
-    where("code", "==", cleanCode),
-    where("used", "==", false)
-  );
-
-  const snap = await getDocs(q);
-  if (snap.empty) {
-    throw new Error("Code de vérification invalide ou déjà utilisé.");
-  }
-
-  const validDoc = snap.docs.find(d => d.data().expiresAt > Date.now());
-  if (!validDoc) {
-    throw new Error("Le code de vérification a expiré (validité de 15 minutes). Veuillez refaire une demande.");
-  }
-
-  return { valid: true, resetDocId: validDoc.id };
+  const cleanEmail = String(email || '').trim().toLowerCase();
+  const data = await api('/auth/verify-reset-code', {
+    method: 'POST',
+    body: { email: cleanEmail, code: String(code || '').trim() }
+  });
+  return { valid: true, resetDocId: data.resetId };
 }
 
 /**
@@ -246,24 +136,9 @@ export async function completePasswordReset(email, code, newPassword) {
   if (newPassword.length < 6) {
     throw new Error("Le nouveau mot de passe doit comporter au moins 6 caractères.");
   }
-
-  const cleanEmail = email.trim().toLowerCase();
-  const verification = await verifyResetCode(cleanEmail, code);
-
-  // Mettre à jour le mot de passe de l'utilisateur
-  const docId = sanitizeEmailDocId(cleanEmail);
-  const passwordHash = await hashPassword(newPassword);
-
-  await updateDoc(doc(db, "users", docId), {
-    passwordHash,
-    updatedAt: new Date().toISOString()
+  const cleanEmail = String(email || '').trim().toLowerCase();
+  return api('/auth/reset-password', {
+    method: 'POST',
+    body: { email: cleanEmail, code: String(code || '').trim(), newPassword }
   });
-
-  // Marquer le code comme utilisé
-  await updateDoc(doc(db, "password_resets", verification.resetDocId), {
-    used: true,
-    usedAt: new Date().toISOString()
-  });
-
-  return { success: true };
 }

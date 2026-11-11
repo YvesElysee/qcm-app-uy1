@@ -6,7 +6,12 @@ import Schedule from './components/Schedule';
 import ReviewSession from './components/ReviewSession';
 import StudentAuth from './components/StudentAuth';
 import StudentDashboard from './components/StudentDashboard';
-import ContactAdmin from './components/ContactAdmin';
+import Navbar from './components/layout/Navbar';
+import Footer from './components/layout/Footer';
+import ScrollToTop from './components/ScrollToTop';
+import Home from './components/pages/Home';
+import NotFound from './components/pages/NotFound';
+import ContactPage from './components/pages/ContactPage';
 import { getCurrentUser } from './services/authService';
 
 // ── Guard Admin ───────────────────────────────────────────────────────
@@ -21,31 +26,71 @@ function RequireStudent({ children }) {
   return user ? children : <Navigate to="/login" replace />;
 }
 
+// ── Pages réservées aux non-connectés (login / inscription) ───────────
+function OnlyPublic({ children }) {
+  const user = getCurrentUser();
+  return user ? <Navigate to="/dashboard" replace /> : children;
+}
+
+// ── Layout standard : navbar partagée + contenu + footer ─────────────
+function Layout({ children }) {
+  return (
+    <div className="min-h-screen flex flex-col bg-slate-950">
+      <Navbar />
+      <div className="flex-1 flex flex-col">{children}</div>
+      <Footer />
+    </div>
+  );
+}
+
 // ── App ───────────────────────────────────────────────────────────────
 export default function App() {
   return (
     <Router>
+      <ScrollToTop />
       <Routes>
-        {/* Espace Étudiant Principal (Tableau de bord protégé) */}
-        <Route path="/" element={<RequireStudent><StudentDashboard /></RequireStudent>} />
+        {/* Accueil public (présentation, stats, prochaines évaluations) */}
+        <Route path="/" element={<Layout><Home /></Layout>} />
 
-        {/* Authentification Étudiant (Sans Firebase Auth) */}
-        <Route path="/login" element={<StudentAuth defaultTab="login" />} />
-        <Route path="/register" element={<StudentAuth defaultTab="register" />} />
-        <Route path="/forgot-password" element={<StudentAuth defaultTab="forgot" />} />
+        {/* Authentification Étudiant (API Node.js) */}
+        <Route
+          path="/login"
+          element={<OnlyPublic><Layout><StudentAuth defaultTab="login" /></Layout></OnlyPublic>}
+        />
+        <Route
+          path="/register"
+          element={<OnlyPublic><Layout><StudentAuth defaultTab="register" /></Layout></OnlyPublic>}
+        />
+        <Route path="/forgot-password" element={<Layout><StudentAuth defaultTab="forgot" /></Layout>} />
 
-        {/* Sessions d'Évaluation & Emploi du Temps */}
+        {/* Espace Étudiant (Tableau de bord protégé) */}
+        <Route
+          path="/dashboard"
+          element={<RequireStudent><Layout><StudentDashboard /></Layout></RequireStudent>}
+        />
+
+        {/* Emploi du temps public */}
+        <Route path="/schedule" element={<Layout><Schedule /></Layout>} />
+
+        {/* Contact administration (étudiant connecté) */}
+        <Route
+          path="/contact"
+          element={<RequireStudent><Layout><ContactPage /></Layout></RequireStudent>}
+        />
+
+        {/* Sessions d'évaluation */}
         <Route path="/quiz/:quizId" element={<RequireStudent><QuizSession /></RequireStudent>} />
-        <Route path="/review/:quizId" element={<RequireStudent><ReviewSession /></RequireStudent>} />
-        <Route path="/schedule" element={<Schedule />} />
-        <Route path="/contact" element={<RequireStudent><div className="min-h-screen bg-slate-100 p-6"><ContactAdmin /></div></RequireStudent>} />
+        <Route
+          path="/review/:quizId"
+          element={<RequireStudent><Layout><ReviewSession /></Layout></RequireStudent>}
+        />
 
-        {/* Espace Administrateur */}
+        {/* Espace Administrateur (interfaces dédiées, sans navbar) */}
         <Route path="/admin-login" element={<Login />} />
         <Route path="/admin" element={<RequireAdmin><AdminPanel /></RequireAdmin>} />
 
-        {/* Fallback */}
-        <Route path="*" element={<Navigate to="/" replace />} />
+        {/* 404 — route inconnue */}
+        <Route path="*" element={<Layout><NotFound /></Layout>} />
       </Routes>
     </Router>
   );

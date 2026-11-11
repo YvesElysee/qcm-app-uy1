@@ -1,8 +1,6 @@
 import { useState } from 'react';
-import { getCurrentUser, updateStudentProfile, hashPassword } from '../services/authService';
-import { db } from '../firebase';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
-import { sanitizeEmailDocId } from '../services/authService';
+import { getCurrentUser, updateStudentProfile, changeStudentPassword } from '../services/authService';
+import Icon from './ui/icons.jsx';
 
 export default function StudentProfile({ onClose, onProfileUpdated }) {
   const user = getCurrentUser() || {};
@@ -59,23 +57,8 @@ export default function StudentProfile({ onClose, onProfileUpdated }) {
     }
 
     try {
-      const docId = sanitizeEmailDocId(user.email);
-      const userRef = doc(db, "users", docId);
-      const snap = await getDoc(userRef);
-
-      if (!snap.exists()) {
-        throw new Error("Utilisateur introuvable.");
-      }
-
-      const userData = snap.data();
-      const oldHash = await hashPassword(oldPassword);
-
-      if (oldHash !== userData.passwordHash) {
-        throw new Error("L'ancien mot de passe est incorrect.");
-      }
-
-      const newHash = await hashPassword(newPassword);
-      await updateDoc(userRef, { passwordHash: newHash });
+      // La vérification de l'ancien mot de passe est faite par le serveur
+      await changeStudentPassword(user.email, oldPassword, newPassword);
 
       setPwdMsg("Mot de passe modifié avec succès !");
       setOldPassword('');
@@ -89,8 +72,10 @@ export default function StudentProfile({ onClose, onProfileUpdated }) {
     }
   };
 
+  const inputClass = 'w-full p-2.5 border border-slate-800 rounded-xl bg-slate-950 text-slate-100 focus:border-blue-600 outline-none text-xs transition';
+
   return (
-    <div className="bg-white rounded-3xl shadow-2xl border border-gray-100 overflow-hidden max-w-lg w-full mx-auto">
+    <div className="bg-slate-900 rounded-3xl shadow-2xl shadow-black/50 border border-slate-800 overflow-hidden max-w-lg w-full mx-auto">
       {/* Header */}
       <div className="bg-gradient-to-r from-blue-700 to-indigo-800 text-white p-6 flex items-center justify-between">
         <div>
@@ -98,62 +83,66 @@ export default function StudentProfile({ onClose, onProfileUpdated }) {
           <p className="text-blue-200 text-xs mt-0.5">{user.email}</p>
         </div>
         {onClose && (
-          <button onClick={onClose} className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition">
-            ✕
+          <button
+            onClick={onClose}
+            aria-label="Fermer"
+            className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition"
+          >
+            <Icon name="close" size={16} />
           </button>
         )}
       </div>
 
       <div className="p-6 space-y-5">
         {successMsg && (
-          <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-xl p-3 flex items-center gap-2">
-            <span>✓</span> <span>{successMsg}</span>
+          <div className="bg-emerald-950/60 border border-emerald-800 text-emerald-300 text-xs rounded-xl p-3 flex items-center gap-2">
+            <Icon name="check-circle" size={15} /> <span>{successMsg}</span>
           </div>
         )}
         {errorMsg && (
-          <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl p-3 flex items-center gap-2">
-            <span>⚠️</span> <span>{errorMsg}</span>
+          <div className="bg-red-950/60 border border-red-800 text-red-300 text-xs rounded-xl p-3 flex items-center gap-2">
+            <Icon name="alert" size={15} /> <span>{errorMsg}</span>
           </div>
         )}
 
         {/* Détails académiques (Fixes) */}
-        <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 grid grid-cols-2 gap-3 text-xs">
+        <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 grid grid-cols-2 gap-3 text-xs">
           <div>
-            <span className="text-gray-400 block font-medium">Filière d'inscription</span>
-            <span className="font-extrabold text-blue-700 text-sm">{user.filiere}</span>
+            <span className="text-slate-400 block font-medium">Filière d'inscription</span>
+            <span className="font-extrabold text-blue-300 text-sm">{user.filiere}</span>
           </div>
           <div>
-            <span className="text-gray-400 block font-medium">Niveau d'inscription</span>
-            <span className="font-extrabold text-gray-800 text-sm">{user.niveau}</span>
+            <span className="text-slate-400 block font-medium">Niveau d'inscription</span>
+            <span className="font-extrabold text-white text-sm">{user.niveau}</span>
           </div>
           <div>
-            <span className="text-gray-400 block font-medium">Année Académique</span>
-            <span className="font-extrabold text-gray-800">{user.anneeAcademique || '2025-2026'}</span>
+            <span className="text-slate-400 block font-medium">Année Académique</span>
+            <span className="font-extrabold text-white">{user.anneeAcademique || '2025-2026'}</span>
           </div>
           <div>
-            <span className="text-gray-400 block font-medium">Statut du compte</span>
-            <span className="font-bold text-emerald-600">Actif • UY1</span>
+            <span className="text-slate-400 block font-medium">Statut du compte</span>
+            <span className="font-bold text-emerald-400">Actif • UY1</span>
           </div>
         </div>
 
         {/* Formulaire de modification */}
         <form onSubmit={handleSaveProfile} className="space-y-4">
           <div>
-            <label className="block text-xs font-bold text-gray-700 mb-1">Nom Complet ou Pseudo</label>
+            <label className="block text-xs font-bold text-slate-300 mb-1">Nom Complet ou Pseudo</label>
             <input
               type="text"
               required
-              className="w-full p-2.5 border-2 border-gray-100 rounded-xl focus:border-blue-500 outline-none text-xs text-gray-800"
+              className={inputClass}
               value={name}
               onChange={e => setName(e.target.value)}
             />
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-gray-700 mb-1">Date de naissance</label>
+            <label className="block text-xs font-bold text-slate-300 mb-1">Date de naissance</label>
             <input
               type="date"
-              className="w-full p-2.5 border-2 border-gray-100 rounded-xl focus:border-blue-500 outline-none text-xs text-gray-800"
+              className={inputClass}
               value={dateNaissance}
               onChange={e => setDateNaissance(e.target.value)}
             />
@@ -163,14 +152,14 @@ export default function StudentProfile({ onClose, onProfileUpdated }) {
             <button
               type="button"
               onClick={() => setShowPasswordChange(!showPasswordChange)}
-              className="text-xs font-bold text-blue-600 hover:underline"
+              className="text-xs font-bold text-blue-400 hover:text-blue-300 hover:underline"
             >
               {showPasswordChange ? "Annuler le changement de mot de passe" : "Modifier mon mot de passe"}
             </button>
             <button
               type="submit"
               disabled={saving}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-extrabold px-5 py-2.5 rounded-xl text-xs transition shadow-md disabled:opacity-50"
+              className="bg-blue-600 hover:bg-blue-500 text-white font-extrabold px-5 py-2.5 rounded-xl text-xs transition shadow-md shadow-blue-600/20 disabled:opacity-50"
             >
               {saving ? "Enregistrement..." : "Enregistrer"}
             </button>
@@ -179,38 +168,51 @@ export default function StudentProfile({ onClose, onProfileUpdated }) {
 
         {/* Section Changement de mot de passe */}
         {showPasswordChange && (
-          <form onSubmit={handleChangePassword} className="border-t border-gray-100 pt-4 space-y-3">
-            <h3 className="text-xs font-black text-gray-700 uppercase tracking-wider">Sécurité du compte</h3>
-            {pwdError && <p className="text-xs text-red-500">{pwdError}</p>}
-            {pwdMsg && <p className="text-xs text-emerald-600">{pwdMsg}</p>}
+          <form onSubmit={handleChangePassword} className="border-t border-slate-800 pt-4 space-y-3">
+            <h3 className="text-xs font-black text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+              <Icon name="key" size={13} />
+              Sécurité du compte
+            </h3>
+            {pwdError && (
+              <p className="text-xs text-red-400 flex items-center gap-1.5">
+                <Icon name="alert" size={13} />
+                {pwdError}
+              </p>
+            )}
+            {pwdMsg && (
+              <p className="text-xs text-emerald-400 flex items-center gap-1.5">
+                <Icon name="check-circle" size={13} />
+                {pwdMsg}
+              </p>
+            )}
 
             <div>
-              <label className="block text-xs font-bold text-gray-600 mb-1">Ancien mot de passe</label>
+              <label className="block text-xs font-bold text-slate-400 mb-1">Ancien mot de passe</label>
               <input
                 type="password"
                 required
-                className="w-full p-2.5 border-2 border-gray-100 rounded-xl focus:border-blue-500 outline-none text-xs"
+                className={inputClass}
                 value={oldPassword}
                 onChange={e => setOldPassword(e.target.value)}
               />
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="block text-xs font-bold text-gray-600 mb-1">Nouveau mot de passe</label>
+                <label className="block text-xs font-bold text-slate-400 mb-1">Nouveau mot de passe</label>
                 <input
                   type="password"
                   required
-                  className="w-full p-2.5 border-2 border-gray-100 rounded-xl focus:border-blue-500 outline-none text-xs"
+                  className={inputClass}
                   value={newPassword}
                   onChange={e => setNewPassword(e.target.value)}
                 />
               </div>
               <div>
-                <label className="block text-xs font-bold text-gray-600 mb-1">Confirmer</label>
+                <label className="block text-xs font-bold text-slate-400 mb-1">Confirmer</label>
                 <input
                   type="password"
                   required
-                  className="w-full p-2.5 border-2 border-gray-100 rounded-xl focus:border-blue-500 outline-none text-xs"
+                  className={inputClass}
                   value={confirmPassword}
                   onChange={e => setConfirmPassword(e.target.value)}
                 />
@@ -219,7 +221,7 @@ export default function StudentProfile({ onClose, onProfileUpdated }) {
             <button
               type="submit"
               disabled={pwdSaving}
-              className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-2.5 rounded-xl text-xs transition disabled:opacity-50"
+              className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-2.5 rounded-xl text-xs transition disabled:opacity-50"
             >
               {pwdSaving ? "Mise à jour..." : "Mettre à jour le mot de passe"}
             </button>

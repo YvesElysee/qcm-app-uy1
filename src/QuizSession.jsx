@@ -1,10 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { db } from './firebase';
-import {
-  collection, getDocs, addDoc, doc, getDoc,
-  onSnapshot, query, where, setDoc, deleteDoc, serverTimestamp
-} from 'firebase/firestore';
+import { api } from './services/api';
+import Icon from './components/ui/icons.jsx';
 
 // Shuffle déterministe par seed (nom étudiant)
 function seededShuffle(arr, seed) {
@@ -56,30 +53,35 @@ export default function QuizSession() {
 
   // ── Chargement des questions ─────────────────────────────────────────
   const loadFresh = useCallback(async () => {
-    const qSnap = await getDocs(collection(db, `quizzes/${quizId}/questions`));
-    const raw = qSnap.docs.map(d => {
-      const data = d.data();
+    const data = await api(`/quizzes/${quizId}/questions`);
+    const raw = data.questions.map((data) => {
+      const q = { ...data };
       // Normaliser ReponseCorrecte : si c'est une lettre (A/B/C/D) → convertir en texte
-      const rc = (data.ReponseCorrecte || '').trim().toUpperCase();
+      const rc = (q.ReponseCorrecte || '').trim().toUpperCase();
       if (['A', 'B', 'C', 'D'].includes(rc)) {
-        data.ReponseCorrecte = (data['Opt' + rc] || rc).trim();
+        q.ReponseCorrecte = (q['Opt' + rc] || rc).trim();
       } else {
-        data.ReponseCorrecte = (data.ReponseCorrecte || '').trim();
+        q.ReponseCorrecte = (q.ReponseCorrecte || '').trim();
       }
       // Nettoyer toutes les options
       ['Question', 'OptA', 'OptB', 'OptC', 'OptD'].forEach(k => {
-        if (data[k]) data[k] = data[k].trim();
+        if (q[k]) q[k] = q[k].trim();
       });
-      return data;
+      return q;
     });
     return seededShuffle(raw, safeName);
   }, [quizId, safeName]);
 
   useEffect(() => {
     const init = async () => {
-      const metaDoc = await getDoc(doc(db, "quizzes", quizId));
-      if (!metaDoc.exists()) { setPhase('finished'); return; }
-      const meta = metaDoc.data();
+      let meta;
+      try {
+        const data = await api(`/quizzes/${quizId}`);
+        meta = data.quiz;
+      } catch {
+        setPhase('finished');
+        return;
+      }
       setQuizMeta(meta);
 
       if (meta.endTime && meta.launchTime) {
@@ -137,17 +139,34 @@ export default function QuizSession() {
     return () => clearInterval(iv);
   }, [phase, quizMeta]);
 
-  // ── Présence participants ────────────────────────────────────────────
+  // ── Présence participants (heartbeat + polling, remplace onSnapshot) ──
   useEffect(() => {
     if (phase !== 'quiz') return;
     if (sessionIdRef.current === null) {
       sessionIdRef.current = `${safeName}_${Date.now()}`;
     }
     const sid = sessionIdRef.current;
-    const ref = doc(db, `quizzes/${quizId}/sessions`, sid);
-    setDoc(ref, { name: safeName, ts: serverTimestamp() }).catch(() => {});
-    const unsub = onSnapshot(collection(db, `quizzes/${quizId}/sessions`), s => setParticipants(s.size));
-    return () => { unsub(); deleteDoc(ref).catch(() => {}); };
+    let active = true;
+
+    // Battement de cœur : annonce la présence et récupère le compteur
+    const beat = async () => {
+      try {
+        const r = await api(`/quizzes/${quizId}/sessions`, {
+          method: 'POST',
+          body: { sid, name: safeName }
+        });
+        if (active) setParticipants(r.participants);
+      } catch { /* compteur non critique */ }
+    };
+    beat();
+    const iv = setInterval(beat, 8000);
+
+    // Sortie propre + compteur rafraîchi une dernière fois
+    return () => {
+      active = false;
+      clearInterval(iv);
+      api(`/quizzes/${quizId}/sessions/${sid}`, { method: 'DELETE' }).catch(() => {});
+    };
   }, [phase, quizId, safeName]);
 
   // ── Validation (manuelle ou auto-timer) ─────────────────────────────
@@ -169,19 +188,20 @@ export default function QuizSession() {
       [entry, ...existing.filter(e => !(e.quizId === quizId && e.sessionTimestamp === entry.sessionTimestamp))].slice(0, 50)
     ));
 
-    await addDoc(collection(db, "results"), {
-      name: safeName,
-      email: userEmail,
-      ue: quizId,
-      filiere: quizMeta?.filiere || '',
-      niveau: quizMeta?.niveau || '',
-      score: finalScore,
-      total: questions.length,
-      answers: finalAnswers,
-      sessionTimestamp: quizMeta?.launchTime || 0,
-      isMakeup: isMakeupMode,
-      date: new Date().toISOString()
-    });
+    await api('/results', {
+      method: 'POST',
+      auth: 'student',
+      body: {
+        ue: quizId,
+        filiere: quizMeta?.filiere || '',
+        niveau: quizMeta?.niveau || '',
+        score: finalScore,
+        total: questions.length,
+        answers: finalAnswers,
+        sessionTimestamp: quizMeta?.launchTime || 0,
+        isMakeup: isMakeupMode
+      }
+    }).catch(err => console.warn("Enregistrement du résultat impossible :", err.message));
   }, [quizId, safeName, userEmail, questions.length, quizMeta, storageKey, isMakeupMode]);
 
   const handleValidate = useCallback((forced = false) => {
@@ -259,19 +279,22 @@ export default function QuizSession() {
     return () => clearTimeout(t);
   }, [phase, quizMeta, makeupEndTime, isMakeupMode, score, answers, finalSubmit]);
 
-  // ── Classement ──────────────────────────────────────────────────────
+  // ── Classement (polling toutes les 3s, remplace onSnapshot) ──────────
   useEffect(() => {
     if (phase !== 'finished' || !quizMeta) return;
     const sessionTimestamp = quizMeta.launchTime || 0;
-    const q = query(collection(db, "results"),
-      where("ue", "==", quizId),
-      where("sessionTimestamp", "==", sessionTimestamp)
-    );
-    const unsub = onSnapshot(q, snap => {
-      const data = snap.docs.map(d => d.data()).sort((a, b) => b.score - a.score);
-      setLeaderboard(data);
-    });
-    return () => unsub();
+    let active = true;
+
+    const load = async () => {
+      try {
+        const data = await api(`/results?ue=${encodeURIComponent(quizId)}&sessionTimestamp=${sessionTimestamp}`);
+        if (!active) return;
+        setLeaderboard(data.results.slice().sort((a, b) => b.score - a.score));
+      } catch { /* classement non critique */ }
+    };
+    load();
+    const iv = setInterval(load, 3000);
+    return () => { active = false; clearInterval(iv); };
   }, [phase, quizId, quizMeta]);
 
   // ── Submit final ─────────────────────────────────────────────────────
@@ -283,14 +306,19 @@ export default function QuizSession() {
     setSelectedOption(opt);
   }, [feedbackState]);
 
-  // ── Validation (manuelle ou auto-timer) ─────────────────────────────
+  // ── Feedback à l'admin (depuis l'écran de fin de QCM) ────────────────
   const sendFeedback = useCallback(async () => {
     if (!feedbackMsg.trim()) return;
     try {
-      await addDoc(collection(db, "feedback"), {
-        name: safeName, ue: quizId,
-        filiere: quizMeta?.filiere || '', niveau: quizMeta?.niveau || '',
-        message: feedbackMsg.trim(), date: new Date().toISOString()
+      await api('/feedback', {
+        method: 'POST',
+        auth: 'student',
+        body: {
+          ue: quizId,
+          filiere: quizMeta?.filiere || '',
+          niveau: quizMeta?.niveau || '',
+          message: feedbackMsg.trim()
+        }
       });
       setFeedbackSent(true);
     } catch (e) {
@@ -343,9 +371,9 @@ export default function QuizSession() {
     const myNote = myEntry ? ((myEntry.score / myEntry.total) * 20).toFixed(2) : ((score / questions.length) * 20).toFixed(2);
     const participation = leaderboard.length;
     return (
-      <div className="min-h-screen bg-gray-50 py-10 px-4">
+      <div className="min-h-screen bg-slate-950 py-10 px-4">
         <div className="max-w-3xl mx-auto">
-          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl p-8 text-center mb-5">
+          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl p-8 text-center mb-5 shadow-lg shadow-blue-600/20">
             <h1 className="text-2xl font-black mb-1">Epreuve terminee</h1>
             <p className="opacity-80 mb-4 text-sm">{safeName}</p>
             <div className="grid grid-cols-3 gap-4">
@@ -366,48 +394,63 @@ export default function QuizSession() {
           </div>
 
           <div className="flex gap-3 mb-5">
-            <Link to={`/review/${quizId}`} className="flex-1 bg-indigo-600 text-white py-3 rounded-xl font-bold text-center hover:bg-indigo-700 transition shadow text-sm">Relire ma copie</Link>
-            <Link to="/schedule" className="flex-1 bg-white border-2 border-gray-100 text-gray-700 py-3 rounded-xl font-bold text-center hover:border-blue-300 transition shadow-sm text-sm">Emploi du temps</Link>
+            <Link to={`/review/${quizId}`} className="flex-1 inline-flex items-center justify-center gap-2 bg-blue-600 text-white py-3 rounded-xl font-bold text-center hover:bg-blue-500 transition shadow text-sm">
+              <Icon name="eye" size={15} />
+              Relire ma copie
+            </Link>
+            <Link to="/schedule" className="flex-1 inline-flex items-center justify-center gap-2 bg-slate-900 border border-slate-700 text-slate-200 py-3 rounded-xl font-bold text-center hover:bg-slate-800 hover:border-slate-600 transition text-sm">
+              <Icon name="calendar" size={15} />
+              Emploi du temps
+            </Link>
           </div>
 
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-5">
-            <h2 className="text-base font-bold text-gray-700 mb-3">Laisser un message a l'administrateur</h2>
+          <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6 mb-5">
+            <h2 className="text-base font-bold text-slate-200 mb-3 flex items-center gap-2">
+              <Icon name="chat" size={16} className="text-blue-400" />
+              Laisser un message a l'administrateur
+            </h2>
             {feedbackSent ? (
-              <div className="text-green-600 font-semibold text-sm bg-green-50 border border-green-200 rounded-lg p-3">Message envoye avec succes.</div>
+              <div className="text-emerald-400 font-semibold text-sm bg-emerald-950/60 border border-emerald-800 rounded-lg p-3">Message envoye avec succes.</div>
             ) : (
               <div className="flex gap-2">
-                <textarea className="flex-1 border-2 border-gray-100 rounded-lg p-3 text-sm outline-none focus:border-blue-400 transition resize-none" rows={3} placeholder="Appreciations, suggestions..." value={feedbackMsg} onChange={e => setFeedbackMsg(e.target.value)} />
-                <button onClick={sendFeedback} disabled={!feedbackMsg.trim()} className="bg-blue-600 text-white px-4 py-2 rounded-xl font-bold text-sm hover:bg-blue-700 transition disabled:opacity-50 self-end">Envoyer</button>
+                <textarea className="flex-1 border border-slate-800 bg-slate-950 text-slate-200 placeholder:text-slate-600 rounded-lg p-3 text-sm outline-none focus:border-blue-600 transition resize-none" rows={3} placeholder="Appreciations, suggestions..." value={feedbackMsg} onChange={e => setFeedbackMsg(e.target.value)} />
+                <button onClick={sendFeedback} disabled={!feedbackMsg.trim()} className="bg-blue-600 text-white px-4 py-2 rounded-xl font-bold text-sm hover:bg-blue-500 transition disabled:opacity-50 self-end inline-flex items-center gap-1.5">
+                  <Icon name="send" size={14} />
+                  Envoyer
+                </button>
               </div>
             )}
           </div>
 
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-            <div className="flex items-center justify-between mb-4 border-b pb-3">
-              <h2 className="text-lg font-bold text-gray-800">Classement de la session</h2>
-              <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-bold">{participation} participants</span>
+          <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6">
+            <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-3">
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                <Icon name="trophy" size={18} className="text-amber-400" />
+                Classement de la session
+              </h2>
+              <span className="text-xs bg-blue-600/20 text-blue-300 px-2 py-0.5 rounded-full font-bold">{participation} participants</span>
             </div>
             <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
               {leaderboard.map((entry, index) => {
                 const isMe = entry.name === safeName;
                 const entryNote = entry.total ? ((entry.score / entry.total) * 20).toFixed(1) : '—';
                 return (
-                  <div key={index} className={`flex justify-between items-center p-3 rounded-xl border-2 ${isMe ? 'bg-blue-50 border-blue-400' : 'bg-gray-50 border-gray-100'}`}>
+                  <div key={index} className={`flex justify-between items-center p-3 rounded-xl border ${isMe ? 'bg-blue-600/15 border-blue-600' : 'bg-slate-950 border-slate-800'}`}>
                     <div className="flex items-center gap-3">
-                      <span className={`font-black text-lg w-7 text-center ${index === 0 ? 'text-yellow-500' : index === 1 ? 'text-slate-400' : index === 2 ? 'text-amber-600' : 'text-gray-400'}`}>#{index + 1}</span>
+                      <span className={`font-black text-lg w-7 text-center ${index === 0 ? 'text-yellow-400' : index === 1 ? 'text-slate-300' : index === 2 ? 'text-amber-500' : 'text-slate-500'}`}>#{index + 1}</span>
                       <div>
-                        <span className="font-bold text-gray-700 text-sm">{entry.name}</span>
+                        <span className="font-bold text-slate-200 text-sm">{entry.name}</span>
                         {isMe && <span className="ml-2 text-xs bg-blue-600 text-white px-1.5 py-0.5 rounded-full">Moi</span>}
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="font-extrabold text-blue-600 text-sm">{entryNote}/20</div>
-                      <div className="text-xs text-gray-400">{entry.score}/{entry.total}</div>
+                      <div className="font-extrabold text-blue-400 text-sm">{entryNote}/20</div>
+                      <div className="text-xs text-slate-500">{entry.score}/{entry.total}</div>
                     </div>
                   </div>
                 );
               })}
-              {leaderboard.length === 0 && <p className="text-gray-400 text-sm text-center py-4">En attente des resultats...</p>}
+              {leaderboard.length === 0 && <p className="text-slate-500 text-sm text-center py-4">En attente des resultats...</p>}
             </div>
           </div>
         </div>
@@ -416,11 +459,17 @@ export default function QuizSession() {
   }
 
   if (questions.length === 0) return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6">
-      <div className="bg-white p-8 rounded-xl shadow-lg text-center max-w-md border border-orange-200">
-        <h2 className="text-2xl font-bold mt-4 text-orange-600">Epreuve non disponible</h2>
-        <p className="text-gray-500 mt-2">Le quiz n'est pas encore configure.</p>
-        <Link to="/" className="mt-4 inline-block text-blue-600 hover:underline">Retour</Link>
+    <div className="min-h-screen flex items-center justify-center bg-slate-950 p-6">
+      <div className="bg-slate-900 p-8 rounded-2xl border border-slate-800 text-center max-w-md">
+        <div className="w-12 h-12 mx-auto rounded-2xl bg-amber-500/15 border border-amber-600/30 text-amber-400 flex items-center justify-center mb-4">
+          <Icon name="alert" size={22} />
+        </div>
+        <h2 className="text-2xl font-bold text-white">Epreuve non disponible</h2>
+        <p className="text-slate-400 mt-2 text-sm">Le quiz n'est pas encore configure.</p>
+        <Link to="/dashboard" className="mt-4 inline-flex items-center gap-1.5 text-blue-400 hover:text-blue-300 font-bold text-sm">
+          <Icon name="arrow-left" size={14} />
+          Retour
+        </Link>
       </div>
     </div>
   );
@@ -434,35 +483,35 @@ export default function QuizSession() {
   const shuffledOptions = seededShuffle(validOptions, safeName + '_' + currentIndex);
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-slate-950 flex flex-col">
       {/* Top bar */}
-      <div className="bg-white border-b shadow-sm px-4 py-3 flex items-center justify-between gap-4">
+      <div className="bg-slate-900 border-b border-slate-800 px-4 py-3 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2.5 py-1 rounded-full">{quizId}</span>
-          <span className="text-gray-500 text-sm font-semibold">{safeName}</span>
+          <span className="bg-blue-600/20 text-blue-300 text-xs font-bold px-2.5 py-1 rounded-full">{quizId}</span>
+          <span className="text-slate-300 text-sm font-semibold">{safeName}</span>
         </div>
         <div className="flex items-center gap-3">
-          <span className="flex items-center gap-1.5 text-xs text-gray-500 bg-gray-100 px-2.5 py-1 rounded-full">
-            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+          <span className="flex items-center gap-1.5 text-xs text-slate-400 bg-slate-800 px-2.5 py-1 rounded-full">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
             {participants} en cours
           </span>
-          <span className="bg-blue-50 text-blue-600 text-xs font-bold px-2.5 py-1 rounded-full">{currentIndex + 1} / {questions.length}</span>
+          <span className="bg-blue-600/20 text-blue-300 text-xs font-bold px-2.5 py-1 rounded-full">{currentIndex + 1} / {questions.length}</span>
         </div>
       </div>
 
       {/* Progress bar */}
-      <div className="h-1 bg-gray-200">
+      <div className="h-1 bg-slate-800">
         <div className="h-1 bg-blue-600 transition-all duration-500" style={{ width: `${progress}%` }}></div>
       </div>
 
       {/* Timer */}
       {quizMeta?.timePerQuestion > 0 && (
-        <div className="bg-white px-4 py-2 border-b">
+        <div className="bg-slate-900 px-4 py-2 border-b border-slate-800">
           <div className="flex items-center justify-between mb-1">
-            <span className="text-xs text-gray-500 font-semibold">Temps restant</span>
-            <span className={`text-sm font-black font-mono ${timerPct <= 20 ? 'text-red-600 animate-pulse' : 'text-gray-700'}`}>{fmtMs(timeLeft)}</span>
+            <span className="text-xs text-slate-400 font-semibold">Temps restant</span>
+            <span className={`text-sm font-black font-mono ${timerPct <= 20 ? 'text-red-400 animate-pulse' : 'text-slate-200'}`}>{fmtMs(timeLeft)}</span>
           </div>
-          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+          <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
             <div className={`h-2 rounded-full transition-all duration-500 ${timerColor}`} style={{ width: `${timerPct}%` }}></div>
           </div>
         </div>
@@ -470,12 +519,12 @@ export default function QuizSession() {
 
       {/* Question */}
       <div className="flex-1 flex flex-col items-center pt-8 px-4 pb-20">
-        <div className="w-full max-w-3xl bg-white p-8 rounded-2xl shadow-lg border border-gray-100">
-          <h2 className="text-xl font-bold mb-8 text-gray-800 leading-relaxed">{q.Question}</h2>
+        <div className="w-full max-w-3xl bg-slate-900 p-8 rounded-2xl border border-slate-800 shadow-xl shadow-black/30">
+          <h2 className="text-xl font-bold mb-8 text-slate-100 leading-relaxed">{q.Question}</h2>
 
           {/* Feedback banner */}
           {feedbackState && (
-            <div className={`mb-4 p-3 rounded-xl text-sm font-bold text-center ${feedbackState === 'correct' ? 'bg-green-100 text-green-800 border-2 border-green-400' : 'bg-red-100 text-red-800 border-2 border-red-400'}`}>
+            <div className={`mb-4 p-3 rounded-xl text-sm font-bold text-center ${feedbackState === 'correct' ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-600' : 'bg-red-950/60 text-red-300 border border-red-600'}`}>
               {feedbackState === 'correct' ? 'Bonne reponse !' : `Mauvaise reponse — La bonne reponse etait : ${correctText}`}
             </div>
           )}
@@ -486,19 +535,19 @@ export default function QuizSession() {
               const clean = opt.trim();
               const isCorrect = clean === (q.ReponseCorrecte || '').trim();
 
-              let cls = 'w-full text-left p-4 border-2 rounded-xl transition font-semibold text-sm ';
+              let cls = 'w-full text-left p-4 border rounded-xl transition font-semibold text-sm ';
               if (feedbackState === 'correct' && isSelected) {
-                cls += 'bg-green-100 border-green-500 text-green-900';
+                cls += 'bg-emerald-950/60 border-emerald-500 text-emerald-300';
               } else if (feedbackState === 'wrong' && isSelected) {
-                cls += 'bg-red-100 border-red-500 text-red-900';
+                cls += 'bg-red-950/60 border-red-500 text-red-300';
               } else if (feedbackState === 'wrong' && isCorrect) {
-                cls += 'bg-green-100 border-green-500 text-green-900';
+                cls += 'bg-emerald-950/60 border-emerald-500 text-emerald-300';
               } else if (isSelected) {
-                cls += 'bg-blue-50 border-blue-500 text-blue-900 shadow-sm';
+                cls += 'bg-blue-600/20 border-blue-500 text-blue-100';
               } else if (feedbackState) {
-                cls += 'bg-gray-50 border-gray-100 text-gray-400';
+                cls += 'bg-slate-950 border-slate-800 text-slate-500';
               } else {
-                cls += 'border-gray-100 text-gray-700 hover:bg-gray-50 hover:border-gray-300 cursor-pointer';
+                cls += 'border-slate-800 bg-slate-950 text-slate-200 hover:bg-slate-800 hover:border-blue-600 cursor-pointer';
               }
 
               return (
@@ -513,7 +562,7 @@ export default function QuizSession() {
             <button
               onClick={() => handleValidate(false)}
               disabled={!selectedOption || !!feedbackState}
-              className="bg-blue-600 text-white px-8 py-3 rounded-xl font-bold shadow-lg hover:bg-blue-700 transition disabled:opacity-40 disabled:shadow-none">
+              className="bg-blue-600 text-white px-8 py-3 rounded-xl font-bold shadow-lg shadow-blue-600/25 hover:bg-blue-500 transition disabled:opacity-40 disabled:shadow-none">
               Valider et Suivant
             </button>
           </div>
