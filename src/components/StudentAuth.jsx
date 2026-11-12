@@ -162,8 +162,8 @@ export default function StudentAuth({ defaultTab = 'login' }) {
         <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-blue-600/20 border border-blue-500/30 text-blue-400 mb-3 shadow-lg shadow-blue-500/10">
           <Icon name="graduation" size={32} />
         </div>
-        <h1 className="text-3xl font-black text-white tracking-tight">Portail QCM — UY1</h1>
-        <p className="text-slate-400 text-sm mt-1">UY1 • Téléévaluation 2026</p>
+        <h1 className="text-3xl font-black text-white tracking-tight">QCM App</h1>
+        <p className="text-slate-400 text-sm mt-1">Plateforme d'évaluation en ligne • 2026</p>
       </div>
 
       {/* Conteneur Carte */}
@@ -222,7 +222,7 @@ export default function StudentAuth({ defaultTab = 'login' }) {
               <input
                 type="email"
                 required
-                placeholder="etudiant@uy1.cm"
+                placeholder="etudiant@exemple.com"
                 className={inputClass}
                 value={loginEmail}
                 onChange={e => setLoginEmail(e.target.value)}

@@ -1,5 +1,5 @@
 /**
- * Serveur API Node.js / Express — Portail QCM UY1
+ * Serveur API Node.js / Express — QCM App
  *
  * Remplace Firebase Firestore : toute la logique de données est désormais
  * gérée ici (SQLite) et exposée via une API REST sécurisée par jetons.
@@ -37,6 +37,29 @@ app.use('/api/feedback', feedbackRoutes);
 app.use('/api/ues', uesRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/settings', settingsRoutes);
+
+/**
+ * Statistiques publiques de la plateforme (page d'accueil).
+ * Aucune donnée personnelle : uniquement des compteurs agrégés.
+ */
+app.get('/api/stats', (_req, res) => {
+  try {
+    const students = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
+    const quizzes = db.prepare('SELECT COUNT(*) AS c FROM quizzes').get().c;
+    const ues = db.prepare('SELECT COUNT(*) AS c FROM ues').get().c;
+    const upcoming = db.prepare(
+      'SELECT COUNT(*) AS c FROM quizzes WHERE launchTime IS NOT NULL AND launchTime >= ?'
+    ).get(Date.now()).c;
+    const filieres = db.prepare(
+      "SELECT COUNT(DISTINCT filiere) AS c FROM ues WHERE filiere IS NOT NULL AND filiere <> ''"
+    ).get().c;
+
+    res.json({ students, quizzes, ues, upcoming, filieres });
+  } catch (err) {
+    console.error('[api] Erreur statistiques :', err);
+    res.status(500).json({ error: 'Impossible de charger les statistiques.' });
+  }
+});
 
 // 404 propre pour toute route API inconnue
 app.use('/api', (_req, res) => {
@@ -83,7 +106,7 @@ if (!process.env.ADMIN_PASSWORD) {
 }
 
 app.listen(PORT, () => {
-  console.log(`[api] Serveur QCM UY1 démarré sur http://localhost:${PORT}`);
+  console.log(`[api] Serveur QCM App démarré sur http://localhost:${PORT}`);
   if (fs.existsSync(distDir)) {
     console.log(`[api] Frontend de production servi depuis ${distDir}`);
   }

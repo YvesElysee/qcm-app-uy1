@@ -25,6 +25,7 @@ export default function ReviewSession() {
     const [score, setScore] = useState(null);
     const [total, setTotal] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [quizMeta, setQuizMeta] = useState(null);
 
     // Tuteur IA (drawer) — contexte de la question actuellement discutée
     const [aiOpen, setAiOpen] = useState(false);
@@ -37,11 +38,14 @@ export default function ReviewSession() {
     useEffect(() => {
         const load = async () => {
             // Questions du QCM + mes résultats pour cette UE (identité via jeton serveur)
-            const [qData, rData] = await Promise.all([
+            const [qData, rData, metaData] = await Promise.all([
                 api(`/quizzes/${quizId}/questions`),
                 api(`/results/mine?ue=${encodeURIComponent(quizId)}`, { auth: 'student' })
-                    .catch(() => ({ results: [] }))
+                    .catch(() => ({ results: [] })),
+                api(`/quizzes/${encodeURIComponent(quizId)}`).catch(() => null)
             ]);
+
+            setQuizMeta(metaData?.quiz || null);
 
             const raw = qData.questions.map((data) => {
                 const q = { ...data };
@@ -166,6 +170,9 @@ export default function ReviewSession() {
                 {/* En-tête résumé */}
                 <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl p-8 my-6 text-center shadow-lg shadow-blue-600/20">
                     <h1 className="text-2xl font-black mb-1">Correction — {quizId}</h1>
+                    {quizMeta?.ueLabel && quizMeta.ueLabel !== quizId && (
+                        <p className="text-sm font-semibold opacity-90">{quizMeta.ueLabel}</p>
+                    )}
                     <p className="opacity-80 mb-6 text-sm">{safeName}</p>
                     <div className="flex justify-center gap-8">
                         <div className="bg-white/10 p-4 rounded-xl min-w-24">

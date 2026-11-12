@@ -13,20 +13,49 @@ const router = Router();
 const PRESENCE_WINDOW_MS = 20 * 1000; // un participant est "en cours" s'il a battu dans les 20 dernières secondes
 
 /**
+ * Garantit que l'UE de l'épreuve figure dans le catalogue (`ues`).
+ * Sans cette ligne, l'étudiant ne voit pas la matière sur son tableau de bord
+ * et l'épreuve reste introuvable même lorsqu'elle est programmée.
+ */
+function ensureUeFromQuiz({ code, label, filiere, niveau }) {
+  const cleanCode = String(code || '').trim().toUpperCase();
+  if (!cleanCode) return;
+  const existing = db.prepare('SELECT * FROM ues WHERE id = ?').get(cleanCode);
+  const cleanLabel = String(label || '').trim() || existing?.label || cleanCode;
+  const cleanFiliere = filiere || existing?.filiere || null;
+  const cleanNiveau = niveau || existing?.niveau || null;
+  // Filière et niveau sont indispensables au filtrage côté étudiant
+  if (!cleanFiliere || !cleanNiveau) return;
+
+  db.prepare(`
+    INSERT INTO ues (id, code, label, filiere, niveau)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      code = excluded.code, label = excluded.label,
+      filiere = excluded.filiere, niveau = excluded.niveau
+  `).run(cleanCode, cleanCode, cleanLabel, cleanFiliere, cleanNiveau);
+}
+
+/**
  * Liste des QCM (public). Filtres optionnels filière / niveau, tri launchTime asc|desc.
  */
 router.get('/', (req, res) => {
   const { filiere, niveau, sort } = req.query;
   const dir = sort === 'desc' ? 'DESC' : 'ASC';
 
-  let sql = 'SELECT * FROM quizzes';
+  // On joint le catalogue des UE pour exposer l'intitulé de chaque matière
+  let sql = `
+    SELECT q.*, u.label AS ueLabel
+    FROM quizzes q
+    LEFT JOIN ues u ON u.code = q.ue
+  `;
   const where = [];
   const params = [];
-  if (filiere) { where.push('filiere = ?'); params.push(filiere); }
-  if (niveau) { where.push('niveau = ?'); params.push(niveau); }
+  if (filiere) { where.push('q.filiere = ?'); params.push(filiere); }
+  if (niveau) { where.push('q.niveau = ?'); params.push(niveau); }
   if (where.length) sql += ' WHERE ' + where.join(' AND ');
   // Les QCM sans date de programmation sont renvoyés en dernier
-  sql += ` ORDER BY (launchTime IS NULL), launchTime ${dir}, id ${dir}`;
+  sql += ` ORDER BY (q.launchTime IS NULL), q.launchTime ${dir}, q.id ${dir}`;
 
   const quizzes = db.prepare(sql).all(...params);
   res.json({ quizzes });
@@ -36,7 +65,12 @@ router.get('/', (req, res) => {
  * Métadonnées d'un QCM (public) — 404 si introuvable
  */
 router.get('/:id', (req, res) => {
-  const quiz = db.prepare('SELECT * FROM quizzes WHERE id = ?').get(req.params.id);
+  const quiz = db.prepare(`
+    SELECT q.*, u.label AS ueLabel
+    FROM quizzes q
+    LEFT JOIN ues u ON u.code = q.ue
+    WHERE q.id = ?
+  `).get(req.params.id);
   if (!quiz) {
     return res.status(404).json({ error: 'Quiz introuvable.' });
   }
@@ -60,7 +94,7 @@ router.get('/:id/questions', (req, res) => {
  * Programmer / mettre à jour un QCM (fusion des champs, comme setDoc merge:true)
  */
 router.post('/:id', requireAdmin, (req, res) => {
-  const { filiere, niveau, semestre, ue, timePerQuestion, launchTime, endTime } = req.body || {};
+  const { filiere, niveau, semestre, ue, ueLabel, label, timePerQuestion, launchTime, endTime } = req.body || {};
   const id = req.params.id;
 
   const existing = db.prepare('SELECT * FROM quizzes WHERE id = ?').get(id) || {};
@@ -86,6 +120,14 @@ router.post('/:id', requireAdmin, (req, res) => {
       timePerQuestion = excluded.timePerQuestion, launchTime = excluded.launchTime,
       endTime = excluded.endTime, updatedAt = excluded.updatedAt
   `).run({ id, ...merged });
+
+  // L'épreuve doit toujours être rattachée à une UE visible par la filière/niveau
+  ensureUeFromQuiz({
+    code: merged.ue,
+    label: ueLabel ?? label,
+    filiere: merged.filiere,
+    niveau: merged.niveau
+  });
 
   res.json({ success: true, quiz: db.prepare('SELECT * FROM quizzes WHERE id = ?').get(id) });
 });
@@ -113,7 +155,7 @@ router.delete('/:id', requireAdmin, (req, res) => {
  */
 router.post('/:id/questions', requireAdmin, (req, res) => {
   const id = req.params.id;
-  const { questions, filiere, niveau, semestre, timePerQuestion } = req.body || {};
+  const { questions, filiere, niveau, semestre, timePerQuestion, ueLabel, label } = req.body || {};
 
   if (!Array.isArray(questions) || questions.length === 0) {
     return res.status(400).json({ error: 'Aucune question valide à importer.' });
@@ -168,6 +210,14 @@ router.post('/:id/questions', requireAdmin, (req, res) => {
     });
   });
   replaceAll(questions);
+
+  // Le catalogue UE est aligné sur l'épreuve importée (même filière/niveau)
+  ensureUeFromQuiz({
+    code: id,
+    label: ueLabel ?? label,
+    filiere: merged.filiere,
+    niveau: merged.niveau
+  });
 
   res.json({ success: true, count: questions.length });
 });

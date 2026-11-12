@@ -56,13 +56,13 @@ export async function sendResetCodeEmail({ email, code, name }) {
   const htmlContent = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
       <div style="text-align: center; margin-bottom: 24px;">
-        <h2 style="color: #2563eb; margin: 0; font-size: 24px;">Portail QCM — UY1</h2>
+        <h2 style="color: #2563eb; margin: 0; font-size: 24px;">QCM App</h2>
         <p style="color: #64748b; font-size: 14px; margin-top: 4px;">Récupération de mot de passe</p>
       </div>
       <div style="background-color: #f8fafc; border-radius: 12px; padding: 20px; margin-bottom: 20px;">
         <p style="color: #334155; font-size: 15px; margin-top: 0;">Bonjour <strong>${name || 'Étudiant'}</strong>,</p>
         <p style="color: #334155; font-size: 14px; line-height: 1.5;">
-          Une demande de réinitialisation de mot de passe a été initiée pour votre compte sur la plateforme de QCM UY1.
+          Une demande de réinitialisation de mot de passe a été initiée pour votre compte sur la plateforme QCM App.
         </p>
         <div style="text-align: center; margin: 24px 0;">
           <span style="display: inline-block; font-size: 32px; font-weight: 800; letter-spacing: 6px; color: #1e40af; background: #dbeafe; padding: 12px 28px; border-radius: 10px; border: 2px dashed #93c5fd;">
@@ -78,16 +78,16 @@ export async function sendResetCodeEmail({ email, code, name }) {
       </p>
       <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
       <p style="color: #cbd5e1; font-size: 11px; text-align: center; margin: 0;">
-        UY1 — Plateforme Téléévaluation 2026
+        QCM App — Plateforme d'évaluation 2026
       </p>
     </div>
   `;
 
   try {
     await transporter.sendMail({
-      from: `"Portail QCM UY1" <${user}>`,
+      from: `"QCM App" <${user}>`,
       to: email,
-      subject: `Code de récupération : ${code} — Portail QCM UY1`,
+      subject: `Code de récupération : ${code} — QCM App`,
       text: `Bonjour, votre code de réinitialisation de mot de passe est : ${code}. Valable 15 minutes.`,
       html: htmlContent
     });
@@ -115,14 +115,14 @@ export async function testSmtpConnection({ smtpEmail, smtpPassword, testRecipien
 
     // Envoi d'un email de test
     await transporter.sendMail({
-      from: `"Portail QCM UY1" <${smtpEmail}>`,
+      from: `"QCM App" <${smtpEmail}>`,
       to: testRecipient || smtpEmail,
-      subject: 'Test de configuration SMTP Google — Portail QCM UY1',
+      subject: 'Test de configuration SMTP Google — QCM App',
       text: 'Félicitations ! Votre configuration SMTP Google avec mot de passe d\'application à 16 caractères fonctionne correctement.',
       html: `
         <div style="font-family: sans-serif; padding: 20px; border: 1px solid #22c55e; border-radius: 8px;">
           <h2 style="color: #16a34a;">Test SMTP Google Réussi !</h2>
-          <p>Le service de récupération de mot de passe est opérationnel pour le Portail QCM UY1.</p>
+          <p>Le service de récupération de mot de passe est opérationnel pour QCM App.</p>
           <p><strong>Adresse expéditeur :</strong> ${smtpEmail}</p>
           <p><strong>Destinataire :</strong> ${testRecipient || smtpEmail}</p>
         </div>

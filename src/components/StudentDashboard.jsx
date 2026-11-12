@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { api } from '../services/api';
 import { getCurrentUser } from '../services/authService';
@@ -38,7 +38,9 @@ export default function StudentDashboard() {
   // Données
   const [availableUes, setAvailableUes] = useState([]);
   const [allQuizzes, setAllQuizzes] = useState([]);
+  const [otherLevelQuizzes, setOtherLevelQuizzes] = useState([]);
   const [myResults, setMyResults] = useState([]);
+  const [nowTs, setNowTs] = useState(0);
   const [loading, setLoading] = useState(true);
 
   // Modales
@@ -53,7 +55,7 @@ export default function StudentDashboard() {
   );
 
   // Charger les données
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     if (!currentUser) return;
     setLoading(true);
 
@@ -63,12 +65,17 @@ export default function StudentDashboard() {
       // 3. Charger STRICTEMENT les résultats de CET utilisateur (filtrés par le serveur)
       const [uesData, quizzesData, resultsData] = await Promise.all([
         api(`/ues?filiere=${encodeURIComponent(filiere)}&niveau=${encodeURIComponent(selectedNiveau)}`),
-        api(`/quizzes?filiere=${encodeURIComponent(filiere)}&niveau=${encodeURIComponent(selectedNiveau)}&sort=asc`),
+        api(`/quizzes?filiere=${encodeURIComponent(filiere)}&sort=asc`),
         api('/results/mine', { auth: 'student' }).catch(() => ({ results: [] }))
       ]);
 
       setAvailableUes(uesData.ues);
-      setAllQuizzes(quizzesData.quizzes);
+      // Épreuves du niveau actif + celles des autres niveaux (simplement signalées)
+      setAllQuizzes(quizzesData.quizzes.filter(q => q.niveau === selectedNiveau));
+      setOtherLevelQuizzes(
+        quizzesData.quizzes.filter(q => q.niveau && q.niveau !== selectedNiveau && q.launchTime)
+      );
+      setNowTs(Date.now());
 
       // Historique personnel exclusif : seuls les résultats par email OU nom
       const userEmail = (currentUser.email || '').toLowerCase();
@@ -85,11 +92,12 @@ export default function StudentDashboard() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentUser, filiere, selectedNiveau]);
 
   useEffect(() => {
-    loadData();
-  }, [selectedNiveau, currentUser?.email]);
+    const load = async () => { await loadData(); };
+    load();
+  }, [loadData]);
 
   const requestNotificationPermission = async () => {
     if (typeof Notification === 'undefined') {
@@ -99,7 +107,7 @@ export default function StudentDashboard() {
     const perm = await Notification.requestPermission();
     setNotifPermission(perm);
     if (perm === 'granted') {
-      new Notification("Portail QCM UY1", {
+      new Notification("QCM App", {
         body: `Rappels activés pour la filière ${filiere} !`,
         icon: '/favicon.ico'
       });
@@ -107,26 +115,36 @@ export default function StudentDashboard() {
   };
 
   // ── Calcul des sous-groupes de QCM ──
-  const now = Date.now();
+  const now = nowTs;
   const passedQuizIds = new Set(myResults.map(r => r.ue));
 
+  // Une seule épreuve par UE : on relie chaque matière à son QCM programmé
+  const quizByUe = new Map();
+  allQuizzes.forEach(q => {
+    const key = q.ue || q.id;
+    if (!quizByUe.has(key)) quizByUe.set(key, q);
+  });
+
+  // Toutes les épreuves programmées (date renseignée), triées chronologiquement
+  const scheduledQuizzes = allQuizzes
+    .filter(q => q.launchTime)
+    .sort((a, b) => a.launchTime - b.launchTime);
+
   // 1. Quizz à venir (launchTime > now)
-  const upcomingQuizzes = allQuizzes.filter(q => q.launchTime && q.launchTime > now);
+  const upcomingQuizzes = scheduledQuizzes.filter(q => q.launchTime > now);
 
-  // 2. Quizz en cours (launchTime <= now <= endTime ou launchTime <= now et pas encore expiré)
-  const ongoingQuizzes = allQuizzes.filter(q => {
-    if (!q.launchTime) return false;
-    if (q.launchTime > now) return false;
-    if (q.endTime && q.endTime < now) return false;
-    return true;
-  });
-
-  // 3. Évaluations MANQUÉES (Point 2) :
-  // Le quiz a été lancé dans le passé (launchTime <= now), et l'étudiant NE l'a PAS encore passé !
-  const missedQuizzes = allQuizzes.filter(q => {
-    const isPast = q.launchTime && (q.endTime ? q.endTime < now : q.launchTime < now);
-    return isPast && !passedQuizIds.has(q.id);
-  });
+  // État d'une épreuve pour l'affichage de la carte UE
+  const getQuizState = (ueCode) => {
+    const quiz = quizByUe.get(ueCode);
+    if (!quiz) return { quiz: null, state: 'none' };
+    if (!quiz.questionCount) return { quiz, state: 'draft' };
+    if (!quiz.launchTime) return { quiz, state: 'draft' };
+    if (quiz.launchTime > now) return { quiz, state: 'upcoming' };
+    if (quiz.endTime && quiz.endTime < now) {
+      return { quiz, state: passedQuizIds.has(quiz.id) || passedQuizIds.has(ueCode) ? 'done' : 'missed' };
+    }
+    return { quiz, state: 'ongoing' };
+  };
 
   // Le prochain quiz immédiat pour le compte à rebours
   const nextQuiz = upcomingQuizzes[0];
@@ -284,77 +302,144 @@ export default function StudentDashboard() {
           </div>
         )}
 
-        {/* ── Quizz EN COURS MAINTENANT ── */}
-        {ongoingQuizzes.length > 0 && (
-          <div className="bg-emerald-950/40 border border-emerald-500/30 rounded-2xl p-5 space-y-3">
-            <h3 className="text-sm font-black text-emerald-400 uppercase tracking-wider flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
-              Évaluations En Cours Actuellement ({ongoingQuizzes.length})
-            </h3>
+        {/* ── Épreuves programmées (chaque épreuve est reliée à son UE) ── */}
+        {scheduledQuizzes.length > 0 && (
+          <div className="bg-slate-800/50 border border-slate-700/60 rounded-3xl p-6 space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <h3 className="text-lg font-black text-white flex items-center gap-2">
+                  <Icon name="calendar" size={18} className="text-blue-400" />
+                  Épreuves programmées ({scheduledQuizzes.length})
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {filiere} • {selectedNiveau} — rejoignez l'épreuve au moment prévu ou rattrapez celles que vous avez manquées.
+                </p>
+              </div>
+              <Link
+                to="/schedule"
+                className="text-xs font-bold text-blue-300 hover:text-white bg-blue-950/60 border border-blue-800 px-3 py-2 rounded-xl transition"
+              >
+                Voir l'emploi du temps
+              </Link>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {ongoingQuizzes.map(q => (
-                <div key={q.id} className="bg-slate-800/80 border border-emerald-500/30 rounded-xl p-4 flex items-center justify-between gap-3">
-                  <div>
-                    <h4 className="font-black text-white text-base">{q.ue || q.id}</h4>
-                    <p className="text-xs text-emerald-300">Session ouverte • {q.niveau}</p>
-                    {q.endTime && (
-                      <p className="text-[11px] text-slate-400">Fin : {formatDate(q.endTime)}</p>
+              {scheduledQuizzes.map(q => {
+                const ueCode = q.ue || q.id;
+                const isPassed = passedQuizIds.has(q.id) || passedQuizIds.has(ueCode);
+                const notReady = !q.questionCount;
+                const isUpcoming = q.launchTime > now;
+                const isOpen = !isUpcoming && (!q.endTime || q.endTime >= now);
+                const isMissed = !isPassed && !isUpcoming && !isOpen;
+
+                const badge = notReady
+                  ? { label: 'En préparation', cls: 'bg-slate-600/40 text-slate-300' }
+                  : isUpcoming
+                  ? { label: 'À venir', cls: 'bg-amber-500/20 text-amber-300' }
+                  : isOpen
+                  ? { label: 'En cours', cls: 'bg-emerald-500/20 text-emerald-300' }
+                  : isPassed
+                  ? { label: 'Passée', cls: 'bg-slate-600/40 text-slate-300' }
+                  : { label: 'Manquée', cls: 'bg-red-500/20 text-red-300' };
+
+                return (
+                  <div
+                    key={q.id}
+                    className={`bg-slate-900/80 border rounded-2xl p-4 flex flex-col justify-between gap-3 ${
+                      isOpen ? 'border-emerald-500/40' : isMissed ? 'border-red-500/30' : 'border-slate-700/80'
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${badge.cls}`}>
+                          {badge.label}
+                        </span>
+                        <span className="text-xs text-slate-400">{q.filiere} — {q.niveau}</span>
+                      </div>
+                      <h4 className="font-black text-white text-base">{ueCode}</h4>
+                      {q.ueLabel && q.ueLabel !== ueCode && (
+                        <p className="text-xs text-slate-300 mt-0.5">{q.ueLabel}</p>
+                      )}
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        Début : {formatDate(q.launchTime)}
+                        {q.endTime ? ` • Fin : ${formatDate(q.endTime)}` : ''}
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        {q.questionCount || 0} question(s)
+                        {q.timePerQuestion ? ` • ${q.timePerQuestion}s / question` : ''}
+                      </p>
+                    </div>
+
+                    {notReady ? (
+                      <div className="w-full text-center bg-slate-800 border border-slate-700 text-slate-400 text-xs font-bold py-2.5 rounded-xl">
+                        Questions en préparation
+                      </div>
+                    ) : isUpcoming ? (
+                      <div className="w-full text-center bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-bold py-2.5 rounded-xl">
+                        Ouverture le {formatDate(q.launchTime)}
+                      </div>
+                    ) : isOpen ? (
+                      <button
+                        onClick={() => handleStartQuiz(q.id, false)}
+                        className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-black py-2.5 rounded-xl transition shadow-lg shadow-emerald-500/20"
+                      >
+                        Rejoindre maintenant
+                      </button>
+                    ) : isPassed ? (
+                      <Link
+                        to={`/review/${ueCode}`}
+                        className="w-full text-center bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-extrabold py-2.5 rounded-xl transition shadow-md shadow-indigo-600/20"
+                      >
+                        Relire ma copie
+                      </Link>
+                    ) : (
+                      <button
+                        onClick={() => handleStartQuiz(q.id, true)}
+                        className="w-full bg-red-600 hover:bg-red-500 text-white text-xs font-black py-2.5 rounded-xl transition shadow-lg shadow-red-600/30"
+                      >
+                        Rattraper l'épreuve
+                      </button>
                     )}
                   </div>
-                  <button
-                    onClick={() => handleStartQuiz(q.id, false)}
-                    className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-black px-4 py-2.5 rounded-xl transition shadow-lg shadow-emerald-500/20"
-                  >
-                    Rejoindre maintenant
-                  </button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
 
-        {/* ── Évaluations MANQUÉES & RATTRAPAGE DISPONIBLE (Point 2) ── */}
-        {missedQuizzes.length > 0 && (
-          <div className="bg-red-950/30 border border-red-500/30 rounded-2xl p-5 space-y-3">
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <h3 className="text-sm font-black text-red-400 uppercase tracking-wider flex items-center gap-2">
-                <Icon name="alert" size={16} />
-                Évaluations Manquées — Rattrapage Disponible ({missedQuizzes.length})
-              </h3>
-              <span className="text-[11px] text-red-300/80">
-                Mêmes questions et même temps imparti garantis
+        {/* ── Épreuves des autres niveaux de la même filière (information) ── */}
+        {otherLevelQuizzes.length > 0 && (
+          <div className="bg-slate-800/40 border border-slate-700/60 rounded-3xl p-5">
+            <div className="flex items-start gap-3">
+              <span className="w-9 h-9 rounded-xl bg-blue-500/15 text-blue-300 flex items-center justify-center shrink-0">
+                <Icon name="info" size={17} />
               </span>
-            </div>
-            <p className="text-xs text-slate-400">
-              Vous avez manqué ces évaluations programmées. Vous pouvez les rattraper à votre propre rythme avec les mêmes configurations strictes que l'épreuve officielle.
-            </p>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
-              {missedQuizzes.map(q => (
-                <div key={q.id} className="bg-slate-800/90 border border-red-500/20 rounded-xl p-4 flex items-center justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <span className="bg-red-500/20 text-red-300 text-[10px] font-black px-2 py-0.5 rounded-full">
-                        Rattrapage
-                      </span>
-                      <span className="text-xs text-slate-400">{q.filiere} — {q.niveau}</span>
-                    </div>
-                    <h4 className="font-black text-white text-base">{q.ue || q.id}</h4>
-                    <p className="text-[11px] text-slate-400">
-                      Épreuve officielle : {formatDate(q.launchTime)}
-                    </p>
-                    {q.timePerQuestion && (
-                      <p className="text-[11px] text-slate-400">{q.timePerQuestion}s par question</p>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => handleStartQuiz(q.id, true)}
-                    className="bg-red-600 hover:bg-red-500 text-white text-xs font-black px-4 py-2.5 rounded-xl transition shadow-lg shadow-red-600/30 shrink-0"
-                  >
-                    Rattraper l'épreuve
-                  </button>
+              <div className="min-w-0">
+                <h3 className="text-sm font-black text-white">
+                  Autres épreuves programmées en {filiere} ({otherLevelQuizzes.length})
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Vous consultez le niveau {selectedNiveau}. D'autres épreuves sont programmées dans les niveaux suivants :
+                </p>
+                <div className="flex flex-wrap gap-2 mt-2.5">
+                  {[...new Set(otherLevelQuizzes.map(q => q.niveau))]
+                    .sort((a, b) => a.localeCompare(b, 'fr'))
+                    .map(niv => {
+                      const count = otherLevelQuizzes.filter(q => q.niveau === niv).length;
+                      return (
+                        <button
+                          key={niv}
+                          onClick={() => setSelectedNiveau(niv)}
+                          className="inline-flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-blue-500/50 text-slate-200 text-xs font-bold px-3 py-1.5 rounded-xl transition"
+                        >
+                          <Icon name="graduation" size={13} className="text-blue-400" />
+                          Niveau {niv}
+                          <span className="text-slate-500">({count})</span>
+                        </button>
+                      );
+                    })}
                 </div>
-              ))}
+              </div>
             </div>
           </div>
         )}
@@ -385,28 +470,83 @@ export default function StudentDashboard() {
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-              {availableUes.map(ue => (
-                <div
-                  key={ue.id}
-                  className="bg-slate-900/70 hover:bg-slate-800 border border-slate-700/80 hover:border-blue-500/50 rounded-2xl p-4 transition duration-200 flex flex-col justify-between"
-                >
-                  <div>
-                    <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">
-                      {filiere} • {selectedNiveau}
-                    </span>
-                    <h4 className="font-black text-white text-base mt-1">{ue.id}</h4>
-                    <p className="text-xs text-slate-300 line-clamp-2 mt-0.5">
-                      {ue.label || ue.id}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => handleStartQuiz(ue.id, false)}
-                    className="mt-4 w-full bg-blue-600 hover:bg-blue-500 text-white text-xs font-extrabold py-2.5 rounded-xl transition shadow-md shadow-blue-600/20"
+              {availableUes.map(ue => {
+                const { quiz, state } = getQuizState(ue.id);
+                const passedResult = myResults.find(r => r.ue === ue.id);
+
+                const statusMeta = {
+                  none: { label: 'Non programmée', cls: 'bg-slate-600/40 text-slate-300' },
+                  draft: { label: 'Brouillon', cls: 'bg-slate-600/40 text-slate-300' },
+                  upcoming: { label: 'À venir', cls: 'bg-amber-500/20 text-amber-300' },
+                  ongoing: { label: 'En cours', cls: 'bg-emerald-500/20 text-emerald-300' },
+                  missed: { label: 'Manquée', cls: 'bg-red-500/20 text-red-300' },
+                  done: { label: 'Passée', cls: 'bg-indigo-500/20 text-indigo-300' }
+                }[state];
+
+                return (
+                  <div
+                    key={ue.id}
+                    className="bg-slate-900/70 hover:bg-slate-800 border border-slate-700/80 hover:border-blue-500/50 rounded-2xl p-4 transition duration-200 flex flex-col justify-between"
                   >
-                    Démarrer le test
-                  </button>
-                </div>
-              ))}
+                    <div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">
+                          {filiere} • {selectedNiveau}
+                        </span>
+                        <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${statusMeta.cls}`}>
+                          {statusMeta.label}
+                        </span>
+                      </div>
+                      <h4 className="font-black text-white text-base mt-1">{ue.id}</h4>
+                      <p className="text-xs text-slate-300 line-clamp-2 mt-0.5">
+                        {ue.label || ue.id}
+                      </p>
+                      {quiz?.launchTime && (
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          {state === 'upcoming' ? 'Prévue' : 'Programmée'} : {formatDate(quiz.launchTime)}
+                        </p>
+                      )}
+                      {passedResult && (
+                        <p className="text-[11px] text-emerald-300 mt-1 font-bold">
+                          Note : {passedResult.total ? ((passedResult.score / passedResult.total) * 20).toFixed(1) : '—'}/20
+                          {passedResult.isMakeup ? ' (rattrapage)' : ''}
+                        </p>
+                      )}
+                    </div>
+
+                    {state === 'ongoing' ? (
+                      <button
+                        onClick={() => handleStartQuiz(ue.id, false)}
+                        className="mt-4 w-full bg-blue-600 hover:bg-blue-500 text-white text-xs font-extrabold py-2.5 rounded-xl transition shadow-md shadow-blue-600/20"
+                      >
+                        Démarrer l'épreuve
+                      </button>
+                    ) : state === 'done' ? (
+                      <Link
+                        to={`/review/${ue.id}`}
+                        className="mt-4 w-full text-center bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-extrabold py-2.5 rounded-xl transition shadow-md shadow-indigo-600/20"
+                      >
+                        Relire ma copie
+                      </Link>
+                    ) : state === 'missed' ? (
+                      <button
+                        onClick={() => handleStartQuiz(ue.id, true)}
+                        className="mt-4 w-full bg-red-600 hover:bg-red-500 text-white text-xs font-extrabold py-2.5 rounded-xl transition shadow-md shadow-red-600/20"
+                      >
+                        Rattraper l'épreuve
+                      </button>
+                    ) : state === 'upcoming' ? (
+                      <div className="mt-4 w-full text-center bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[11px] font-bold py-2.5 rounded-xl">
+                        Ouverture le {formatDate(quiz.launchTime)}
+                      </div>
+                    ) : (
+                      <div className="mt-4 w-full text-center bg-slate-800 border border-slate-700 text-slate-400 text-[11px] font-bold py-2.5 rounded-xl">
+                        Épreuve non programmée
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

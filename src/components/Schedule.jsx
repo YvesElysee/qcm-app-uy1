@@ -11,7 +11,8 @@ export default function Schedule() {
   const [upcomingQuizzes, setUpcomingQuizzes] = useState([]);
   const [pastQuizzes, setPastQuizzes] = useState([]);
   const [loading, setLoading] = useState(true);
-  const user = getCurrentUser();
+  // Identité figée pour la durée de la page (évite de relancer l'effet à chaque rendu)
+  const [user] = useState(getCurrentUser);
 
   // Si l'utilisateur est connecté, sa filière est verrouillée (Point 3)
   const userFiliere = user?.filiere || '';
@@ -23,13 +24,15 @@ export default function Schedule() {
   });
 
   const [myResults, setMyResults] = useState([]);
+  const [nowTs, setNowTs] = useState(0);
 
   useEffect(() => {
-    const fetchAll = async () => {
+    const load = async () => {
       try {
         const data = await api('/quizzes?sort=asc');
         const all = data.quizzes;
         const now = Date.now();
+        setNowTs(now);
         setUpcomingQuizzes(all.filter(q => q.launchTime && q.launchTime > now));
         setPastQuizzes(all.filter(q => q.launchTime && q.launchTime <= now).reverse());
 
@@ -43,7 +46,7 @@ export default function Schedule() {
         setLoading(false);
       }
     };
-    fetchAll();
+    load();
   }, [user]);
 
   const passedUes = new Set(myResults.map(r => r.ue));
@@ -68,10 +71,18 @@ export default function Schedule() {
     return 'bg-slate-800 text-slate-300';
   };
 
-  const QuizCard = ({ quiz, past }) => {
-    const hasTaken = passedUes.has(quiz.id || quiz.ue);
+  const now = nowTs;
+
+  const QuizCard = ({ quiz }) => {
+    const ueCode = quiz.ue || quiz.id;
+    const hasTaken = passedUes.has(quiz.id) || passedUes.has(ueCode);
+    const isOpen = quiz.launchTime <= now && (!quiz.endTime || quiz.endTime >= now);
+    const isFinished = !isOpen && quiz.launchTime <= now;
+
     return (
-      <div className={`bg-slate-900 rounded-2xl border border-slate-800 border-l-4 p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 transition hover:border-slate-700 ${past ? (hasTaken ? 'border-l-emerald-500' : 'border-l-red-500') : 'border-l-blue-500'}`}>
+      <div className={`bg-slate-900 rounded-2xl border border-slate-800 border-l-4 p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 transition hover:border-slate-700 ${
+        isOpen ? 'border-l-emerald-500' : isFinished ? (hasTaken ? 'border-l-slate-600' : 'border-l-red-500') : 'border-l-blue-500'
+      }`}>
         <div>
           <div className="flex items-center gap-2 mb-1 flex-wrap">
             <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-full ${badgeColor(quiz.filiere)}`}>
@@ -85,9 +96,14 @@ export default function Schedule() {
                 S{quiz.semestre}
               </span>
             )}
-            {past && (
+            {isOpen ? (
+              <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                En cours
+              </span>
+            ) : isFinished ? (
               hasTaken ? (
-                <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300">
+                <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full bg-slate-700/50 text-slate-300">
                   <Icon name="check-circle" size={11} />
                   Épreuve passée
                 </span>
@@ -97,11 +113,19 @@ export default function Schedule() {
                   Évaluation manquée
                 </span>
               )
+            ) : (
+              <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-300">
+                <Icon name="calendar" size={11} />
+                Programmée
+              </span>
             )}
           </div>
-          <h3 className="font-black text-white text-lg">{quiz.ue || quiz.id}</h3>
+          <h3 className="font-black text-white text-lg">{ueCode}</h3>
+          {quiz.ueLabel && quiz.ueLabel !== ueCode && (
+            <p className="text-slate-300 text-xs mt-0.5">{quiz.ueLabel}</p>
+          )}
           <p className="text-slate-400 text-xs mt-1">
-            {past ? 'Session officielle : ' : 'Prévu le : '}
+            {isFinished ? 'Session officielle : ' : 'Prévu le : '}
             <strong className="text-slate-200">{formatDate(quiz.launchTime)}</strong>
             {quiz.timePerQuestion ? ` • ${quiz.timePerQuestion}s par question` : ''}
           </p>
@@ -109,25 +133,49 @@ export default function Schedule() {
         </div>
 
         <div className="flex gap-2 flex-shrink-0">
-          {past ? (
+          {isOpen ? (
+            user ? (
+              <Link
+                to={`/quiz/${ueCode}`}
+                className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl text-xs font-black transition"
+              >
+                <Icon name="play" size={14} />
+                Rejoindre l'épreuve
+              </Link>
+            ) : (
+              <Link
+                to="/login"
+                className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-xs font-black transition"
+              >
+                <Icon name="lock" size={14} />
+                Se connecter pour rejoindre
+              </Link>
+            )
+          ) : isFinished ? (
             hasTaken ? (
               <Link
-                to={`/review/${quiz.id || quiz.ue}`}
-                className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl text-xs font-bold transition"
+                to={`/review/${ueCode}`}
+                className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-bold transition"
               >
                 <Icon name="eye" size={14} />
                 Relire ma copie
               </Link>
+            ) : user ? (
+              <Link
+                to={`/quiz/${ueCode}?mode=rattrapage`}
+                className="inline-flex items-center gap-1.5 bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-xl text-xs font-black transition"
+              >
+                <Icon name="refresh" size={14} />
+                Rattraper l'épreuve
+              </Link>
             ) : (
-              user && (
-                <Link
-                  to={`/quiz/${quiz.id || quiz.ue}?mode=rattrapage`}
-                  className="inline-flex items-center gap-1.5 bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-xl text-xs font-black transition"
-                >
-                  <Icon name="refresh" size={14} />
-                  Rattraper l'épreuve
-                </Link>
-              )
+              <Link
+                to="/login"
+                className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-xs font-black transition"
+              >
+                <Icon name="lock" size={14} />
+                Se connecter
+              </Link>
             )
           ) : user ? (
             <Link
@@ -135,7 +183,7 @@ export default function Schedule() {
               className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-xs font-black transition"
             >
               <Icon name="arrow-right" size={14} />
-              Rejoindre depuis mon espace
+              Voir dans mon espace
             </Link>
           ) : (
             <Link
@@ -150,6 +198,21 @@ export default function Schedule() {
       </div>
     );
   };
+
+  // Regroupement lisible : filière → niveau → épreuves triées par date
+  const visibleQuizzes = filtered([...upcomingQuizzes, ...pastQuizzes])
+    .slice()
+    .sort((a, b) => a.launchTime - b.launchTime);
+
+  const groups = visibleQuizzes.reduce((acc, quiz) => {
+    const filiereKey = quiz.filiere || 'Filière non précisée';
+    const niveauKey = quiz.niveau || 'Niveau non précisé';
+    if (!acc[filiereKey]) acc[filiereKey] = {};
+    if (!acc[filiereKey][niveauKey]) acc[filiereKey][niveauKey] = [];
+    acc[filiereKey][niveauKey].push(quiz);
+    return acc;
+  }, {});
+  const filiereKeys = Object.keys(groups).sort((a, b) => a.localeCompare(b, 'fr'));
 
   return (
     <div className="flex-1 bg-slate-950 p-4 md:p-8">
@@ -173,7 +236,7 @@ export default function Schedule() {
 
         <div>
           <h1 className="text-2xl font-black text-white">Emploi du Temps — Évaluations QCM</h1>
-          <p className="text-xs text-slate-400 mt-0.5">Portail Officiel • UY1</p>
+          <p className="text-xs text-slate-400 mt-0.5">QCM App • Plateforme d'évaluation</p>
         </div>
 
         {/* Barre de Filtres */}
@@ -223,39 +286,50 @@ export default function Schedule() {
           </div>
         ) : (
           <div className="space-y-8">
-            {/* Prochains QCM */}
-            <section>
-              <h2 className="text-sm font-black text-slate-300 uppercase tracking-wider mb-3 flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>
-                Prochaines Évaluations ({filtered(upcomingQuizzes).length})
-              </h2>
-              {filtered(upcomingQuizzes).length === 0 ? (
-                <div className="text-center py-8 bg-slate-900 rounded-2xl text-slate-500 text-xs border border-dashed border-slate-800">
-                  Aucune évaluation programmée à venir pour ces critères.
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {filtered(upcomingQuizzes).map(q => <QuizCard key={q.id} quiz={q} past={false} />)}
-                </div>
-              )}
-            </section>
+            {filiereKeys.length === 0 ? (
+              <div className="text-center py-12 bg-slate-900 rounded-2xl text-slate-500 text-xs border border-dashed border-slate-800">
+                Aucune épreuve programmée pour ces critères.
+              </div>
+            ) : (
+              filiereKeys.map(filiereKey => {
+                const niveaux = groups[filiereKey];
+                const niveauKeys = Object.keys(niveaux).sort((a, b) => a.localeCompare(b, 'fr'));
+                const total = niveauKeys.reduce((n, niv) => n + niveaux[niv].length, 0);
 
-            {/* QCM Passés */}
-            <section>
-              <h2 className="text-sm font-black text-slate-300 uppercase tracking-wider mb-3 flex items-center gap-2">
-                <Icon name="book" size={15} className="text-blue-400" />
-                Évaluations Passées ({filtered(pastQuizzes).length})
-              </h2>
-              {filtered(pastQuizzes).length === 0 ? (
-                <div className="text-center py-8 bg-slate-900 rounded-2xl text-slate-500 text-xs border border-dashed border-slate-800">
-                  Aucune évaluation passée enregistrée.
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {filtered(pastQuizzes).map(q => <QuizCard key={q.id} quiz={q} past={true} />)}
-                </div>
-              )}
-            </section>
+                return (
+                  <section key={filiereKey} className="space-y-4">
+                    <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-2">
+                      <h2 className="flex items-center gap-2 text-sm font-black text-white">
+                        <span className={`text-[11px] font-black px-2.5 py-1 rounded-full ${badgeColor(filiereKey)}`}>
+                          {filiereKey}
+                        </span>
+                      </h2>
+                      <span className="text-[11px] text-slate-500 font-bold">
+                        {total} épreuve(s)
+                      </span>
+                    </div>
+
+                    {niveauKeys.map(niveauKey => (
+                      <div key={niveauKey} className="space-y-2.5">
+                        <h3 className="text-[11px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-2">
+                          <Icon name="graduation" size={13} className="text-blue-400" />
+                          Niveau {niveauKey}
+                          <span className="text-slate-600">•</span>
+                          <span className="text-slate-500 font-bold normal-case">
+                            {niveaux[niveauKey].length} épreuve(s)
+                          </span>
+                        </h3>
+                        <div className="space-y-3">
+                          {niveaux[niveauKey].map(q => (
+                            <QuizCard key={q.id} quiz={q} />
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </section>
+                );
+              })
+            )}
           </div>
         )}
       </div>

@@ -52,6 +52,7 @@ export default function AdminPanel() {
   const [niveau, setNiveau] = useState('L1');
   const [semestre, setSemestre] = useState('1');
   const [ue, setUe] = useState('');
+  const [manualUe, setManualUe] = useState(false);
   const [launchTime, setLaunchTime] = useState('');
   const [endTime, setEndTime] = useState('');
   const [timePerQuestion, setTimePerQuestion] = useState('60');
@@ -215,7 +216,7 @@ export default function AdminPanel() {
   const handleConfirmImport = useCallback(async () => {
     const targetUe = ue.trim().toUpperCase();
     if (!targetUe) {
-      alert("Veuillez d'abord saisir le code UE (ex: INF232).");
+      alert("Veuillez d'abord sélectionner l'UE à importer.");
       return;
     }
     if (!parsedCsvData?.questions?.length) {
@@ -223,6 +224,7 @@ export default function AdminPanel() {
       return;
     }
 
+    const ueInfo = allUes.find(u => (u.code || u.id || '').toUpperCase() === targetUe);
     setImporting(true);
     try {
       // Import atomique côté serveur : remplace les anciennes questions
@@ -235,6 +237,7 @@ export default function AdminPanel() {
           filiere,
           niveau,
           semestre,
+          ueLabel: ueInfo?.label || targetUe,
           timePerQuestion: parseInt(timePerQuestion) || 60
         }
       });
@@ -246,6 +249,7 @@ export default function AdminPanel() {
       setCsvFile(null);
       fetchHistory();
       fetchUpcoming();
+      fetchUes();
       if (inspectQuizId === targetUe) loadInspectQuestions(targetUe);
     } catch (err) {
       alert("Erreur lors de l'enregistrement : " + err.message);
@@ -259,8 +263,10 @@ export default function AdminPanel() {
     niveau,
     semestre,
     timePerQuestion,
+    allUes,
     fetchHistory,
     fetchUpcoming,
+    fetchUes,
     inspectQuizId,
     loadInspectQuestions
   ]);
@@ -268,24 +274,31 @@ export default function AdminPanel() {
   const handleSaveQuiz = useCallback(async () => {
     const targetUe = ue.trim().toUpperCase();
     if (!targetUe) {
-      alert('Saisissez le code UE.');
+      alert("Sélectionnez l'unité d'enseignement (UE) à évaluer.");
       return;
     }
+    if (!launchTime) {
+      alert("Renseignez la date et l'heure d'ouverture : sans cela, les étudiants ne verront pas l'épreuve.");
+      return;
+    }
+    const ueInfo = allUes.find(u => (u.code || u.id || '').toUpperCase() === targetUe);
     const data = {
       filiere,
       niveau,
       semestre,
       ue: targetUe,
-      timePerQuestion: parseInt(timePerQuestion) || 60
+      ueLabel: ueInfo?.label || targetUe,
+      timePerQuestion: parseInt(timePerQuestion) || 60,
+      launchTime: new Date(launchTime).getTime()
     };
-    if (launchTime) data.launchTime = new Date(launchTime).getTime();
     if (endTime) data.endTime = new Date(endTime).getTime();
 
     await api(`/quizzes/${encodeURIComponent(targetUe)}`, { method: 'POST', auth: 'admin', body: data });
-    alert(`Quiz ${targetUe} programmé avec succès !`);
+    alert(`Épreuve ${targetUe} programmée avec succès !`);
     fetchHistory();
     fetchUpcoming();
-  }, [ue, filiere, niveau, semestre, timePerQuestion, launchTime, endTime, fetchHistory, fetchUpcoming]);
+    fetchUes();
+  }, [ue, filiere, niveau, semestre, timePerQuestion, launchTime, endTime, allUes, fetchHistory, fetchUpcoming, fetchUes]);
 
   const deleteSingleQuestion = useCallback(
     async (qId) => {
@@ -429,7 +442,7 @@ export default function AdminPanel() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'Etudiants_UY1.csv';
+    a.download = 'Etudiants_QCM_App.csv';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -530,7 +543,7 @@ export default function AdminPanel() {
     docPdf.setFontSize(14);
     docPdf.text(`Procès-Verbal Officiel des Résultats — ${quizId}`, 14, 14);
     docPdf.setFontSize(9);
-    docPdf.text(`Généré le ${new Date().toLocaleString('fr-FR')} • UY1`, 14, 21);
+    docPdf.text(`Généré le ${new Date().toLocaleString('fr-FR')} • QCM App`, 14, 21);
     docPdf.autoTable({
       startY: 28,
       head: [['Étudiant', 'Email', 'Score', 'Note /20', 'Type', 'Date']],
@@ -597,11 +610,11 @@ export default function AdminPanel() {
       <aside className="hidden lg:flex flex-col w-64 shrink-0 bg-slate-900 border-r border-slate-800 sticky top-0 h-screen">
         <div className="flex items-center gap-3 px-5 py-5 border-b border-slate-800">
           <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center font-black text-white text-sm">
-            UY1
+            QA
           </div>
           <div className="min-w-0">
             <h1 className="text-sm font-black text-white leading-tight">Administration QCM</h1>
-            <p className="text-[11px] text-slate-500">UY1 • Téléévaluation</p>
+            <p className="text-[11px] text-slate-500">QCM App • Évaluation</p>
           </div>
         </div>
 
@@ -648,11 +661,11 @@ export default function AdminPanel() {
         <header className="lg:hidden bg-slate-900 border-b border-slate-800 px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center font-black text-white text-xs">
-              UY1
+              QA
             </div>
             <div>
               <h1 className="text-sm font-black text-white leading-tight">Administration QCM</h1>
-              <p className="text-[10px] text-slate-500">UY1 • Téléévaluation</p>
+              <p className="text-[10px] text-slate-500">QCM App • Évaluation</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -954,16 +967,54 @@ export default function AdminPanel() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
-                      <label className={label}>Code UE</label>
-                      <input
-                        type="text"
-                        placeholder="INF232"
-                        className={input}
-                        value={ue}
-                        onChange={e => setUe(e.target.value)}
-                      />
+                      <label className={label}>Unité d'enseignement</label>
+                      <select
+                        className={selectCls}
+                        value={manualUe ? '__manual__' : ue}
+                        onChange={e => {
+                          const value = e.target.value;
+                          if (value === '__manual__') {
+                            setManualUe(true);
+                            setUe('');
+                            return;
+                          }
+                          setManualUe(false);
+                          setUe(value);
+                          // La filière et le niveau sont hérités du catalogue UE
+                          const info = allUes.find(u => (u.code || u.id) === value);
+                          if (info) {
+                            if (info.filiere) setFiliere(info.filiere);
+                            if (info.niveau) setNiveau(info.niveau);
+                          }
+                        }}
+                      >
+                        <option value="">Sélectionner une UE…</option>
+                        {allUes.map(u => (
+                          <option key={u.id} value={u.code || u.id}>
+                            {(u.code || u.id)} — {u.label} ({u.filiere} {u.niveau})
+                          </option>
+                        ))}
+                        {ue && !allUes.some(u => (u.code || u.id) === ue) && (
+                          <option value={ue}>{ue} (hors catalogue)</option>
+                        )}
+                        <option value="__manual__">Saisie manuelle…</option>
+                      </select>
+                      {manualUe && (
+                        <input
+                          type="text"
+                          placeholder="INF232"
+                          className={`${input} mt-2`}
+                          value={ue}
+                          onChange={e => setUe(e.target.value)}
+                        />
+                      )}
+                      {allUes.length === 0 && !manualUe && (
+                        <p className="text-[11px] text-amber-400 mt-1">
+                          Catalogue vide : ajoutez d'abord une UE dans la section « Unités d'enseignement ».
+                        </p>
+                      )}
                     </div>
                     <div>
                       <label className={label}>Semestre</label>
@@ -986,7 +1037,7 @@ export default function AdminPanel() {
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className={label}>Ouverture de l'épreuve</label>
+                      <label className={label}>Ouverture de l'épreuve (obligatoire)</label>
                       <input
                         type="datetime-local"
                         className={input}
@@ -1316,29 +1367,49 @@ export default function AdminPanel() {
                   </p>
                 ) : (
                   <div className="divide-y divide-slate-800">
-                    {allUes.map(u => (
-                      <div key={u.id} className="px-6 py-3.5 flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="font-black text-white text-sm">{u.code}</span>
-                            <span className="text-[10px] font-bold text-blue-300 bg-blue-600/15 px-2 py-0.5 rounded-full">
-                              {u.filiere}
-                            </span>
-                            <span className="text-[10px] font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded-full">
-                              {u.niveau}
-                            </span>
+                    {allUes.map(u => {
+                      const linkedQuiz = history.find(
+                        q => (q.ue || q.id) === (u.code || u.id) || q.id === u.id
+                      );
+                      return (
+                        <div key={u.id} className="px-6 py-3.5 flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="font-black text-white text-sm">{u.code}</span>
+                              <span className="text-[10px] font-bold text-blue-300 bg-blue-600/15 px-2 py-0.5 rounded-full">
+                                {u.filiere}
+                              </span>
+                              <span className="text-[10px] font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded-full">
+                                {u.niveau}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-500 mt-0.5 truncate">{u.label || u.code}</p>
                           </div>
-                          <p className="text-[11px] text-slate-500 mt-0.5 truncate">{u.label || u.code}</p>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {linkedQuiz?.launchTime ? (
+                              <span className="text-[10px] font-bold text-emerald-300 bg-emerald-600/15 border border-emerald-600/30 px-2 py-1 rounded-full">
+                                Épreuve : {formatDate(linkedQuiz.launchTime)}
+                              </span>
+                            ) : linkedQuiz ? (
+                              <span className="text-[10px] font-bold text-amber-300 bg-amber-600/15 border border-amber-600/30 px-2 py-1 rounded-full">
+                                Épreuve non programmée
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-bold text-slate-400 bg-slate-800 px-2 py-1 rounded-full">
+                                Sans épreuve
+                              </span>
+                            )}
+                            <button
+                              onClick={() => deleteUe(u.id)}
+                              aria-label={`Supprimer l'UE ${u.code}`}
+                              className="w-8 h-8 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-950/50 flex items-center justify-center transition shrink-0"
+                            >
+                              <Icon name="trash" size={14} />
+                            </button>
+                          </div>
                         </div>
-                        <button
-                          onClick={() => deleteUe(u.id)}
-                          aria-label={`Supprimer l'UE ${u.code}`}
-                          className="w-8 h-8 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-950/50 flex items-center justify-center transition shrink-0"
-                        >
-                          <Icon name="trash" size={14} />
-                        </button>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -1732,7 +1803,7 @@ export default function AdminPanel() {
                     <input
                       type="email"
                       required
-                      placeholder="administration.uy1@gmail.com"
+                      placeholder="administration@gmail.com"
                       className={input}
                       value={smtpEmail}
                       onChange={e => setSmtpEmail(e.target.value)}

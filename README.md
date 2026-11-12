@@ -1,6 +1,6 @@
-# QCM App UY1 — Plateforme Téléévaluation 2026
+# QCM App — Plateforme d'évaluation 2026
 
-Application web d'évaluations et QCM pour l'UY1.
+Application web d'évaluations et QCM pour **QCM App**.
 Conçue avec **React 19 + Vite 8 + Tailwind CSS** et un **backend Node.js / Express + SQLite** (plus aucune dépendance à Firebase).
 
 ---
@@ -85,7 +85,7 @@ Conçue avec **React 19 + Vite 8 + Tailwind CSS** et un **backend Node.js / Expr
 ### 8. Design Professionnel Unifié
 - **Thème sombre** cohérent sur tout le site (étudiant et administration) : fonds `slate-950/900`, bordures `slate-800`, couleur primaire `blue-600`, accents émeraude / rouge / ambre.
 - **Aucun emoji** : l'interface utilise exclusivement des icônes SVG au trait fin (`src/components/ui/icons.jsx`), alignées et lisibles à toutes les tailles.
-- Identité resserrée sur le nom court **UY1** partout (titre, emails, pied de page, procès-verbaux PDF).
+- Identité resserrée sur le nom **QCM App** partout (titre, emails, pied de page, procès-verbaux PDF).
 
 ---
 
@@ -94,7 +94,7 @@ Conçue avec **React 19 + Vite 8 + Tailwind CSS** et un **backend Node.js / Expr
 Pour activer l'envoi réel des emails de récupération de mot de passe :
 1. Connectez-vous à votre compte Google et activez la **Validation en deux étapes (2FA)** dans vos paramètres de sécurité.
 2. Rendez-vous sur : [https://myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)
-3. Créez un mot de passe d'application (nommez-le par exemple *"QCM App UY1"*).
+3. Créez un mot de passe d'application (nommez-le par exemple *"QCM App"*).
 4. Google vous fournit un code à **16 caractères** (ex: `abcd efgh ijkl mnop`).
 5. Rendez-vous dans le panneau d'administration (section *Paramètres SMTP*) ou ajoutez-le dans votre fichier `.env` :
    ```env

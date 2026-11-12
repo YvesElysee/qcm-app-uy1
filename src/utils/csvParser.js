@@ -83,7 +83,7 @@ export function parseQuestionsCsv(fileOrString) {
             const rawCorrect = (correctKey ? row[correctKey] : (row['ReponseCorrecte'] || '')).toString().trim();
 
             // Normalisation de la réponse correcte
-            let finalCorrect = '';
+            let finalCorrect;
             const upper = rawCorrect.toUpperCase();
 
             // Cas 1 : Réponse sous forme de lettre A, B, C, D
@@ -176,7 +176,7 @@ export function downloadCsvTemplate(separator = ';') {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = isSemicolon ? "modele_qcm_excel_uy1.csv" : "modele_qcm_standard_uy1.csv";
+  a.download = isSemicolon ? "modele_qcm_excel_qcm_app.csv" : "modele_qcm_standard_qcm_app.csv";
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

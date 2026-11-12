@@ -121,7 +121,7 @@ export default function StudentProfile({ onClose, onProfileUpdated }) {
           </div>
           <div>
             <span className="text-slate-400 block font-medium">Statut du compte</span>
-            <span className="font-bold text-emerald-400">Actif • UY1</span>
+            <span className="font-bold text-emerald-400">Actif • QCM App</span>
           </div>
         </div>
 

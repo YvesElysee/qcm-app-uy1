@@ -84,16 +84,16 @@ export default function Home() {
   const [stats, setStats] = useState(null);
   const [upcoming, setUpcoming] = useState([]);
 
-  // Statistiques publiques : nombre de QCM, d'UE, de filières et d'épreuves à venir
+  // Statistiques publiques : QCM, UE, étudiants inscrits et épreuves à venir
   useEffect(() => {
     let ignore = false;
     (async () => {
       let quizList = [];
-      let ueList = [];
+      let publicStats = null;
       try {
-        const [qData, uData] = await Promise.all([api('/quizzes'), api('/ues')]);
+        const [qData, sData] = await Promise.all([api('/quizzes'), api('/stats')]);
         quizList = qData.quizzes || [];
-        ueList = uData.ues || [];
+        publicStats = sData;
       } catch (err) {
         console.warn('Erreur chargement des données publiques :', err);
       }
@@ -104,15 +104,11 @@ export default function Home() {
         .filter(q => q.launchTime && q.launchTime > nowMs)
         .sort((a, b) => a.launchTime - b.launchTime);
 
-      const filieres = new Set(
-        [...quizList.map(q => q.filiere), ...ueList.map(u => u.filiere)].filter(Boolean)
-      );
-
       setUpcoming(upcomingList);
-      setStats({
+      setStats(publicStats || {
         quizzes: quizList.length,
-        ues: ueList.length,
-        filieres: filieres.size,
+        ues: 0,
+        students: 0,
         upcoming: upcomingList.length
       });
     })();
@@ -122,10 +118,10 @@ export default function Home() {
   }, []);
 
   const statCards = [
-    { label: 'Évaluations programmées', value: stats ? stats.quizzes : '…' },
-    { label: "Unités d'enseignement", value: stats ? stats.ues : '…' },
-    { label: 'Filières couvertes', value: stats ? stats.filieres : '…' },
-    { label: 'Épreuves à venir', value: stats ? stats.upcoming : '…' }
+    { label: 'Évaluations programmées', value: stats ? stats.quizzes : '…', icon: 'document' },
+    { label: 'Étudiants inscrits', value: stats ? stats.students : '…', icon: 'users' },
+    { label: "Unités d'enseignement", value: stats ? stats.ues : '…', icon: 'book' },
+    { label: 'Épreuves à venir', value: stats ? stats.upcoming : '…', icon: 'calendar' }
   ];
 
   return (
@@ -138,7 +134,7 @@ export default function Home() {
         <div className="relative max-w-6xl mx-auto px-4 pt-16 pb-24 text-center">
           <span className="inline-flex items-center gap-2 bg-blue-500/10 border border-blue-500/30 text-blue-300 text-xs font-bold px-4 py-1.5 rounded-full">
             <Icon name="graduation" size={14} />
-            UY1 — Téléévaluation 2026
+            QCM App — Évaluation en ligne 2026
           </span>
 
           <h1 className="text-4xl md:text-5xl font-black text-white leading-tight max-w-3xl mx-auto mt-6">
@@ -206,7 +202,12 @@ export default function Home() {
               key={s.label}
               className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl shadow-black/30"
             >
-              <div className="text-3xl font-black text-white">{s.value}</div>
+              <div className="flex items-center justify-between">
+                <div className="text-3xl font-black text-white">{s.value}</div>
+                <span className="w-9 h-9 rounded-xl bg-blue-500/15 text-blue-300 flex items-center justify-center">
+                  <Icon name={s.icon} size={17} />
+                </span>
+              </div>
               <div className="text-[11px] uppercase tracking-wider text-slate-400 font-bold mt-1">
                 {s.label}
               </div>

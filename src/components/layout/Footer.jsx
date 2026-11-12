@@ -16,12 +16,12 @@ export default function Footer() {
         <div>
           <div className="flex items-center gap-2.5 mb-3">
             <div className="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center font-black text-white text-sm">
-              UY1
+              QA
             </div>
-            <span className="font-black text-white text-sm">Portail QCM</span>
+            <span className="font-black text-white text-sm">QCM App</span>
           </div>
           <p className="text-xs leading-relaxed">
-            Plateforme officielle de téléévaluation par QCM de l'UY1 :
+            Plateforme d'évaluation en ligne par QCM :
             épreuves chronométrées, rattrapages garantis et suivi de vos résultats.
           </p>
         </div>
@@ -50,8 +50,8 @@ export default function Footer() {
         <div>
           <h3 className="text-[11px] font-black uppercase tracking-wider text-slate-500 mb-3">Informations</h3>
           <ul className="space-y-2 text-xs">
-            <li>UY1</li>
-            <li>Téléévaluation — Année académique 2025-2026</li>
+            <li>QCM App</li>
+            <li>Évaluation en ligne — Année académique 2025-2026</li>
             <li>
               <Link to="/admin-login" className="font-bold hover:text-white transition">
                 Accès Enseignant / Admin
@@ -62,7 +62,7 @@ export default function Footer() {
       </div>
 
       <div className="border-t border-slate-800/70 py-4 text-center text-[11px] text-slate-500">
-        © {year} UY1 — Portail QCM. Tous droits réservés.
+        © {year} QCM App. Tous droits réservés.
       </div>
     </footer>
   );

@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 
-const BASE_TITLE = 'Portail QCM — UY1';
+const BASE_TITLE = 'QCM App';
 
 /**
  * Met à jour le titre de l'onglet pour la page courante.

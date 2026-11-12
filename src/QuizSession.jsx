@@ -37,6 +37,7 @@ export default function QuizSession() {
   const [feedbackMsg, setFeedbackMsg] = useState('');
   const [feedbackSent, setFeedbackSent] = useState(false);
   const [quizMeta, setQuizMeta] = useState(null);
+  const [accessError, setAccessError] = useState('');
 
   const submitted = useRef(false);
   const timerInterval = useRef(null);
@@ -44,7 +45,6 @@ export default function QuizSession() {
 
   const user = JSON.parse(localStorage.getItem('userSession')) || { name: 'Anonyme' };
   const safeName = (user.name || 'Anonyme').trim();
-  const userEmail = (user.email || '').trim().toLowerCase();
   const urlParams = new URLSearchParams(window.location.search);
   const isMakeupMode = urlParams.get('mode') === 'rattrapage' || !!user.isMakeup;
   const [makeupEndTime, setMakeupEndTime] = useState(null);
@@ -79,9 +79,22 @@ export default function QuizSession() {
         const data = await api(`/quizzes/${quizId}`);
         meta = data.quiz;
       } catch {
-        setPhase('finished');
+        setAccessError("Cette épreuve est introuvable ou a été retirée de la plateforme.");
         return;
       }
+
+      // Une épreuve non programmée (ou sans questions) n'est pas accessible aux étudiants.
+      // L'admin conserve un aperçu via son jeton de session.
+      const isAdminPreview = !!sessionStorage.getItem('adminToken');
+      if (!meta.launchTime && !isAdminPreview) {
+        setAccessError("Cette épreuve n'est pas encore programmée. Consultez l'emploi du temps pour connaître la date d'ouverture.");
+        return;
+      }
+      if (!meta.questionCount) {
+        setAccessError("Les questions de cette épreuve ne sont pas encore disponibles. Réessayez plus tard.");
+        return;
+      }
+
       setQuizMeta(meta);
 
       if (meta.endTime && meta.launchTime) {
@@ -202,7 +215,7 @@ export default function QuizSession() {
         isMakeup: isMakeupMode
       }
     }).catch(err => console.warn("Enregistrement du résultat impossible :", err.message));
-  }, [quizId, safeName, userEmail, questions.length, quizMeta, storageKey, isMakeupMode]);
+  }, [quizId, safeName, questions.length, quizMeta, storageKey, isMakeupMode]);
 
   const handleValidate = useCallback((forced = false) => {
     if (feedbackState) return;
@@ -324,7 +337,7 @@ export default function QuizSession() {
     } catch (e) {
       console.error(e);
     }
-  }, [feedbackMsg, safeName, quizId, quizMeta]);
+  }, [feedbackMsg, quizId, quizMeta]);
 
   // ── Utils ────────────────────────────────────────────────────────────
   const fmtMs = (ms) => {
@@ -340,6 +353,25 @@ export default function QuizSession() {
   const timerColor = timerPct > 50 ? 'bg-green-500' : timerPct > 20 ? 'bg-yellow-500' : 'bg-red-500';
 
   // ─────────────────────────── RENDUS ─────────────────────────────────
+
+  if (accessError) return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 max-w-md text-center">
+        <div className="w-12 h-12 mx-auto rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center mb-4">
+          <Icon name="lock" size={22} />
+        </div>
+        <h1 className="text-xl font-black text-white mb-2">Épreuve indisponible</h1>
+        <p className="text-sm text-slate-400 mb-5">{accessError}</p>
+        <Link
+          to="/schedule"
+          className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm px-4 py-2.5 rounded-xl transition"
+        >
+          <Icon name="calendar" size={15} />
+          Voir l'emploi du temps
+        </Link>
+      </div>
+    </div>
+  );
 
   if (phase === 'loading') return (
     <div className="min-h-screen flex items-center justify-center bg-slate-900">

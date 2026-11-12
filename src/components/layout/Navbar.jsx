@@ -92,16 +92,16 @@ export default function Navbar() {
           {/* ── Marque ── */}
           <Link to="/" className="flex items-center gap-3 shrink-0">
             <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center font-black text-white text-lg shadow-md shadow-blue-500/20">
-              UY1
+              QA
             </div>
             <div className="hidden sm:block leading-tight">
               <span className="font-black text-base tracking-tight text-white flex items-center gap-2">
-                Portail QCM
+                QCM App
                 <span className="text-[10px] bg-blue-500/20 text-blue-300 border border-blue-500/30 font-bold px-2 py-0.5 rounded-full">
-                  Téléévaluation 2026
+                  Évaluation 2026
                 </span>
               </span>
-              <span className="block text-[11px] text-slate-400">UY1</span>
+              <span className="block text-[11px] text-slate-400">Plateforme d'évaluation</span>
             </div>
           </Link>
 

@@ -43,7 +43,7 @@ export default function Login() {
                         <Icon name="shield" size={30} />
                     </div>
                     <h1 className="text-2xl font-black text-white">Accès Administrateur</h1>
-                    <p className="text-slate-400 text-sm mt-1">Portail QCM UY1</p>
+                    <p className="text-slate-400 text-sm mt-1">QCM App</p>
                 </div>
 
                 {expired && (
