@@ -1,5 +1,5 @@
 /**
- * Routes des messages & suggestions — /api/feedback
+ * Routes des messages & suggestions · /api/feedback
  * - POST : envoi d'un message (étudiant connecté → identité enrichie depuis le jeton)
  * - GET /mine : suivi des messages envoyés par l'étudiant connecté
  * - Routes admin : liste complète, changement de statut, suppression

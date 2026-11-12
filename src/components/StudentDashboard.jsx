@@ -169,7 +169,7 @@ export default function StudentDashboard() {
   };
 
   const formatDate = (isoOrTs) => {
-    if (!isoOrTs) return '—';
+    if (!isoOrTs) return '-';
     const d = new Date(isoOrTs);
     return d.toLocaleDateString('fr-FR', {
       weekday: 'short',
@@ -255,17 +255,17 @@ export default function StudentDashboard() {
 
         {/* ── Avertissement & Alerte Prochain Quizz (Point 4) ── */}
         {nextQuiz && (
-          <div className="bg-amber-950/40 border border-amber-500/30 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="bg-indigo-950/40 border border-indigo-500/30 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center animate-pulse shrink-0">
+              <div className="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center animate-pulse shrink-0">
                 <Icon name="bell" size={20} />
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-black uppercase text-amber-400 tracking-wider">
+                  <span className="text-xs font-black uppercase text-indigo-400 tracking-wider">
                     Alerte Évaluation à venir
                   </span>
-                  <span className="bg-amber-400/20 text-amber-300 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                  <span className="bg-indigo-400/20 text-indigo-300 text-[10px] font-bold px-2 py-0.5 rounded-full">
                     {nextDiffMinutes <= 60
                       ? `Dans ~${nextDiffMinutes} min`
                       : nextDiffMinutes <= 1440
@@ -274,9 +274,9 @@ export default function StudentDashboard() {
                   </span>
                 </div>
                 <h3 className="text-base font-bold text-white mt-0.5">
-                  QCM {nextQuiz.ue || nextQuiz.id} — {nextQuiz.filiere} ({nextQuiz.niveau})
+                  QCM {nextQuiz.ue || nextQuiz.id} · {nextQuiz.filiere} ({nextQuiz.niveau})
                 </h3>
-                <p className="text-xs text-amber-200/70">
+                <p className="text-xs text-indigo-200/70">
                   Début : {formatDate(nextQuiz.launchTime)} {nextQuiz.timePerQuestion ? `• ${nextQuiz.timePerQuestion}s par question` : ''}
                 </p>
               </div>
@@ -286,7 +286,7 @@ export default function StudentDashboard() {
               {notifPermission !== 'granted' && (
                 <button
                   onClick={requestNotificationPermission}
-                  className="inline-flex items-center gap-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-xs font-bold px-3 py-2 rounded-xl transition border border-amber-500/30"
+                  className="inline-flex items-center gap-1.5 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 text-xs font-bold px-3 py-2 rounded-xl transition border border-indigo-500/30"
                 >
                   <Icon name="bell" size={13} />
                   M'avertir
@@ -294,7 +294,7 @@ export default function StudentDashboard() {
               )}
               <Link
                 to="/schedule"
-                className="bg-amber-500 text-slate-950 hover:bg-amber-400 text-xs font-black px-4 py-2 rounded-xl transition shadow-md"
+                className="bg-indigo-500 text-slate-950 hover:bg-indigo-400 text-xs font-black px-4 py-2 rounded-xl transition shadow-md"
               >
                 Voir l'emploi du temps
               </Link>
@@ -312,7 +312,7 @@ export default function StudentDashboard() {
                   Épreuves programmées ({scheduledQuizzes.length})
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  {filiere} • {selectedNiveau} — rejoignez l'épreuve au moment prévu ou rattrapez celles que vous avez manquées.
+                  {filiere} • {selectedNiveau} · rejoignez l'épreuve au moment prévu ou rattrapez celles que vous avez manquées.
                 </p>
               </div>
               <Link
@@ -335,7 +335,7 @@ export default function StudentDashboard() {
                 const badge = notReady
                   ? { label: 'En préparation', cls: 'bg-slate-600/40 text-slate-300' }
                   : isUpcoming
-                  ? { label: 'À venir', cls: 'bg-amber-500/20 text-amber-300' }
+                  ? { label: 'À venir', cls: 'bg-indigo-500/20 text-indigo-300' }
                   : isOpen
                   ? { label: 'En cours', cls: 'bg-emerald-500/20 text-emerald-300' }
                   : isPassed
@@ -354,7 +354,7 @@ export default function StudentDashboard() {
                         <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${badge.cls}`}>
                           {badge.label}
                         </span>
-                        <span className="text-xs text-slate-400">{q.filiere} — {q.niveau}</span>
+                        <span className="text-xs text-slate-400">{q.filiere} · {q.niveau}</span>
                       </div>
                       <h4 className="font-black text-white text-base">{ueCode}</h4>
                       {q.ueLabel && q.ueLabel !== ueCode && (
@@ -375,7 +375,7 @@ export default function StudentDashboard() {
                         Questions en préparation
                       </div>
                     ) : isUpcoming ? (
-                      <div className="w-full text-center bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-bold py-2.5 rounded-xl">
+                      <div className="w-full text-center bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 text-xs font-bold py-2.5 rounded-xl">
                         Ouverture le {formatDate(q.launchTime)}
                       </div>
                     ) : isOpen ? (
@@ -449,7 +449,7 @@ export default function StudentDashboard() {
           <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
             <div>
               <h3 className="text-lg font-black text-white">
-                Unités d'Enseignement disponibles — {filiere} ({selectedNiveau})
+                Unités d'Enseignement disponibles · {filiere} ({selectedNiveau})
               </h3>
               <p className="text-xs text-slate-400">
                 Sélectionnez une matière pour lancer un entraînement ou passer l'épreuve
@@ -477,7 +477,7 @@ export default function StudentDashboard() {
                 const statusMeta = {
                   none: { label: 'Non programmée', cls: 'bg-slate-600/40 text-slate-300' },
                   draft: { label: 'Brouillon', cls: 'bg-slate-600/40 text-slate-300' },
-                  upcoming: { label: 'À venir', cls: 'bg-amber-500/20 text-amber-300' },
+                  upcoming: { label: 'À venir', cls: 'bg-indigo-500/20 text-indigo-300' },
                   ongoing: { label: 'En cours', cls: 'bg-emerald-500/20 text-emerald-300' },
                   missed: { label: 'Manquée', cls: 'bg-red-500/20 text-red-300' },
                   done: { label: 'Passée', cls: 'bg-indigo-500/20 text-indigo-300' }
@@ -508,7 +508,7 @@ export default function StudentDashboard() {
                       )}
                       {passedResult && (
                         <p className="text-[11px] text-emerald-300 mt-1 font-bold">
-                          Note : {passedResult.total ? ((passedResult.score / passedResult.total) * 20).toFixed(1) : '—'}/20
+                          Note : {passedResult.total ? ((passedResult.score / passedResult.total) * 20).toFixed(1) : '-'}/20
                           {passedResult.isMakeup ? ' (rattrapage)' : ''}
                         </p>
                       )}
@@ -536,7 +536,7 @@ export default function StudentDashboard() {
                         Rattraper l'épreuve
                       </button>
                     ) : state === 'upcoming' ? (
-                      <div className="mt-4 w-full text-center bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[11px] font-bold py-2.5 rounded-xl">
+                      <div className="mt-4 w-full text-center bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 text-[11px] font-bold py-2.5 rounded-xl">
                         Ouverture le {formatDate(quiz.launchTime)}
                       </div>
                     ) : (
@@ -559,7 +559,7 @@ export default function StudentDashboard() {
                 Mes Évaluations Passées ({myResults.length})
               </h3>
               <p className="text-xs text-slate-400">
-                Historique exclusif de vos copies et notes — {currentUser.name}
+                Historique exclusif de vos copies et notes · {currentUser.name}
               </p>
             </div>
           </div>
@@ -571,7 +571,7 @@ export default function StudentDashboard() {
           ) : (
             <div className="space-y-2.5">
               {myResults.map(res => {
-                const note20 = res.total ? ((res.score / res.total) * 20).toFixed(1) : '—';
+                const note20 = res.total ? ((res.score / res.total) * 20).toFixed(1) : '-';
                 const isGood = parseFloat(note20) >= 10;
                 return (
                   <div
@@ -587,7 +587,7 @@ export default function StudentDashboard() {
                           </span>
                         )}
                         <span className="text-xs text-slate-400">
-                          {res.filiere} — {res.niveau}
+                          {res.filiere} · {res.niveau}
                         </span>
                       </div>
                       <p className="text-xs text-slate-400">
@@ -636,7 +636,7 @@ export default function StudentDashboard() {
             <div className="my-3 py-2 px-3 bg-blue-950/60 border border-blue-900 text-blue-300 font-black rounded-xl text-lg">
               {selectedUeForStart}
             </div>
-            <div className="bg-amber-950/50 border border-amber-800 rounded-xl p-3 text-left text-xs text-amber-300 space-y-1 mb-5">
+            <div className="bg-indigo-950/50 border border-indigo-800 rounded-xl p-3 text-left text-xs text-indigo-300 space-y-1 mb-5">
               <p>• Candidat : <strong>{currentUser.name}</strong></p>
               <p>• Filière : <strong>{filiere}</strong> ({selectedNiveau})</p>
               <p>• Les questions et réponses sont mélangées automatiquement.</p>

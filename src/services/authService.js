@@ -1,7 +1,7 @@
 import { api, saveSession, updateLocalSession, getSession } from './api';
 
 /**
- * Authentification étudiant — délègue désormais tout au backend Node.js.
+ * Authentification étudiant · délègue désormais tout au backend Node.js.
  * Les signatures restent identiques à l'époque Firestore pour ne pas
  * modifier la logique des composants.
  *

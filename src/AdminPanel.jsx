@@ -7,6 +7,7 @@ import { parseQuestionsCsv, downloadCsvTemplate } from './utils/csvParser';
 import { getSmtpSettings, saveSmtpSettings, testSmtpConnection } from './services/emailService';
 import usePageTitle from './hooks/usePageTitle';
 import Icon from './components/ui/icons.jsx';
+import { ADMIN_LOGIN_PATH } from './config';
 
 const SECTIONS = [
   { id: 'overview', label: "Vue d'ensemble", icon: 'chart', desc: 'Statistiques clés et prochaines évaluations' },
@@ -41,7 +42,7 @@ const btnSecondary =
 const btnPrimary =
   'inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-3 py-2 rounded-xl transition disabled:opacity-50';
 
-const formatDate = (ts) => (ts ? new Date(ts).toLocaleString('fr-FR') : '—');
+const formatDate = (ts) => (ts ? new Date(ts).toLocaleString('fr-FR') : '-');
 
 export default function AdminPanel() {
   usePageTitle('Administration');
@@ -434,7 +435,7 @@ export default function AdminPanel() {
       Email: s.email,
       Filiere: s.filiere,
       Niveau: s.niveau,
-      'Annee Academique': s.anneeAcademique || '—',
+      'Annee Academique': s.anneeAcademique || '-',
       Inscrit_le: formatDate(s.createdAt)
     }));
     const csv = Papa.unparse(rows);
@@ -500,9 +501,9 @@ export default function AdminPanel() {
     const data = await api(`/admin/results?ue=${encodeURIComponent(quizId)}`, { auth: 'admin' });
     const rows = data.results.map(r => ({
       Nom: r.name,
-      Email: r.email || '—',
-      Filiere: r.filiere || '—',
-      Niveau: r.niveau || '—',
+      Email: r.email || '-',
+      Filiere: r.filiere || '-',
+      Niveau: r.niveau || '-',
       Score: r.score,
       Total: r.total,
       Note_Sur_20: r.total ? ((r.score / r.total) * 20).toFixed(2) : 0,
@@ -529,9 +530,9 @@ export default function AdminPanel() {
     const data = await api(`/admin/results?ue=${encodeURIComponent(quizId)}`, { auth: 'admin' });
     const rows = data.results.map(r => [
       r.name,
-      r.email || '—',
+      r.email || '-',
       `${r.score}/${r.total}`,
-      r.total ? `${((r.score / r.total) * 20).toFixed(2)}/20` : '—',
+      r.total ? `${((r.score / r.total) * 20).toFixed(2)}/20` : '-',
       r.isMakeup ? 'Rattrapage' : 'Régulier',
       new Date(r.date).toLocaleString('fr-FR')
     ]);
@@ -541,7 +542,7 @@ export default function AdminPanel() {
     }
     const docPdf = new jsPDF();
     docPdf.setFontSize(14);
-    docPdf.text(`Procès-Verbal Officiel des Résultats — ${quizId}`, 14, 14);
+    docPdf.text(`Procès-Verbal Officiel des Résultats · ${quizId}`, 14, 14);
     docPdf.setFontSize(9);
     docPdf.text(`Généré le ${new Date().toLocaleString('fr-FR')} • QCM App`, 14, 21);
     docPdf.autoTable({
@@ -563,7 +564,7 @@ export default function AdminPanel() {
     }
     sessionStorage.removeItem('adminAuth');
     sessionStorage.removeItem('adminToken');
-    location.href = '/admin-login';
+    location.href = ADMIN_LOGIN_PATH;
   };
 
   // ─── Données dérivées ─────────────────────────────────────────────────
@@ -581,7 +582,7 @@ export default function AdminPanel() {
   );
 
   const resultsStats = useMemo(() => {
-    if (!resultsList.length) return { count: 0, average: '—', best: '—' };
+    if (!resultsList.length) return { count: 0, average: '-', best: '-' };
     const notes = resultsList.map(r => (r.total ? (r.score / r.total) * 20 : 0));
     const sum = notes.reduce((a, b) => a + b, 0);
     return {
@@ -763,7 +764,7 @@ export default function AdminPanel() {
                     icon: 'chat',
                     value: stats.pendingMessages,
                     label: 'Messages en attente',
-                    style: 'bg-amber-600/15 text-amber-400 border-amber-600/30'
+                    style: 'bg-indigo-600/15 text-indigo-400 border-indigo-600/30'
                   }
                 ].map(s => (
                   <div key={s.label} className={`${card} p-5`}>
@@ -798,7 +799,7 @@ export default function AdminPanel() {
                         >
                           <div className="min-w-0">
                             <span className="text-[10px] font-bold text-blue-300 bg-blue-600/15 px-2 py-0.5 rounded-full">
-                              {q.filiere} — {q.niveau}
+                              {q.filiere} · {q.niveau}
                             </span>
                             <h4 className="font-black text-white text-sm mt-1 truncate">{q.ue || q.id}</h4>
                             <p className="text-[11px] text-slate-500">
@@ -837,7 +838,7 @@ export default function AdminPanel() {
                             <div className="min-w-0">
                               <h4 className="font-black text-white text-sm truncate">{q.ue || q.id}</h4>
                               <p className="text-[11px] text-slate-500">
-                                {q.filiere} • {q.niveau} — {formatDate(q.launchTime)}
+                                {q.filiere} • {q.niveau} · {formatDate(q.launchTime)}
                               </p>
                             </div>
                             <button
@@ -865,7 +866,7 @@ export default function AdminPanel() {
                   <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
                     <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
                       <Icon name="eye" size={15} className="text-blue-400" />
-                      Questions — {inspectQuizId} ({inspectQuestions.length})
+                      Questions · {inspectQuizId} ({inspectQuestions.length})
                     </h3>
                     <button
                       onClick={() => {
@@ -993,7 +994,7 @@ export default function AdminPanel() {
                         <option value="">Sélectionner une UE…</option>
                         {allUes.map(u => (
                           <option key={u.id} value={u.code || u.id}>
-                            {(u.code || u.id)} — {u.label} ({u.filiere} {u.niveau})
+                            {(u.code || u.id)} · {u.label} ({u.filiere} {u.niveau})
                           </option>
                         ))}
                         {ue && !allUes.some(u => (u.code || u.id) === ue) && (
@@ -1011,7 +1012,7 @@ export default function AdminPanel() {
                         />
                       )}
                       {allUes.length === 0 && !manualUe && (
-                        <p className="text-[11px] text-amber-400 mt-1">
+                        <p className="text-[11px] text-indigo-400 mt-1">
                           Catalogue vide : ajoutez d'abord une UE dans la section « Unités d'enseignement ».
                         </p>
                       )}
@@ -1141,7 +1142,7 @@ export default function AdminPanel() {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="text-[10px] font-bold text-blue-300 bg-blue-600/15 px-2 py-0.5 rounded-full">
-                                {q.filiere || '—'} — {q.niveau || '—'}
+                                {q.filiere || '-'} · {q.niveau || '-'}
                               </span>
                               {q.semestre && (
                                 <span className="text-[10px] font-bold text-emerald-300 bg-emerald-600/15 px-2 py-0.5 rounded-full">
@@ -1391,7 +1392,7 @@ export default function AdminPanel() {
                                 Épreuve : {formatDate(linkedQuiz.launchTime)}
                               </span>
                             ) : linkedQuiz ? (
-                              <span className="text-[10px] font-bold text-amber-300 bg-amber-600/15 border border-amber-600/30 px-2 py-1 rounded-full">
+                              <span className="text-[10px] font-bold text-indigo-300 bg-indigo-600/15 border border-indigo-600/30 px-2 py-1 rounded-full">
                                 Épreuve non programmée
                               </span>
                             ) : (
@@ -1504,7 +1505,7 @@ export default function AdminPanel() {
                             </span>
                           </td>
                           <td className="py-3 px-4 text-slate-300 font-bold">{s.niveau}</td>
-                          <td className="py-3 px-4 text-slate-400">{s.anneeAcademique || '—'}</td>
+                          <td className="py-3 px-4 text-slate-400">{s.anneeAcademique || '-'}</td>
                           <td className="py-3 px-4 text-slate-500">{formatDate(s.createdAt)}</td>
                           <td className="py-3 px-4 text-right">
                             <button
@@ -1539,10 +1540,10 @@ export default function AdminPanel() {
                         loadResults(e.target.value);
                       }}
                     >
-                      <option value="">— Sélectionner une évaluation —</option>
+                      <option value="">· Sélectionner une évaluation ·</option>
                       {filteredHistory.map(q => (
                         <option key={q.id} value={q.id}>
-                          {q.ue || q.id} — {q.filiere || '?'} {q.niveau || ''} ({formatDate(q.launchTime)})
+                          {q.ue || q.id} · {q.filiere || '?'} {q.niveau || ''} ({formatDate(q.launchTime)})
                         </option>
                       ))}
                     </select>
@@ -1594,8 +1595,8 @@ export default function AdminPanel() {
                   <div className={`${card} overflow-hidden`}>
                     <div className="px-6 py-4 border-b border-slate-800">
                       <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
-                        <Icon name="trophy" size={15} className="text-amber-400" />
-                        Résultats — {resultsQuizId}
+                        <Icon name="trophy" size={15} className="text-indigo-400" />
+                        Résultats · {resultsQuizId}
                       </h3>
                     </div>
                     {loadingResults ? (
@@ -1624,17 +1625,17 @@ export default function AdminPanel() {
                             {resultsList.map(r => (
                               <tr key={r.id} className="hover:bg-slate-950/60 transition">
                                 <td className="py-3 px-4 font-bold text-white">{r.name}</td>
-                                <td className="py-3 px-4 text-slate-400 font-mono">{r.email || '—'}</td>
+                                <td className="py-3 px-4 text-slate-400 font-mono">{r.email || '-'}</td>
                                 <td className="py-3 px-4">
                                   <span className="text-blue-300 bg-blue-600/15 px-2 py-0.5 rounded-full font-bold">
-                                    {r.filiere || '—'}
+                                    {r.filiere || '-'}
                                   </span>
                                 </td>
                                 <td className="py-3 px-4 text-right text-slate-300 font-bold">
                                   {r.score}/{r.total}
                                 </td>
                                 <td className="py-3 px-4 text-right font-black text-blue-400">
-                                  {r.total ? ((r.score / r.total) * 20).toFixed(2) : '—'}
+                                  {r.total ? ((r.score / r.total) * 20).toFixed(2) : '-'}
                                 </td>
                                 <td className="py-3 px-4">
                                   <span
@@ -1737,7 +1738,7 @@ export default function AdminPanel() {
                                 f.status === 'traite'
                                   ? 'bg-emerald-500/15 text-emerald-300'
                                   : f.status === 'en_cours'
-                                    ? 'bg-amber-500/15 text-amber-300'
+                                    ? 'bg-indigo-500/15 text-indigo-300'
                                     : 'bg-slate-800 text-slate-400'
                               }`}
                             >
@@ -1745,7 +1746,7 @@ export default function AdminPanel() {
                             </span>
                           </div>
                           <p className="text-[11px] text-slate-500 mt-1">
-                            {f.name || 'Étudiant'} • {f.email || '—'} • {f.filiere || '—'} •{' '}
+                            {f.name || 'Étudiant'} • {f.email || '-'} • {f.filiere || '-'} •{' '}
                             {f.category} • {formatDate(f.date)}
                           </p>
                           <p className="text-xs text-slate-300 leading-relaxed mt-2">{f.message}</p>
@@ -1903,11 +1904,11 @@ export default function AdminPanel() {
               <div className="min-w-0">
                 <h3 className="text-sm font-black text-white flex items-center gap-2">
                   <Icon name="document" size={15} className="text-blue-400" />
-                  Aperçu de l'import — {csvFile?.name || 'fichier.csv'}
+                  Aperçu de l'import · {csvFile?.name || 'fichier.csv'}
                 </h3>
                 <p className="text-[11px] text-slate-500 mt-0.5">
                   {parsedCsvData.questions.length} question(s) détectée(s) • Cible : UE{' '}
-                  <strong className="text-blue-300">{ue.trim().toUpperCase() || '— non saisie —'}</strong>
+                  <strong className="text-blue-300">{ue.trim().toUpperCase() || '· non saisie ·'}</strong>
                 </p>
               </div>
               <button
@@ -1947,7 +1948,7 @@ export default function AdminPanel() {
                   </p>
                 ))}
                 {parsedCsvData.warnings?.map((w, i) => (
-                  <p key={`w${i}`} className="text-[11px] text-amber-300 flex items-start gap-1.5">
+                  <p key={`w${i}`} className="text-[11px] text-indigo-300 flex items-start gap-1.5">
                     <Icon name="alert" size={12} className="mt-0.5 shrink-0" />
                     {w}
                   </p>

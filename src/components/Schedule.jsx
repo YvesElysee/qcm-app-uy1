@@ -67,7 +67,7 @@ export default function Schedule() {
   const badgeColor = (f) => {
     if (f === 'Informatique') return 'bg-blue-500/15 text-blue-300';
     if (f === 'Mathématiques') return 'bg-purple-500/15 text-purple-300';
-    if (f === 'Physique') return 'bg-amber-500/15 text-amber-300';
+    if (f === 'Physique') return 'bg-indigo-500/15 text-indigo-300';
     return 'bg-slate-800 text-slate-300';
   };
 
@@ -235,7 +235,7 @@ export default function Schedule() {
         </div>
 
         <div>
-          <h1 className="text-2xl font-black text-white">Emploi du Temps — Évaluations QCM</h1>
+          <h1 className="text-2xl font-black text-white">Emploi du Temps · Évaluations QCM</h1>
           <p className="text-xs text-slate-400 mt-0.5">QCM App • Plateforme d'évaluation</p>
         </div>
 

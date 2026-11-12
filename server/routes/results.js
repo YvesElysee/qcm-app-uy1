@@ -1,5 +1,5 @@
 /**
- * Routes des résultats — /api/results
+ * Routes des résultats · /api/results
  * - POST : enregistrement d'une copie (étudiant connecté, identité prise du jeton)
  * - GET  : classement public d'une session (remplace onSnapshot via polling)
  * - GET /mine : historique strictement personnel (remplace le filtrage client-side)

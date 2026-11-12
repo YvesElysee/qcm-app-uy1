@@ -1,5 +1,5 @@
 /**
- * Base de données SQLite (better-sqlite3) — remplace Firebase Firestore.
+ * Base de données SQLite (better-sqlite3) · remplace Firebase Firestore.
  * Les noms de colonnes reproduisent exactement les champs des documents Firestore
  * d'origine afin de conserver la même logique métier côté frontend.
  */
@@ -129,7 +129,7 @@ db.exec(`
     niveau   TEXT
   );
 
-  -- Paramètres système (ex-"settings/smtp") — stockés en JSON
+  -- Paramètres système (ex-"settings/smtp") · stockés en JSON
   CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT
@@ -148,6 +148,16 @@ db.exec(`
     token      TEXT PRIMARY KEY,
     createdAt TEXT
   );
+
+  -- Quota d'utilisation du tuteur IA (2 questions max par erreur et par étudiant)
+  CREATE TABLE IF NOT EXISTS ai_usage (
+    userId     TEXT NOT NULL,
+    contextKey TEXT NOT NULL,
+    count      INTEGER NOT NULL DEFAULT 0,
+    updatedAt  TEXT NOT NULL,
+    PRIMARY KEY (userId, contextKey)
+  );
+  CREATE INDEX IF NOT EXISTS idx_ai_usage_updated ON ai_usage(updatedAt);
 `);
 
 /**

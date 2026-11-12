@@ -28,7 +28,7 @@ const FEATURES = [
     icon: 'calendar',
     title: 'Emploi du temps public',
     desc: 'La programmation des évaluations est consultable librement, même sans compte étudiant.',
-    style: 'bg-amber-500/15 text-amber-300'
+    style: 'bg-indigo-500/15 text-indigo-300'
   },
   {
     icon: 'chat',
@@ -48,7 +48,7 @@ const STEPS = [
   {
     n: '1',
     title: 'Créez votre compte',
-    desc: "Nom, email, filière et niveau — c'est tout. Votre filière est ensuite verrouillée pour la sécurité des épreuves."
+    desc: "Nom, email, filière et niveau · c'est tout. Votre filière est ensuite verrouillée pour la sécurité des épreuves."
   },
   {
     n: '2',
@@ -63,7 +63,7 @@ const STEPS = [
 ];
 
 function formatDate(ts) {
-  if (!ts) return '—';
+  if (!ts) return '-';
   return new Date(ts).toLocaleDateString('fr-FR', {
     weekday: 'short',
     day: '2-digit',
@@ -134,7 +134,7 @@ export default function Home() {
         <div className="relative max-w-6xl mx-auto px-4 pt-16 pb-24 text-center">
           <span className="inline-flex items-center gap-2 bg-blue-500/10 border border-blue-500/30 text-blue-300 text-xs font-bold px-4 py-1.5 rounded-full">
             <Icon name="graduation" size={14} />
-            QCM App — Évaluation en ligne 2026
+            QCM App · Évaluation en ligne 2026
           </span>
 
           <h1 className="text-4xl md:text-5xl font-black text-white leading-tight max-w-3xl mx-auto mt-6">
@@ -222,7 +222,7 @@ export default function Home() {
           <div className="flex items-center justify-between flex-wrap gap-3 mb-5">
             <div>
               <h2 className="text-xl font-black text-white">Prochaines évaluations</h2>
-              <p className="text-xs text-slate-400 mt-0.5">Programmation officielle — consultable librement</p>
+              <p className="text-xs text-slate-400 mt-0.5">Programmation officielle · consultable librement</p>
             </div>
             <Link
               to="/schedule"

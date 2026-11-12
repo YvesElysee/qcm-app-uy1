@@ -195,7 +195,7 @@ export default function StudentAuth({ defaultTab = 'login' }) {
           {tab === 'forgot' && (
             <button
               type="button"
-              className="flex-1 py-3 text-sm font-extrabold rounded-2xl bg-slate-800 text-amber-400"
+              className="flex-1 py-3 text-sm font-extrabold rounded-2xl bg-slate-800 text-indigo-400"
             >
               Récupération
             </button>
@@ -479,7 +479,7 @@ export default function StudentAuth({ defaultTab = 'login' }) {
             )}
 
             {simulationCodeInfo && (
-              <div className="bg-amber-950/60 border border-amber-800 text-amber-300 text-xs rounded-xl p-3">
+              <div className="bg-indigo-950/60 border border-indigo-800 text-indigo-300 text-xs rounded-xl p-3">
                 <p className="font-bold">Mode vérification / test :</p>
                 <p className="mt-0.5">Votre code à 6 chiffres est : <strong className="text-sm font-mono tracking-wider">{simulationCodeInfo}</strong></p>
               </div>
@@ -595,8 +595,6 @@ export default function StudentAuth({ defaultTab = 'login' }) {
         <Link to="/" className="hover:text-slate-300 transition">Accueil</Link>
         <span>•</span>
         <Link to="/schedule" className="hover:text-slate-300 transition">Emploi du temps public</Link>
-        <span>•</span>
-        <Link to="/admin-login" className="hover:text-slate-300 transition">Accès Enseignant / Admin</Link>
       </div>
     </div>
   );

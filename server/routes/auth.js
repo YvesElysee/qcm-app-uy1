@@ -1,5 +1,5 @@
 /**
- * Routes d'authentification étudiant — /api/auth
+ * Routes d'authentification étudiant · /api/auth
  * Reproduit exactement la logique de l'ancien services/authService.js
  * (inscription, connexion, profil, changement et réinitialisation de mot de passe en 3 étapes).
  */

@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Icon from '../ui/icons.jsx';
-import { askTutor, TUTOR_SYSTEM_PROMPT } from '../../services/aiService.js';
+import { askTutor, fetchAiStatus } from '../../services/aiService.js';
 
 /**
- * Drawer « Tuteur IA » — aide les étudiants à comprendre leurs mauvaises
- * réponses de QCM en discutant avec l'IA (Puter.js, gratuit).
+ * Drawer « Tuteur IA » · aide les étudiants à comprendre leurs mauvaises
+ * réponses de QCM. Les appels passent par le proxy serveur /api/ai : aucune
+ * clé, aucun fournisseur et aucun modèle ne sont exposés au navigateur.
  *
  * Props :
  * - open      : affichage du drawer
@@ -13,11 +14,13 @@ import { askTutor, TUTOR_SYSTEM_PROMPT } from '../../services/aiService.js';
  *     key: 'q12' | 'general',   // changement => réinitialise la discussion
  *     kind: 'question' | 'general',
  *     quizId: 'INF232',
+ *     questionId: 42,
  *     question: 'Texte de la question',
  *     options: [{label:'A', text:'...'}, ...],
  *     selected: 'A',              // réponse de l'étudiant (fausse)
  *     correct: 'B'                // bonne réponse
  *   }
+ * - status    : { available, maxPerError, dailyLimit, remainingToday }
  */
 
 const QUICK_PROMPTS_QUESTION = [
@@ -33,8 +36,7 @@ const QUICK_PROMPTS_GENERAL = [
   'Comment comprendre mes erreurs récurrentes ?'
 ];
 
-// Identifiant de message — crypto.randomUUID n'existe que en contexte
-// sécurisé (HTTPS / localhost) : on prévoit une alternative simple.
+// Identifiant de message · crypto.randomUUID n'existe qu'en contexte sécurisé
 let idSeq = 0;
 function newId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -44,45 +46,34 @@ function newId() {
   return `msg-${idSeq}-${Math.random().toString(36).slice(2)}`;
 }
 
-function buildSystemMessage(context) {
-  const base = TUTOR_SYSTEM_PROMPT;
-  if (context?.kind !== 'question') {
-    return {
-      role: 'system',
-      content: `${base}\n\nContexte : l'étudiant vient de terminer le QCM « ${context?.quizId || 'QCM'} » et souhaite des conseils généraux de révision.`
-    };
-  }
-  const options = (context.options || [])
-    .map((o) => `${o.label}. ${o.text}`)
-    .join('\n');
-  return {
-    role: 'system',
-    content: [
-      base,
-      '',
-      `Contexte : l'étudiant a mal répondu à une question du QCM « ${context.quizId} ».`,
-      `Question : ${context.question}`,
-      'Options :',
-      options,
-      `Réponse choisie par l'étudiant : ${context.selected || 'aucune'}.`,
-      `Bonne réponse : ${context.correct || 'inconnue'}.`,
-      'Aide-le à comprendre son erreur sans simplement lui donner la lettre de la bonne réponse.'
-    ].join('\n')
-  };
-}
-
-export default function AiTutor({ open, onClose, context }) {
+export default function AiTutor({ open, onClose, context, status }) {
   const [history, setHistory] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [aiStatus, setAiStatus] = useState(status || null);
+  const [remaining, setRemaining] = useState(status?.maxPerError ?? null);
+  const [limit, setLimit] = useState(status?.maxPerError ?? 2);
+  const [quotaReached, setQuotaReached] = useState(false);
   const scrollRef = useRef(null);
 
-  const contextKey = context?.key || 'general';
-  const systemMessage = useMemo(() => buildSystemMessage(context), [contextKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const unavailable = aiStatus ? aiStatus.available === false : false;
+  const blocked = unavailable || quotaReached || remaining === 0;
 
-  // Nouveau contexte (autre question) => le composant est remonté par le
-  // parent via la prop `key={context.key}` : la discussion repart de zéro.
+  useEffect(() => {
+    if (!open || aiStatus) return undefined;
+    let active = true;
+    fetchAiStatus()
+      .then((next) => {
+        if (!active) return;
+        setAiStatus(next);
+        setLimit(next.maxPerError || 2);
+        setRemaining(next.maxPerError || 2);
+        if (!next.available) setError("L'assistant IA n'est pas encore activé sur cette plateforme.");
+      })
+      .catch(() => { /* indisponibilité silencieuse : le bouton reste masqué */ });
+    return () => { active = false; };
+  }, [open, aiStatus]);
 
   // Défilement automatique vers le dernier message
   useEffect(() => {
@@ -101,8 +92,9 @@ export default function AiTutor({ open, onClose, context }) {
   const send = useCallback(
     async (text) => {
       const content = (text || input).trim();
-      if (!content || loading) return;
+      if (!content || loading || blocked) return;
 
+      const previous = history.map(({ role, content: c }) => ({ role, content: c }));
       const userMessage = { role: 'user', content, id: newId() };
       setHistory((h) => [...h, userMessage]);
       setInput('');
@@ -110,19 +102,27 @@ export default function AiTutor({ open, onClose, context }) {
       setLoading(true);
 
       try {
-        const reply = await askTutor([systemMessage, ...history, userMessage]);
-        setHistory((h) => [...h, { role: 'assistant', content: reply, id: newId() }]);
+        const data = await askTutor({ context, message: content, history: previous });
+        setHistory((h) => [...h, { role: 'assistant', content: data.reply, id: newId() }]);
+        if (Number.isFinite(data.limit)) setLimit(data.limit);
+        if (Number.isFinite(data.remaining)) setRemaining(data.remaining);
+        if (data.remaining === 0) setQuotaReached(true);
       } catch (e) {
+        if (e?.status === 429) {
+          setQuotaReached(true);
+          setRemaining(0);
+        }
         setError(e.message || 'Une erreur inattendue est survenue.');
       } finally {
         setLoading(false);
       }
     },
-    [input, loading, history, systemMessage]
+    [input, loading, blocked, history, context]
   );
 
   const quickPrompts =
     context?.kind === 'question' ? QUICK_PROMPTS_QUESTION : QUICK_PROMPTS_GENERAL;
+  const quotaLabel = context?.kind === 'question' ? 'cette erreur' : 'ce QCM';
 
   return (
     <div
@@ -152,10 +152,20 @@ export default function AiTutor({ open, onClose, context }) {
           </span>
           <div className="flex-1 min-w-0">
             <h2 className="text-sm font-bold text-white leading-tight">Tuteur IA</h2>
-            <p className="text-[11px] text-slate-400">
-              Comprendre vos erreurs, pas les corriger pour vous
-            </p>
+            <p className="text-[11px] text-slate-400">Assistant pédagogique QCM App</p>
           </div>
+          {!unavailable && remaining !== null && (
+            <span
+              className={`text-[10px] font-bold px-2 py-1 rounded-full ${
+                remaining > 0
+                  ? 'bg-blue-600/20 text-blue-300'
+                  : 'bg-slate-800 text-slate-500'
+              }`}
+              title={`Questions restantes pour ${quotaLabel}`}
+            >
+              {remaining}/{limit}
+            </span>
+          )}
           <button
             onClick={onClose}
             aria-label="Fermer le tuteur IA"
@@ -170,7 +180,7 @@ export default function AiTutor({ open, onClose, context }) {
           <div className="mx-4 mt-3 rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 text-xs">
             <div className="flex items-center gap-1.5 text-slate-400 mb-1.5">
               <Icon name="book" size={13} />
-              <span>Question en cours — {context.quizId}</span>
+              <span>Question en cours · {context.quizId}</span>
             </div>
             <p className="text-slate-200 leading-relaxed line-clamp-3">{context.question}</p>
             <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1">
@@ -188,7 +198,14 @@ export default function AiTutor({ open, onClose, context }) {
 
         {/* Discussion */}
         <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
-          {history.length === 0 && !loading && (
+          {unavailable && (
+            <div className="flex items-start gap-2 bg-slate-800/60 border border-slate-700 text-slate-300 text-xs rounded-xl px-3.5 py-3">
+              <Icon name="info" size={15} className="mt-0.5" />
+              <p>L'assistant IA n'est pas encore activé sur cette plateforme.</p>
+            </div>
+          )}
+
+          {history.length === 0 && !loading && !unavailable && (
             <div className="text-center py-8 space-y-4">
               <div className="w-12 h-12 mx-auto rounded-2xl bg-blue-600/10 border border-blue-600/30 text-blue-400 flex items-center justify-center">
                 <Icon name="lightbulb" size={22} />
@@ -202,7 +219,8 @@ export default function AiTutor({ open, onClose, context }) {
                   <button
                     key={p}
                     onClick={() => send(p)}
-                    className="text-xs text-slate-300 bg-slate-800/70 hover:bg-blue-600 hover:text-white border border-slate-700 hover:border-blue-600 rounded-xl px-3.5 py-2 transition text-left max-w-[17rem]"
+                    disabled={blocked}
+                    className="text-xs text-slate-300 bg-slate-800/70 hover:bg-blue-600 hover:text-white border border-slate-700 hover:border-blue-600 rounded-xl px-3.5 py-2 transition text-left max-w-[17rem] disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {p}
                   </button>
@@ -238,6 +256,16 @@ export default function AiTutor({ open, onClose, context }) {
             </div>
           )}
 
+          {quotaReached && !unavailable && (
+            <div className="flex items-start gap-2 bg-indigo-950/50 border border-indigo-800 text-indigo-300 text-xs rounded-xl px-3.5 py-3">
+              <Icon name="info" size={15} className="mt-0.5" />
+              <p>
+                Limite atteinte : {limit} questions maximum pour {quotaLabel}.
+                Continuez à relire la correction, vous pouvez revenir demain.
+              </p>
+            </div>
+          )}
+
           {error && (
             <div className="flex items-start gap-2 bg-red-950/60 border border-red-800 text-red-300 text-xs rounded-xl px-3.5 py-3">
               <Icon name="alert" size={15} className="mt-0.5" />
@@ -247,7 +275,7 @@ export default function AiTutor({ open, onClose, context }) {
                   onClick={() => setError(null)}
                   className="mt-1.5 text-[11px] font-semibold underline underline-offset-2 hover:text-red-200"
                 >
-                  Réessayer
+                  Fermer
                 </button>
               </div>
             </div>
@@ -264,13 +292,13 @@ export default function AiTutor({ open, onClose, context }) {
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Posez votre question au tuteur…"
-              disabled={loading}
+              placeholder={blocked ? 'Limite atteinte pour ce contexte' : 'Posez votre question au tuteur…'}
+              disabled={loading || blocked}
               className="flex-1 bg-transparent text-xs text-slate-200 placeholder:text-slate-500 outline-none disabled:opacity-50"
             />
             <button
               type="submit"
-              disabled={loading || !input.trim()}
+              disabled={loading || blocked || !input.trim()}
               aria-label="Envoyer"
               className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center transition hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed"
             >
@@ -279,8 +307,9 @@ export default function AiTutor({ open, onClose, context }) {
           </form>
           <p className="mt-2 flex items-center gap-1.5 text-[10px] text-slate-500">
             <Icon name="info" size={11} />
-            Assistant IA gratuit via Puter.js — une connexion gratuite peut être proposée
-            à la première utilisation.
+            {unavailable
+              ? 'Assistant pédagogique QCM App · bientôt disponible'
+              : `${remaining ?? limit} question(s) restante(s) pour ${quotaLabel} · assistant QCM App`}
           </p>
         </div>
       </aside>

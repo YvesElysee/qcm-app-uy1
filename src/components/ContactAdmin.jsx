@@ -211,7 +211,7 @@ export default function ContactAdmin({ onClose, preselectedUe = '' }) {
 
               <div className="bg-blue-950/50 border border-blue-900 rounded-xl p-3 flex items-center justify-between text-xs text-blue-300">
                 <span>
-                  Envoyé par : <strong>{user.name || 'Étudiant'}</strong> ({user.email}) • {user.filiere} — {user.niveau}
+                  Envoyé par : <strong>{user.name || 'Étudiant'}</strong> ({user.email}) • {user.filiere} · {user.niveau}
                 </span>
               </div>
 
@@ -255,7 +255,7 @@ export default function ContactAdmin({ onClose, preselectedUe = '' }) {
                       msg.status === 'traite'
                         ? 'bg-emerald-600/15 text-emerald-300'
                         : msg.status === 'en_cours'
-                        ? 'bg-amber-600/15 text-amber-300'
+                        ? 'bg-indigo-600/15 text-indigo-300'
                         : 'bg-slate-800 text-slate-400'
                     }`}>
                       {msg.status === 'traite' ? 'Traité' : msg.status === 'en_cours' ? 'En cours' : 'En attente'}

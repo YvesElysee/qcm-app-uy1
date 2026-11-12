@@ -1,4 +1,5 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import AdminPanel from './AdminPanel';
 import QuizSession from './QuizSession';
 import Login from './components/Login';
@@ -13,11 +14,28 @@ import Home from './components/pages/Home';
 import NotFound from './components/pages/NotFound';
 import ContactPage from './components/pages/ContactPage';
 import { getCurrentUser } from './services/authService';
+import { ADMIN_LOGIN_PATH, ADMIN_PANEL_PATH } from './config';
 
 // ── Guard Admin ───────────────────────────────────────────────────────
 function RequireAdmin({ children }) {
   const ok = sessionStorage.getItem('adminAuth') === '1';
-  return ok ? children : <Navigate to="/admin-login" replace />;
+  return ok ? children : <Navigate to={ADMIN_LOGIN_PATH} replace />;
+}
+
+// ── Raccourci discret vers le portail admin (Ctrl + Shift + Alt + A) ──
+function AdminShortcut() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.ctrlKey && e.shiftKey && e.altKey && (e.key === 'A' || e.key === 'a')) {
+        e.preventDefault();
+        navigate(ADMIN_LOGIN_PATH);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [navigate]);
+  return null;
 }
 
 // ── Guard Étudiant ───────────────────────────────────────────────────
@@ -48,6 +66,7 @@ export default function App() {
   return (
     <Router>
       <ScrollToTop />
+      <AdminShortcut />
       <Routes>
         {/* Accueil public (présentation, stats, prochaines évaluations) */}
         <Route path="/" element={<Layout><Home /></Layout>} />
@@ -85,11 +104,11 @@ export default function App() {
           element={<RequireStudent><Layout><ReviewSession /></Layout></RequireStudent>}
         />
 
-        {/* Espace Administrateur (interfaces dédiées, sans navbar) */}
-        <Route path="/admin-login" element={<Login />} />
-        <Route path="/admin" element={<RequireAdmin><AdminPanel /></RequireAdmin>} />
+        {/* Espace Administrateur · portail discret, sans lien public */}
+        <Route path={ADMIN_LOGIN_PATH} element={<Login />} />
+        <Route path={ADMIN_PANEL_PATH} element={<RequireAdmin><AdminPanel /></RequireAdmin>} />
 
-        {/* 404 — route inconnue */}
+        {/* 404 · route inconnue */}
         <Route path="*" element={<Layout><NotFound /></Layout>} />
       </Routes>
     </Router>

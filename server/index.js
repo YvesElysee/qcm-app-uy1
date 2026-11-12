@@ -1,5 +1,5 @@
 /**
- * Serveur API Node.js / Express — QCM App
+ * Serveur API Node.js / Express · QCM App
  *
  * Remplace Firebase Firestore : toute la logique de données est désormais
  * gérée ici (SQLite) et exposée via une API REST sécurisée par jetons.
@@ -21,6 +21,7 @@ import feedbackRoutes from './routes/feedback.js';
 import uesRoutes from './routes/ues.js';
 import adminRoutes from './routes/admin.js';
 import settingsRoutes from './routes/settings.js';
+import aiRoutes from './routes/ai.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3001;
@@ -37,6 +38,7 @@ app.use('/api/feedback', feedbackRoutes);
 app.use('/api/ues', uesRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/ai', aiRoutes);
 
 /**
  * Statistiques publiques de la plateforme (page d'accueil).
@@ -95,6 +97,9 @@ setInterval(() => {
     const now = Date.now();
     db.prepare('DELETE FROM quiz_sessions WHERE lastSeen < ?').run(now - 5 * 60 * 1000);
     db.prepare('DELETE FROM password_resets WHERE expiresAt < ?').run(now - 24 * 60 * 60 * 1000);
+    // Historique de quota IA de plus de 30 jours (les compteurs quotidiens n'en ont plus besoin)
+    db.prepare('DELETE FROM ai_usage WHERE updatedAt < ?')
+      .run(new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString());
   } catch (err) {
     console.warn('[cleanup] Échec du nettoyage périodique :', err.message);
   }
@@ -102,7 +107,11 @@ setInterval(() => {
 
 // ── Démarrage ─────────────────────────────────────────────────────────
 if (!process.env.ADMIN_PASSWORD) {
-  console.warn('[api] ⚠️  ADMIN_PASSWORD non défini dans .env — la connexion administrateur sera refusée.');
+  console.warn('[api] ⚠️  ADMIN_PASSWORD non défini dans .env · la connexion administrateur sera refusée.');
+}
+if (!process.env.GROQ_API_KEYS && !process.env.GROQ_API_KEY
+  && !process.env.GEMINI_API_KEYS && !process.env.GEMINI_API_KEY) {
+  console.warn('[api] ⚠️  Aucune clé IA configurée · le tuteur IA reste masqué dans l\'interface.');
 }
 
 app.listen(PORT, () => {

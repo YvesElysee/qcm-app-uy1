@@ -1,5 +1,5 @@
 /**
- * Routes des paramètres système — /api/settings
+ * Routes des paramètres système · /api/settings
  * - Configuration SMTP Google (lecture/écriture réservées à l'admin)
  * - Test de connexion SMTP en temps réel (ancien /api/test-smtp du plugin Vite)
  */

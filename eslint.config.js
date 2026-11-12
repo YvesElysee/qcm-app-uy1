@@ -19,7 +19,7 @@ export default defineConfig([
     },
   },
   {
-    // Backend Node.js / Express — globals serveur
+    // Backend Node.js / Express · globals serveur
     files: ['server/**/*.js'],
     languageOptions: {
       globals: globals.node,

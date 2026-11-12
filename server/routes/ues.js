@@ -1,5 +1,5 @@
 /**
- * Routes des Unités d'Enseignement — /api/ues
+ * Routes des Unités d'Enseignement · /api/ues
  * - Lecture publique (comme les anciennes règles Firestore)
  * - Écriture réservée à l'admin
  */

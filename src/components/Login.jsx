@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { api } from '../services/api';
 import usePageTitle from '../hooks/usePageTitle';
 import Icon from './ui/icons.jsx';
+import { ADMIN_PANEL_PATH } from '../config';
 
 export default function Login() {
     usePageTitle('Accès administrateur');
@@ -25,7 +26,7 @@ export default function Login() {
             const data = await api('/admin/login', { method: 'POST', body: { password: pwd } });
             sessionStorage.setItem('adminAuth', '1');
             sessionStorage.setItem('adminToken', data.token);
-            navigate('/admin');
+            navigate(ADMIN_PANEL_PATH);
         } catch (err) {
             setError(true);
             setErrorMsg(err.message || 'Mot de passe incorrect.');
@@ -47,7 +48,7 @@ export default function Login() {
                 </div>
 
                 {expired && (
-                    <div className="mb-5 flex items-start gap-2 bg-amber-950/50 border border-amber-800 text-amber-300 text-xs rounded-xl px-3.5 py-3">
+                    <div className="mb-5 flex items-start gap-2 bg-indigo-950/50 border border-indigo-800 text-indigo-300 text-xs rounded-xl px-3.5 py-3">
                         <Icon name="clock" size={15} className="mt-0.5" />
                         <span>
                             Session expirée ou fermée à distance. Reconnectez-vous pour

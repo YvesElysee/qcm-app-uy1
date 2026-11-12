@@ -26,8 +26,6 @@ export default function QuizSession() {
   const [answers, setAnswers] = useState([]); // {selected, correct, isOk}[]
 
   const [selectedOption, setSelectedOption] = useState(null);   // option choisie
-  const [feedbackState, setFeedbackState] = useState(null);     // 'correct' | 'wrong' | null
-  const [correctText, setCorrectText] = useState('');           // texte bonne réponse (pour feedback)
 
   const [phase, setPhase] = useState('loading');
   const [countdown, setCountdown] = useState(null);
@@ -41,7 +39,7 @@ export default function QuizSession() {
 
   const submitted = useRef(false);
   const timerInterval = useRef(null);
-  const feedbackTimeout = useRef(null);
+  const lastValidatedRef = useRef(-1);
 
   const user = JSON.parse(localStorage.getItem('userSession')) || { name: 'Anonyme' };
   const safeName = (user.name || 'Anonyme').trim();
@@ -218,12 +216,14 @@ export default function QuizSession() {
   }, [quizId, safeName, questions.length, quizMeta, storageKey, isMakeupMode]);
 
   const handleValidate = useCallback((forced = false) => {
-    if (feedbackState) return;
+    // Empêche une double validation (double-clic ou clic + fin du timer)
+    if (lastValidatedRef.current === currentIndex) return;
+    lastValidatedRef.current = currentIndex;
     clearInterval(timerInterval.current);
 
     const q = questions[currentIndex];
     const correct = (q?.ReponseCorrecte || '').trim();
-    const chosen = (forced ? null : selectedOption);
+    const chosen = forced ? null : selectedOption;
     const cleanChosen = (chosen || '').trim();
     const isOk = cleanChosen !== '' && cleanChosen === correct;
     const newScore = isOk ? score + 1 : score;
@@ -231,27 +231,20 @@ export default function QuizSession() {
 
     setScore(newScore);
     setAnswers(newAnswers);
-    setCorrectText(correct);
-    setFeedbackState(isOk ? 'correct' : 'wrong');
+    setSelectedOption(null);
 
-    // Après 1.8s de feedback coloré → passer à la suivante
-    feedbackTimeout.current = setTimeout(() => {
-      setFeedbackState(null);
-      setSelectedOption(null);
-      setCorrectText('');
-      if (currentIndex + 1 < questions.length) {
-        setCurrentIndex(i => i + 1);
-        if (quizMeta?.timePerQuestion) setTimeLeft(quizMeta.timePerQuestion * 1000);
-      } else {
-        finalSubmit(newScore, newAnswers);
-      }
-    }, 1800);
-  }, [feedbackState, currentIndex, questions, score, answers, selectedOption, quizMeta, finalSubmit]);
+    // Aucun feedback intermédiaire : la correction n'apparaît qu'à la fin.
+    if (currentIndex + 1 < questions.length) {
+      setCurrentIndex(i => i + 1);
+      setTimeLeft(quizMeta?.timePerQuestion ? quizMeta.timePerQuestion * 1000 : null);
+    } else {
+      finalSubmit(newScore, newAnswers);
+    }
+  }, [currentIndex, questions, score, answers, selectedOption, quizMeta, finalSubmit]);
 
   // ── Timer par question ───────────────────────────────────────────────
   useEffect(() => {
     if (phase !== 'quiz' || !quizMeta?.timePerQuestion || quizMeta.timePerQuestion <= 0) return;
-    if (feedbackState) return; // ne pas relancer le timer pendant le feedback
 
     clearInterval(timerInterval.current);
     const ms = quizMeta.timePerQuestion * 1000;
@@ -266,14 +259,14 @@ export default function QuizSession() {
       });
     }, 500);
     return () => clearInterval(timerInterval.current);
-  }, [phase, currentIndex, quizMeta, feedbackState]);
+  }, [phase, currentIndex, quizMeta]);
 
   useEffect(() => {
-    if (timeLeft === 0 && phase === 'quiz' && !feedbackState) {
+    if (timeLeft === 0 && phase === 'quiz') {
       const id = setTimeout(() => handleValidate(true), 0);
       return () => clearTimeout(id);
     }
-  }, [timeLeft, phase, feedbackState, handleValidate]);
+  }, [timeLeft, phase, handleValidate]);
 
   // ── Soumission à endTime (Officielle ou Rattrapage) ───────────────────
   useEffect(() => {
@@ -315,9 +308,8 @@ export default function QuizSession() {
 
   // ── Sélection d'une option ───────────────────────────────────────────
   const handleOptionClick = useCallback((opt) => {
-    if (feedbackState) return; // bloqué pendant le feedback
     setSelectedOption(opt);
-  }, [feedbackState]);
+  }, []);
 
   // ── Feedback à l'admin (depuis l'écran de fin de QCM) ────────────────
   const sendFeedback = useCallback(async () => {
@@ -357,7 +349,7 @@ export default function QuizSession() {
   if (accessError) return (
     <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4">
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 max-w-md text-center">
-        <div className="w-12 h-12 mx-auto rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center mb-4">
+        <div className="w-12 h-12 mx-auto rounded-2xl bg-indigo-500/15 border border-indigo-500/30 text-indigo-400 flex items-center justify-center mb-4">
           <Icon name="lock" size={22} />
         </div>
         <h1 className="text-xl font-black text-white mb-2">Épreuve indisponible</h1>
@@ -418,7 +410,7 @@ export default function QuizSession() {
                 <div className="text-xs opacity-75 mt-1">Note</div>
               </div>
               <div className="bg-white/10 rounded-xl p-3">
-                <div className="text-2xl font-black">#{myRank || '—'}</div>
+                <div className="text-2xl font-black">#{myRank || '-'}</div>
                 <div className="text-xs opacity-75 mt-1">Rang</div>
               </div>
             </div>
@@ -457,7 +449,7 @@ export default function QuizSession() {
           <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6">
             <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-3">
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                <Icon name="trophy" size={18} className="text-amber-400" />
+                <Icon name="trophy" size={18} className="text-indigo-400" />
                 Classement de la session
               </h2>
               <span className="text-xs bg-blue-600/20 text-blue-300 px-2 py-0.5 rounded-full font-bold">{participation} participants</span>
@@ -465,11 +457,11 @@ export default function QuizSession() {
             <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
               {leaderboard.map((entry, index) => {
                 const isMe = entry.name === safeName;
-                const entryNote = entry.total ? ((entry.score / entry.total) * 20).toFixed(1) : '—';
+                const entryNote = entry.total ? ((entry.score / entry.total) * 20).toFixed(1) : '-';
                 return (
                   <div key={index} className={`flex justify-between items-center p-3 rounded-xl border ${isMe ? 'bg-blue-600/15 border-blue-600' : 'bg-slate-950 border-slate-800'}`}>
                     <div className="flex items-center gap-3">
-                      <span className={`font-black text-lg w-7 text-center ${index === 0 ? 'text-yellow-400' : index === 1 ? 'text-slate-300' : index === 2 ? 'text-amber-500' : 'text-slate-500'}`}>#{index + 1}</span>
+                      <span className={`font-black text-lg w-7 text-center ${index === 0 ? 'text-yellow-400' : index === 1 ? 'text-slate-300' : index === 2 ? 'text-indigo-500' : 'text-slate-500'}`}>#{index + 1}</span>
                       <div>
                         <span className="font-bold text-slate-200 text-sm">{entry.name}</span>
                         {isMe && <span className="ml-2 text-xs bg-blue-600 text-white px-1.5 py-0.5 rounded-full">Moi</span>}
@@ -493,7 +485,7 @@ export default function QuizSession() {
   if (questions.length === 0) return (
     <div className="min-h-screen flex items-center justify-center bg-slate-950 p-6">
       <div className="bg-slate-900 p-8 rounded-2xl border border-slate-800 text-center max-w-md">
-        <div className="w-12 h-12 mx-auto rounded-2xl bg-amber-500/15 border border-amber-600/30 text-amber-400 flex items-center justify-center mb-4">
+        <div className="w-12 h-12 mx-auto rounded-2xl bg-indigo-500/15 border border-indigo-600/30 text-indigo-400 flex items-center justify-center mb-4">
           <Icon name="alert" size={22} />
         </div>
         <h2 className="text-2xl font-bold text-white">Epreuve non disponible</h2>
@@ -554,48 +546,33 @@ export default function QuizSession() {
         <div className="w-full max-w-3xl bg-slate-900 p-8 rounded-2xl border border-slate-800 shadow-xl shadow-black/30">
           <h2 className="text-xl font-bold mb-8 text-slate-100 leading-relaxed">{q.Question}</h2>
 
-          {/* Feedback banner */}
-          {feedbackState && (
-            <div className={`mb-4 p-3 rounded-xl text-sm font-bold text-center ${feedbackState === 'correct' ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-600' : 'bg-red-950/60 text-red-300 border border-red-600'}`}>
-              {feedbackState === 'correct' ? 'Bonne reponse !' : `Mauvaise reponse — La bonne reponse etait : ${correctText}`}
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 gap-3 mb-8">
+          <div className="grid grid-cols-1 gap-3 mb-6">
             {shuffledOptions.map(opt => {
               const isSelected = opt === selectedOption;
-              const clean = opt.trim();
-              const isCorrect = clean === (q.ReponseCorrecte || '').trim();
 
-              let cls = 'w-full text-left p-4 border rounded-xl transition font-semibold text-sm ';
-              if (feedbackState === 'correct' && isSelected) {
-                cls += 'bg-emerald-950/60 border-emerald-500 text-emerald-300';
-              } else if (feedbackState === 'wrong' && isSelected) {
-                cls += 'bg-red-950/60 border-red-500 text-red-300';
-              } else if (feedbackState === 'wrong' && isCorrect) {
-                cls += 'bg-emerald-950/60 border-emerald-500 text-emerald-300';
-              } else if (isSelected) {
-                cls += 'bg-blue-600/20 border-blue-500 text-blue-100';
-              } else if (feedbackState) {
-                cls += 'bg-slate-950 border-slate-800 text-slate-500';
-              } else {
-                cls += 'border-slate-800 bg-slate-950 text-slate-200 hover:bg-slate-800 hover:border-blue-600 cursor-pointer';
-              }
+              const cls = 'w-full text-left p-4 border rounded-xl transition font-semibold text-sm ' +
+                (isSelected
+                  ? 'bg-blue-600/20 border-blue-500 text-blue-100'
+                  : 'border-slate-800 bg-slate-950 text-slate-200 hover:bg-slate-800 hover:border-blue-600 cursor-pointer');
 
               return (
-                <button key={opt} onClick={() => handleOptionClick(opt)} disabled={!!feedbackState} className={cls}>
+                <button key={opt} onClick={() => handleOptionClick(opt)} className={cls}>
                   {opt}
                 </button>
               );
             })}
           </div>
 
-          <div className="flex justify-end">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <p className="flex items-center gap-1.5 text-xs text-slate-500">
+              <Icon name="info" size={13} />
+              La correction sera disponible uniquement à la fin de l'épreuve.
+            </p>
             <button
               onClick={() => handleValidate(false)}
-              disabled={!selectedOption || !!feedbackState}
+              disabled={!selectedOption}
               className="bg-blue-600 text-white px-8 py-3 rounded-xl font-bold shadow-lg shadow-blue-600/25 hover:bg-blue-500 transition disabled:opacity-40 disabled:shadow-none">
-              Valider et Suivant
+              {currentIndex + 1 === questions.length ? 'Valider et terminer' : 'Valider et suivant'}
             </button>
           </div>
         </div>

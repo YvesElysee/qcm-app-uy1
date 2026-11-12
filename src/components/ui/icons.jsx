@@ -268,7 +268,7 @@ const ICONS = {
 };
 
 /**
- * Icône SVG — trait fin arrondi, couleur héritée du texte (currentColor).
+ * Icône SVG · trait fin arrondi, couleur héritée du texte (currentColor).
  */
 export default function Icon({ name, size = 18, className = '', strokeWidth = 2 }) {
   const content = ICONS[name];

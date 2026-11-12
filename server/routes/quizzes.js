@@ -1,5 +1,5 @@
 /**
- * Routes des QCM — /api/quizzes
+ * Routes des QCM · /api/quizzes
  * - Lecture publique : liste, métadonnées, questions (même logique d'accès que Firestore avant)
  * - Écriture réservée à l'admin : programmation, import CSV de questions, suppression
  * - Présence temps réel des participants (heartbeat + compteur, remplace onSnapshot)
@@ -62,7 +62,7 @@ router.get('/', (req, res) => {
 });
 
 /**
- * Métadonnées d'un QCM (public) — 404 si introuvable
+ * Métadonnées d'un QCM (public) · 404 si introuvable
  */
 router.get('/:id', (req, res) => {
   const quiz = db.prepare(`
@@ -78,7 +78,7 @@ router.get('/:id', (req, res) => {
 });
 
 /**
- * Questions d'un QCM (public) — dans l'ordre d'insertion (identique à Firestore)
+ * Questions d'un QCM (public) · dans l'ordre d'insertion (identique à Firestore)
  */
 router.get('/:id/questions', (req, res) => {
   const questions = db.prepare(`

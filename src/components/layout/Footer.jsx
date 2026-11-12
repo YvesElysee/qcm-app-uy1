@@ -3,7 +3,7 @@ import { getCurrentUser } from '../../services/authService';
 
 /**
  * Pied de page partagé : identité, navigation rapide et informations
- * institutionnelles. Le lien "Accès Enseignant / Admin" reste discret.
+ * institutionnelles. Aucun lien vers le portail administrateur n'est exposé.
  */
 export default function Footer() {
   const user = getCurrentUser();
@@ -51,12 +51,7 @@ export default function Footer() {
           <h3 className="text-[11px] font-black uppercase tracking-wider text-slate-500 mb-3">Informations</h3>
           <ul className="space-y-2 text-xs">
             <li>QCM App</li>
-            <li>Évaluation en ligne — Année académique 2025-2026</li>
-            <li>
-              <Link to="/admin-login" className="font-bold hover:text-white transition">
-                Accès Enseignant / Admin
-              </Link>
-            </li>
+            <li>Évaluation en ligne · Année académique 2025-2026</li>
           </ul>
         </div>
       </div>

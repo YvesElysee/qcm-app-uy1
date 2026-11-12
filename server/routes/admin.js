@@ -1,5 +1,5 @@
 /**
- * Routes administrateur — /api/admin
+ * Routes administrateur · /api/admin
  * - Login par mot de passe (ADMIN_PASSWORD du .env, vérifié côté serveur)
  * - Gestion des étudiants inscrits (liste, suppression)
  * - Résultats pour exports CSV / PDF

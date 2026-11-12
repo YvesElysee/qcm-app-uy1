@@ -1,83 +1,48 @@
 /**
- * Assistant pédagogique IA — Puter.js (gratuit, exécuté dans le navigateur).
+ * Assistant pédagogique IA · couche cliente du proxy serveur /api/ai.
  *
- * - Aucune clé API à gérer et aucun coût serveur : les requêtes partent du
- *   navigateur de l'étudiant via le script https://js.puter.com/v2/ chargé
- *   dans index.html. La première utilisation peut proposer une connexion
- *   Puter gratuite (popup).
- * - API : window.puter.ai.chat(messages) → réponse dans response.message.content
+ * Les clés des fournisseurs restent exclusivement côté serveur. Le navigateur
+ * ne connaît ni le fournisseur, ni le modèle : il envoie simplement le contexte
+ * de la question et le message de l'étudiant.
  */
+import { api } from './api';
 
-export const TUTOR_SYSTEM_PROMPT = [
-  'Tu es « Tuteur QCM », un assistant pédagogique bienveillant qui aide des étudiants',
-  "de premier cycle universitaire à comprendre leurs mauvaises réponses aux QCM.",
-  'Règles de comportement :',
-  '1. Réponds toujours en français, sur un ton clair, encourageant et professionnel.',
-  "2. Ne donne jamais simplement la lettre de la bonne réponse : guide l'étudiant pour",
-  'qu\'il comprenne pourquoi sa réponse était incorrecte et pourquoi la bonne réponse',
-  'est la bonne.',
-  '3. Reste concis (environ 180 mots maximum), structuré : explication courte, exemple',
-  'concret si utile, étapes numérotées si nécessaire.',
-  "4. Si la question de l'étudiant sort du cadre des QCM et des études, ramène-le",
-  'gentiment au sujet.',
-  "5. N'invente pas de faits : si tu n'es pas sûr, dis-le et propose une méthode pour",
-  'vérifier.'
-].join('\n');
+const DEFAULT_STATUS = {
+  available: false,
+  maxPerError: 2,
+  dailyLimit: 0,
+  remainingToday: 0
+};
 
 /**
- * Indique si le script Puter.js est chargé et utilisable.
+ * Récupère la disponibilité de l'assistant et les quotas de l'étudiant.
+ * En cas d'erreur réseau/session, l'assistant est considéré indisponible.
  */
-export function isAiAvailable() {
-  return typeof window !== 'undefined' && !!window.puter?.ai?.chat;
+export async function fetchAiStatus({ signal } = {}) {
+  try {
+    const data = await api('/ai/status', { auth: 'student', signal });
+    return {
+      available: !!data.available,
+      maxPerError: Number.isFinite(data.maxPerError) ? data.maxPerError : DEFAULT_STATUS.maxPerError,
+      dailyLimit: Number.isFinite(data.dailyLimit) ? data.dailyLimit : 0,
+      remainingToday: Number.isFinite(data.remainingToday) ? data.remainingToday : 0
+    };
+  } catch (err) {
+    if (err?.name === 'AbortError') throw err;
+    return { ...DEFAULT_STATUS };
+  }
 }
 
 /**
- * Extrait le texte d'une réponse Puter, quel que soit son format.
- * Puter peut renvoyer une chaîne, un objet `{ message: { content } }`
- * ou un contenu sous forme de tableau de blocs.
+ * Envoie une question au tuteur.
+ * @param {object} params
+ * @param {object} params.context   Contexte de la question (kind, quizId, questionId, ...)
+ * @param {string} params.message   Message de l'étudiant
+ * @param {Array<{role:'user'|'assistant', content:string}>} [params.history]
+ * @param {AbortSignal} [params.signal]
+ * @returns {Promise<{reply:string, remaining:number, limit:number, remainingToday:number}>}
  */
-function extractText(response) {
-  if (typeof response === 'string') return response.trim();
-  if (!response || typeof response !== 'object') return '';
-
-  const content = response?.message?.content ?? response?.content ?? response?.text;
-  if (typeof content === 'string') return content.trim();
-
-  if (Array.isArray(content)) {
-    return content
-      .map(part => (typeof part === 'string' ? part : part?.text || part?.content || ''))
-      .join('')
-      .trim();
-  }
-
-  return '';
-}
-
-/**
- * Pose une conversation au tuteur IA.
- * @param {Array<{role:'system'|'user'|'assistant', content:string}>} messages
- *   Historique complet (message système d'abord).
- * @param {{ signal?: AbortSignal }} [options]
- * @returns {Promise<string>} La réponse du tuteur.
- */
-export async function askTutor(messages, { signal } = {}) {
-  if (!isAiAvailable()) {
-    throw new Error(
-      "L'assistant IA n'est pas disponible (script Puter non chargé). Rechargez la page puis réessayez."
-    );
-  }
-
-  // Puter n'accepte que les champs role/content : on retire les `id` locaux
-  const payload = (Array.isArray(messages) ? messages : [])
-    .filter(m => m && typeof m.content === 'string' && m.content.trim())
-    .filter(m => ['system', 'user', 'assistant'].includes(m.role))
-    .map(({ role, content }) => ({ role, content }));
-
-  if (payload.length === 0) {
-    throw new Error("Aucun message à envoyer à l'assistant IA.");
-  }
-
-  // Garde-fou : une réponse qui ne vient pas en 60 s est abandonnée
+export async function askTutor({ context, message, history = [], signal } = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60000);
   const onExternalAbort = () => controller.abort();
@@ -86,31 +51,24 @@ export async function askTutor(messages, { signal } = {}) {
     else signal.addEventListener('abort', onExternalAbort, { once: true });
   }
 
-  let response;
   try {
-    response = await window.puter.ai.chat(payload, {
-      normalize: true,
-      signal: controller.signal
+    return await api('/ai/tutor', {
+      method: 'POST',
+      auth: 'student',
+      signal: controller.signal,
+      body: {
+        context,
+        message,
+        history: history.map(({ role, content }) => ({ role, content }))
+      }
     });
   } catch (err) {
-    if (err?.name === 'AbortError' || controller.signal.aborted) {
+    if (err?.name === 'AbortError') {
       throw new Error("L'assistant IA met trop de temps à répondre. Réessayez.", { cause: err });
     }
-    const detail = err?.message || err?.error?.message || '';
-    throw new Error(
-      detail
-        ? `L'assistant IA a échoué : ${detail}`
-        : "L'assistant IA a échoué. Autorisez les fenêtres popups puis réessayez.",
-      { cause: err }
-    );
+    throw err;
   } finally {
     clearTimeout(timeout);
     if (signal) signal.removeEventListener('abort', onExternalAbort);
   }
-
-  const text = extractText(response);
-  if (!text) {
-    throw new Error("L'assistant IA n'a pas renvoyé de réponse exploitable. Réessayez.");
-  }
-  return text;
 }

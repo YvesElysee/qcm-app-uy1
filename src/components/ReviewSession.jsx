@@ -4,6 +4,7 @@ import { api } from '../services/api';
 import usePageTitle from '../hooks/usePageTitle';
 import Icon from './ui/icons.jsx';
 import AiTutor from './ai/AiTutor.jsx';
+import { fetchAiStatus } from '../services/aiService';
 
 function seededShuffle(arr, seed) {
     const a = [...arr];
@@ -19,7 +20,7 @@ function seededShuffle(arr, seed) {
 
 export default function ReviewSession() {
     const { quizId } = useParams();
-    usePageTitle(`Correction — ${quizId || ''}`);
+    usePageTitle(`Correction · ${quizId || ''}`);
     const [questions, setQuestions] = useState([]);
     const [answers, setAnswers] = useState([]); // { selected, correct, isOk }[]
     const [score, setScore] = useState(null);
@@ -27,9 +28,10 @@ export default function ReviewSession() {
     const [loading, setLoading] = useState(true);
     const [quizMeta, setQuizMeta] = useState(null);
 
-    // Tuteur IA (drawer) — contexte de la question actuellement discutée
+    // Tuteur IA (drawer) · contexte de la question actuellement discutée
     const [aiOpen, setAiOpen] = useState(false);
     const [aiContext, setAiContext] = useState(null);
+    const [aiStatus, setAiStatus] = useState(null);
 
     const user = JSON.parse(localStorage.getItem('userSession')) || { name: 'Anonyme' };
     const safeName = (user.name || 'Anonyme').trim();
@@ -84,6 +86,16 @@ export default function ReviewSession() {
         load();
     }, [quizId, safeName, userEmail]);
 
+    // Disponibilité de l'assistant : les boutons IA restent masqués tant que
+    // les clés ne sont pas configurées côté serveur.
+    useEffect(() => {
+        let active = true;
+        fetchAiStatus()
+            .then((next) => { if (active) setAiStatus(next); })
+            .catch(() => { /* assistant indisponible */ });
+        return () => { active = false; };
+    }, []);
+
     if (loading) return (
         <div className="min-h-screen flex items-center justify-center bg-slate-950">
             <div className="flex flex-col items-center gap-3 text-slate-400">
@@ -96,7 +108,7 @@ export default function ReviewSession() {
     if (!questions.length || score === null) return (
         <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4">
             <div className="bg-slate-900 p-8 rounded-2xl border border-slate-800 text-center max-w-sm">
-                <div className="w-12 h-12 mx-auto rounded-2xl bg-amber-500/15 border border-amber-600/30 text-amber-400 flex items-center justify-center mb-4">
+                <div className="w-12 h-12 mx-auto rounded-2xl bg-indigo-500/15 border border-indigo-600/30 text-indigo-400 flex items-center justify-center mb-4">
                     <Icon name="search" size={22} />
                 </div>
                 <h2 className="text-xl font-bold text-white mb-2">Aucun resultat trouve</h2>
@@ -109,7 +121,8 @@ export default function ReviewSession() {
         </div>
     );
 
-    const note = (total && total > 0) ? ((score / total) * 20).toFixed(2) : '—';
+    const note = (total && total > 0) ? ((score / total) * 20).toFixed(2) : '-';
+    const aiAvailable = aiStatus?.available === true;
 
     // Ouvre le tuteur IA sur une question précise (mauvaise réponse)
     const openTutorForQuestion = (q, i) => {
@@ -127,6 +140,7 @@ export default function ReviewSession() {
             key: `q${i}_${quizId}`,
             kind: 'question',
             quizId,
+            questionId: q.id,
             question: q.Question,
             options: optionsList,
             selected: selectedLabel,
@@ -158,18 +172,20 @@ export default function ReviewSession() {
                         <Icon name="arrow-left" size={14} />
                         Retour à mon espace
                     </Link>
-                    <button
-                        onClick={openTutorGeneral}
-                        className="mb-2 inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-3.5 py-2 rounded-xl transition shadow-lg shadow-blue-600/25"
-                    >
-                        <Icon name="sparkles" size={14} />
-                        Aide IA pour réviser
-                    </button>
+                    {aiAvailable && (
+                        <button
+                            onClick={openTutorGeneral}
+                            className="mb-2 inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-3.5 py-2 rounded-xl transition shadow-lg shadow-blue-600/25"
+                        >
+                            <Icon name="sparkles" size={14} />
+                            Aide IA pour réviser
+                        </button>
+                    )}
                 </div>
 
                 {/* En-tête résumé */}
                 <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl p-8 my-6 text-center shadow-lg shadow-blue-600/20">
-                    <h1 className="text-2xl font-black mb-1">Correction — {quizId}</h1>
+                    <h1 className="text-2xl font-black mb-1">Correction · {quizId}</h1>
                     {quizMeta?.ueLabel && quizMeta.ueLabel !== quizId && (
                         <p className="text-sm font-semibold opacity-90">{quizMeta.ueLabel}</p>
                     )}
@@ -187,7 +203,7 @@ export default function ReviewSession() {
                 </div>
 
                 {/* Bandeau tuteur IA si des erreurs existent */}
-                {wrongCount > 0 && (
+                {wrongCount > 0 && aiAvailable && (
                     <div className="bg-blue-950/50 border border-blue-800 rounded-2xl p-4 mb-5 flex items-center justify-between gap-4 flex-wrap">
                         <div className="flex items-center gap-3">
                             <span className="w-9 h-9 rounded-xl bg-blue-600/20 border border-blue-600/40 text-blue-300 flex items-center justify-center shrink-0">
@@ -229,7 +245,7 @@ export default function ReviewSession() {
                                 {/* En-tête question */}
                                 <div className="flex items-center justify-between px-6 pt-5 pb-3">
                                     <span className={`text-xs font-black uppercase tracking-wider px-2.5 py-1 rounded-full ${isOk ? 'bg-emerald-500/15 text-emerald-300' : notAnswered ? 'bg-slate-800 text-slate-400' : 'bg-red-500/15 text-red-300'}`}>
-                                        {isOk ? 'Correct' : notAnswered ? 'Sans reponse' : 'Incorrect'} — Q{i + 1}
+                                        {isOk ? 'Correct' : notAnswered ? 'Sans reponse' : 'Incorrect'} · Q{i + 1}
                                     </span>
                                     <span className={`font-extrabold text-sm ${isOk ? 'text-emerald-400' : 'text-red-400'}`}>
                                         {isOk ? '+1 pt' : '0 pt'}
@@ -273,7 +289,7 @@ export default function ReviewSession() {
                                     </div>
 
                                     {/* Aide IA sur cette question (uniquement si erreur) */}
-                                    {!isOk && (
+                                    {!isOk && aiAvailable && (
                                         <button
                                             onClick={() => openTutorForQuestion(q, i)}
                                             className="mt-4 inline-flex items-center gap-1.5 text-xs font-bold text-blue-300 hover:text-white bg-blue-950/60 hover:bg-blue-900 border border-blue-800 hover:border-blue-700 px-3.5 py-2 rounded-xl transition"
@@ -289,13 +305,16 @@ export default function ReviewSession() {
                 </div>
             </div>
 
-            {/* Drawer Tuteur IA — remonté (discussion vierge) à chaque nouveau contexte */}
-            <AiTutor
-              key={aiContext?.key || 'none'}
-              open={aiOpen}
-              onClose={() => setAiOpen(false)}
-              context={aiContext}
-            />
+            {/* Drawer Tuteur IA · remonté (discussion vierge) à chaque nouveau contexte */}
+            {aiContext && (
+              <AiTutor
+                key={aiContext.key || 'none'}
+                open={aiOpen}
+                onClose={() => setAiOpen(false)}
+                context={aiContext}
+                status={aiStatus}
+              />
+            )}
         </div>
     );
 }

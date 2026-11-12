@@ -39,7 +39,7 @@ export function createGmailTransporter(user, pass) {
 
 /**
  * Envoie le code de réinitialisation par email.
- * Retourne { success, error? } — identique à l'ancien handler.
+ * Retourne { success, error? } · identique à l'ancien handler.
  */
 export async function sendResetCodeEmail({ email, code, name }) {
   const { email: user, appPassword: pass } = getSmtpConfig();
@@ -78,7 +78,7 @@ export async function sendResetCodeEmail({ email, code, name }) {
       </p>
       <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
       <p style="color: #cbd5e1; font-size: 11px; text-align: center; margin: 0;">
-        QCM App — Plateforme d'évaluation 2026
+        QCM App · Plateforme d'évaluation 2026
       </p>
     </div>
   `;
@@ -87,7 +87,7 @@ export async function sendResetCodeEmail({ email, code, name }) {
     await transporter.sendMail({
       from: `"QCM App" <${user}>`,
       to: email,
-      subject: `Code de récupération : ${code} — QCM App`,
+      subject: `Code de récupération : ${code} · QCM App`,
       text: `Bonjour, votre code de réinitialisation de mot de passe est : ${code}. Valable 15 minutes.`,
       html: htmlContent
     });
@@ -100,7 +100,7 @@ export async function sendResetCodeEmail({ email, code, name }) {
 
 /**
  * Teste la connexion SMTP et envoie un email de test (panneau admin).
- * Retourne { success, message?, error? } — identique à l'ancien handler.
+ * Retourne { success, message?, error? } · identique à l'ancien handler.
  */
 export async function testSmtpConnection({ smtpEmail, smtpPassword, testRecipient }) {
   if (!smtpEmail || !smtpPassword) {
@@ -117,7 +117,7 @@ export async function testSmtpConnection({ smtpEmail, smtpPassword, testRecipien
     await transporter.sendMail({
       from: `"QCM App" <${smtpEmail}>`,
       to: testRecipient || smtpEmail,
-      subject: 'Test de configuration SMTP Google — QCM App',
+      subject: 'Test de configuration SMTP Google · QCM App',
       text: 'Félicitations ! Votre configuration SMTP Google avec mot de passe d\'application à 16 caractères fonctionne correctement.',
       html: `
         <div style="font-family: sans-serif; padding: 20px; border: 1px solid #22c55e; border-radius: 8px;">

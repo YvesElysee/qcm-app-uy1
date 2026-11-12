@@ -1,9 +1,11 @@
 /**
- * Couche d'accès à l'API REST (Node.js/Express) — remplace Firebase Firestore.
+ * Couche d'accès à l'API REST (Node.js/Express) · remplace Firebase Firestore.
  * Toutes les données transitent désormais par /api/* avec jetons Bearer :
  *  - 'student' : jeton de session étudiant (localStorage userSession)
  *  - 'admin'   : jeton administrateur (sessionStorage adminToken)
  */
+
+import { ADMIN_LOGIN_PATH } from '../config';
 
 function getSession() {
   try {
@@ -24,9 +26,9 @@ function getAdminToken() {
 /**
  * Appelle l'API et lève une Error avec le message serveur en cas d'échec.
  * @param {string} path    Chemin relatif (ex: '/quizzes/INF232')
- * @param {object} options { method, body, auth: 'student' | 'admin' | null }
+ * @param {object} options { method, body, auth: 'student' | 'admin' | null, signal }
  */
-export async function api(path, { method = 'GET', body, auth } = {}) {
+export async function api(path, { method = 'GET', body, auth, signal } = {}) {
   const headers = {};
   if (body !== undefined) headers['Content-Type'] = 'application/json';
 
@@ -43,10 +45,12 @@ export async function api(path, { method = 'GET', body, auth } = {}) {
     res = await fetch(`/api${path}`, {
       method,
       headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal
     });
-  } catch {
-    throw new Error('Le serveur est injoignable. Vérifiez que l\'API est démarrée.');
+  } catch (err) {
+    if (err?.name === 'AbortError') throw err;
+    throw new Error('Le serveur est injoignable. Vérifiez que l\'API est démarrée.', { cause: err });
   }
 
   const data = await res.json().catch(() => ({}));
@@ -60,11 +64,14 @@ export async function api(path, { method = 'GET', body, auth } = {}) {
     if (res.status === 401 && auth === 'admin') {
       sessionStorage.removeItem('adminAuth');
       sessionStorage.removeItem('adminToken');
-      if (!location.pathname.startsWith('/admin-login')) {
-        location.href = '/admin-login?expired=1';
+      if (!location.pathname.startsWith(ADMIN_LOGIN_PATH)) {
+        location.href = `${ADMIN_LOGIN_PATH}?expired=1`;
       }
     }
-    throw new Error(data.error || `Erreur ${res.status}`);
+    const err = new Error(data.error || `Erreur ${res.status}`);
+    err.status = res.status;
+    err.data = data;
+    throw err;
   }
 
   return data;

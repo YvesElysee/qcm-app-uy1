@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import usePageTitle from '../../hooks/usePageTitle';
 
 /**
- * Page 404 — affichée pour toute route inconnue au lieu d'une redirection silencieuse.
+ * Page 404 · affichée pour toute route inconnue au lieu d'une redirection silencieuse.
  */
 export default function NotFound() {
   usePageTitle('Page introuvable');
