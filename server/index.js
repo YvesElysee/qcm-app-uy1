@@ -22,6 +22,8 @@ import uesRoutes from './routes/ues.js';
 import adminRoutes from './routes/admin.js';
 import settingsRoutes from './routes/settings.js';
 import aiRoutes from './routes/ai.js';
+import reviewRoutes from './routes/review.js';
+import { scheduleBackups } from './backup.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3001;
@@ -39,6 +41,7 @@ app.use('/api/ues', uesRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/review', reviewRoutes);
 
 /**
  * Statistiques publiques de la plateforme (page d'accueil).
@@ -119,4 +122,5 @@ app.listen(PORT, () => {
   if (fs.existsSync(distDir)) {
     console.log(`[api] Frontend de production servi depuis ${distDir}`);
   }
+  scheduleBackups();
 });

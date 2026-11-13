@@ -6,11 +6,28 @@
  */
 import { Router } from 'express';
 import { db } from '../db.js';
-import { requireAdmin } from '../auth.js';
+import { requireAdmin, bearerToken, isAdminToken, getStudentFromToken } from '../auth.js';
+import { drawForStudent } from '../questionDraw.js';
 
 const router = Router();
 
 const PRESENCE_WINDOW_MS = 20 * 1000; // un participant est "en cours" s'il a battu dans les 20 dernières secondes
+
+/**
+ * Convertit une question en objet public (sans la réponse correcte).
+ */
+function publicQuestion(q) {
+  return {
+    id: q.id,
+    Question: q.Question,
+    OptA: q.OptA,
+    OptB: q.OptB,
+    OptC: q.OptC,
+    OptD: q.OptD,
+    tags: q.tags || '',
+    difficulte: q.difficulte || 'moyenne'
+  };
+}
 
 /**
  * Garantit que l'UE de l'épreuve figure dans le catalogue (`ues`).
@@ -78,14 +95,35 @@ router.get('/:id', (req, res) => {
 });
 
 /**
- * Questions d'un QCM (public) · dans l'ordre d'insertion (identique à Firestore)
+ * Questions d'un QCM.
+ * - Étudiant / public : jamais de `ReponseCorrecte`, tirage déterministe
+ *   selon l'étudiant si l'épreuve définit un nombre de questions par tentative.
+ * - Administrateur (jeton admin) : toutes les questions avec la correction
+ *   pour l'inspecteur du panneau d'administration.
  */
 router.get('/:id/questions', (req, res) => {
-  const questions = db.prepare(`
-    SELECT id, Question, OptA, OptB, OptC, OptD, ReponseCorrecte
+  const quiz = db.prepare('SELECT * FROM quizzes WHERE id = ?').get(req.params.id);
+  if (!quiz) {
+    return res.status(404).json({ error: 'Quiz introuvable.' });
+  }
+
+  const user = getStudentFromToken(bearerToken(req));
+  const admin = isAdminToken(bearerToken(req));
+
+  const allQuestions = db.prepare(`
+    SELECT id, Question, OptA, OptB, OptC, OptD, ReponseCorrecte, tags, difficulte
     FROM questions WHERE quizId = ? ORDER BY position ASC, id ASC
   `).all(req.params.id);
-  res.json({ questions });
+
+  if (admin) {
+    return res.json({ questions: allQuestions, drawn: false });
+  }
+
+  const selected = drawForStudent(allQuestions, quiz, user);
+  res.json({
+    questions: selected.map(publicQuestion),
+    drawn: selected.length !== allQuestions.length
+  });
 });
 
 // ══════════════ Routes administrateur ══════════════
@@ -94,7 +132,7 @@ router.get('/:id/questions', (req, res) => {
  * Programmer / mettre à jour un QCM (fusion des champs, comme setDoc merge:true)
  */
 router.post('/:id', requireAdmin, (req, res) => {
-  const { filiere, niveau, semestre, ue, ueLabel, label, timePerQuestion, launchTime, endTime } = req.body || {};
+  const { filiere, niveau, semestre, ue, ueLabel, label, timePerQuestion, drawCount, launchTime, endTime } = req.body || {};
   const id = req.params.id;
 
   const existing = db.prepare('SELECT * FROM quizzes WHERE id = ?').get(id) || {};
@@ -105,6 +143,7 @@ router.post('/:id', requireAdmin, (req, res) => {
     niveau: niveau ?? existing.niveau ?? null,
     semestre: semestre ?? existing.semestre ?? null,
     timePerQuestion: timePerQuestion != null ? (Number(timePerQuestion) || 60) : (existing.timePerQuestion ?? 60),
+    drawCount: drawCount != null ? Math.max(0, Number(drawCount) || 0) : (existing.drawCount ?? 0),
     launchTime: launchTime != null ? Number(launchTime) : (existing.launchTime ?? null),
     endTime: endTime != null ? Number(endTime) : (existing.endTime ?? null),
     questionCount: existing.questionCount ?? 0,
@@ -112,13 +151,13 @@ router.post('/:id', requireAdmin, (req, res) => {
   };
 
   db.prepare(`
-    INSERT INTO quizzes (id, ue, filiere, niveau, semestre, questionCount, timePerQuestion, launchTime, endTime, updatedAt)
-    VALUES (@id, @ue, @filiere, @niveau, @semestre, @questionCount, @timePerQuestion, @launchTime, @endTime, @updatedAt)
+    INSERT INTO quizzes (id, ue, filiere, niveau, semestre, questionCount, timePerQuestion, drawCount, launchTime, endTime, updatedAt)
+    VALUES (@id, @ue, @filiere, @niveau, @semestre, @questionCount, @timePerQuestion, @drawCount, @launchTime, @endTime, @updatedAt)
     ON CONFLICT(id) DO UPDATE SET
       ue = excluded.ue, filiere = excluded.filiere, niveau = excluded.niveau,
       semestre = excluded.semestre, questionCount = excluded.questionCount,
-      timePerQuestion = excluded.timePerQuestion, launchTime = excluded.launchTime,
-      endTime = excluded.endTime, updatedAt = excluded.updatedAt
+      timePerQuestion = excluded.timePerQuestion, drawCount = excluded.drawCount,
+      launchTime = excluded.launchTime, endTime = excluded.endTime, updatedAt = excluded.updatedAt
   `).run({ id, ...merged });
 
   // L'épreuve doit toujours être rattachée à une UE visible par la filière/niveau
@@ -155,7 +194,7 @@ router.delete('/:id', requireAdmin, (req, res) => {
  */
 router.post('/:id/questions', requireAdmin, (req, res) => {
   const id = req.params.id;
-  const { questions, filiere, niveau, semestre, timePerQuestion, ueLabel, label } = req.body || {};
+  const { questions, filiere, niveau, semestre, timePerQuestion, drawCount, ueLabel, label } = req.body || {};
 
   if (!Array.isArray(questions) || questions.length === 0) {
     return res.status(400).json({ error: 'Aucune question valide à importer.' });
@@ -171,18 +210,20 @@ router.post('/:id/questions', requireAdmin, (req, res) => {
     semestre: semestre ?? existing.semestre ?? null,
     questionCount: questions.length,
     timePerQuestion: timePerQuestion != null ? Number(timePerQuestion) || 60 : existing.timePerQuestion ?? 60,
+    drawCount: drawCount != null ? Math.max(0, Number(drawCount) || 0) : (existing.drawCount ?? 0),
     launchTime: existing.launchTime ?? null,
     endTime: existing.endTime ?? null,
     updatedAt: new Date().toISOString()
   };
 
   db.prepare(`
-    INSERT INTO quizzes (id, ue, filiere, niveau, semestre, questionCount, timePerQuestion, launchTime, endTime, updatedAt)
-    VALUES (@id, @ue, @filiere, @niveau, @semestre, @questionCount, @timePerQuestion, @launchTime, @endTime, @updatedAt)
+    INSERT INTO quizzes (id, ue, filiere, niveau, semestre, questionCount, timePerQuestion, drawCount, launchTime, endTime, updatedAt)
+    VALUES (@id, @ue, @filiere, @niveau, @semestre, @questionCount, @timePerQuestion, @drawCount, @launchTime, @endTime, @updatedAt)
     ON CONFLICT(id) DO UPDATE SET
       ue = excluded.ue, filiere = excluded.filiere, niveau = excluded.niveau,
       semestre = excluded.semestre, questionCount = excluded.questionCount,
-      timePerQuestion = excluded.timePerQuestion, updatedAt = excluded.updatedAt
+      timePerQuestion = excluded.timePerQuestion, drawCount = excluded.drawCount,
+      updatedAt = excluded.updatedAt
   `).run({
     id,
     ue: existing.ue ?? id,
@@ -193,8 +234,8 @@ router.post('/:id/questions', requireAdmin, (req, res) => {
   const replaceAll = db.transaction((rows) => {
     db.prepare('DELETE FROM questions WHERE quizId = ?').run(id);
     const insert = db.prepare(`
-      INSERT INTO questions (quizId, Question, OptA, OptB, OptC, OptD, ReponseCorrecte, position)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO questions (quizId, Question, OptA, OptB, OptC, OptD, ReponseCorrecte, tags, difficulte, position)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     rows.forEach((q, i) => {
       insert.run(
@@ -205,6 +246,8 @@ router.post('/:id/questions', requireAdmin, (req, res) => {
         String(q.OptC || '').trim(),
         String(q.OptD || '').trim(),
         String(q.ReponseCorrecte || q.OptA || '').trim(),
+        String(q.Tags || q.tags || '').trim(),
+        String(q.Difficulte || q.difficulte || 'moyenne').trim().toLowerCase(),
         i
       );
     });

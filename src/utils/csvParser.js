@@ -61,6 +61,8 @@ export function parseQuestionsCsv(fileOrString) {
             'justereponse', 'correctanswer', 'answer', 'correct', 'solution',
             'cle', 'reponse'
           ]);
+          const tagsKey = findMatchingKey(keys, ['tags', 'tag', 'etiquettes', 'etiquette', 'chapitres', 'chapitre', 'themes', 'theme']);
+          const difficultyKey = findMatchingKey(keys, ['difficulte', 'difficulty', 'niveau', 'niveaudifficulte']);
 
           const warnings = [];
           const errors = [];
@@ -81,6 +83,13 @@ export function parseQuestionsCsv(fileOrString) {
             const optD = (optDKey ? row[optDKey] : (row['OptD'] || row['D'] || '')).toString().trim();
 
             const rawCorrect = (correctKey ? row[correctKey] : (row['ReponseCorrecte'] || '')).toString().trim();
+            const rawTags = (tagsKey ? row[tagsKey] : (row['Tags'] || row['tags'] || '')).toString().trim();
+            const rawDifficulty = (difficultyKey ? row[difficultyKey] : (row['Difficulte'] || row['Difficulté'] || '')).toString().trim().toLowerCase();
+            const normalizedDifficulty = ['facile', 'easy'].includes(rawDifficulty)
+              ? 'facile'
+              : ['difficile', 'difficult', 'hard'].includes(rawDifficulty)
+                ? 'difficile'
+                : 'moyenne';
 
             // Normalisation de la réponse correcte
             let finalCorrect;
@@ -122,7 +131,9 @@ export function parseQuestionsCsv(fileOrString) {
               OptB: optB,
               OptC: optC,
               OptD: optD,
-              ReponseCorrecte: finalCorrect
+              ReponseCorrecte: finalCorrect,
+              Tags: rawTags,
+              Difficulte: normalizedDifficulty
             });
           });
 
@@ -137,7 +148,9 @@ export function parseQuestionsCsv(fileOrString) {
               optB: optBKey,
               optC: optCKey,
               optD: optDKey,
-              reponseCorrecte: correctKey
+              reponseCorrecte: correctKey,
+              tags: tagsKey,
+              difficulte: difficultyKey
             }
           });
         } catch (err) {
@@ -157,17 +170,17 @@ export function parseQuestionsCsv(fileOrString) {
 export function downloadCsvTemplate(separator = ';') {
   const isSemicolon = separator === ';';
   const headers = isSemicolon
-    ? "Question;Option A;Option B;Option C;Option D;Bonne Réponse\r\n"
-    : "Question,OptA,OptB,OptC,OptD,ReponseCorrecte\r\n";
+    ? "Question;Option A;Option B;Option C;Option D;Bonne Réponse;Tags;Difficulte\r\n"
+    : "Question,OptA,OptB,OptC,OptD,ReponseCorrecte,Tags,Difficulte\r\n";
 
   const rows = isSemicolon ? [
-    '"Quel est le rôle du compilateur ?";"Traduire le code source en langage machine";"Exécuter le code pas à pas";"Formater le texte";"Supprimer les bugs";"A"',
-    '"Quel protocole sécurise les échanges Web ?";"HTTP";"FTP";"HTTPS";"Telnet";"HTTPS"',
-    '"Quelle structure de données fonctionne en FIFO ?";"Pile";"File";"Arbre binaire";"Table de hachage";"File"'
+    '"Quel est le rôle du compilateur ?";"Traduire le code source en langage machine";"Exécuter le code pas à pas";"Formater le texte";"Supprimer les bugs";"A";"compilation;bases";"facile"',
+    '"Quel protocole sécurise les échanges Web ?";"HTTP";"FTP";"HTTPS";"Telnet";"HTTPS";"réseaux;web";"facile"',
+    '"Quelle structure de données fonctionne en FIFO ?";"Pile";"File";"Arbre binaire";"Table de hachage";"File";"structures;algorithmes";"moyenne"'
   ].join("\r\n") : [
-    '"Quel est le rôle du compilateur ?","Traduire le code source en langage machine","Exécuter le code pas à pas","Formater le texte","Supprimer les bugs","A"',
-    '"Quel protocole sécurise les échanges Web ?","HTTP","FTP","HTTPS","Telnet","HTTPS"',
-    '"Quelle structure de données fonctionne en FIFO ?","Pile","File","Arbre binaire","Table de hachage","File"'
+    '"Quel est le rôle du compilateur ?","Traduire le code source en langage machine","Exécuter le code pas à pas","Formater le texte","Supprimer les bugs","A","compilation;bases","facile"',
+    '"Quel protocole sécurise les échanges Web ?","HTTP","FTP","HTTPS","Telnet","HTTPS","réseaux;web","facile"',
+    '"Quelle structure de données fonctionne en FIFO ?","Pile","File","Arbre binaire","Table de hachage","File","structures;algorithmes","moyenne"'
   ].join("\r\n");
 
   const bom = "\uFEFF"; // Pour forcer Excel à lire en UTF-8

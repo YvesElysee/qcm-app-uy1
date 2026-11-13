@@ -18,11 +18,19 @@ function seededShuffle(arr, seed) {
     return a;
 }
 
+function optionsOf(question) {
+    return {
+        OptA: question?.OptA || '',
+        OptB: question?.OptB || '',
+        OptC: question?.OptC || '',
+        OptD: question?.OptD || ''
+    };
+}
+
 export default function ReviewSession() {
     const { quizId } = useParams();
     usePageTitle(`Correction · ${quizId || ''}`);
-    const [questions, setQuestions] = useState([]);
-    const [answers, setAnswers] = useState([]); // { selected, correct, isOk }[]
+    const [items, setItems] = useState([]);
     const [score, setScore] = useState(null);
     const [total, setTotal] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -39,9 +47,10 @@ export default function ReviewSession() {
 
     useEffect(() => {
         const load = async () => {
-            // Questions du QCM + mes résultats pour cette UE (identité via jeton serveur)
+            // Question publique en secours pour les anciennes copies (sans détail
+            // dans `answers`), métadonnées et historique personnel.
             const [qData, rData, metaData] = await Promise.all([
-                api(`/quizzes/${quizId}/questions`),
+                api(`/quizzes/${quizId}/questions`, { auth: 'student' }).catch(() => ({ questions: [] })),
                 api(`/results/mine?ue=${encodeURIComponent(quizId)}`, { auth: 'student' })
                     .catch(() => ({ results: [] })),
                 api(`/quizzes/${encodeURIComponent(quizId)}`).catch(() => null)
@@ -49,21 +58,13 @@ export default function ReviewSession() {
 
             setQuizMeta(metaData?.quiz || null);
 
-            const raw = qData.questions.map((data) => {
+            const fallbackQuestions = (qData.questions || []).map((data) => {
                 const q = { ...data };
-                // Normaliser ReponseCorrecte (lettre → texte) identique à QuizSession
-                const rc = (q.ReponseCorrecte || '').trim().toUpperCase();
-                if (['A', 'B', 'C', 'D'].includes(rc)) {
-                    q.ReponseCorrecte = (q['Opt' + rc] || rc).trim();
-                } else {
-                    q.ReponseCorrecte = (q.ReponseCorrecte || '').trim();
-                }
                 ['Question', 'OptA', 'OptB', 'OptC', 'OptD'].forEach(k => {
                     if (q[k]) q[k] = q[k].trim();
                 });
                 return q;
             });
-            const qs = seededShuffle(raw, safeName);
 
             const matching = rData.results.filter(r => {
                 const rEmail = (r.email || '').toLowerCase();
@@ -71,16 +72,55 @@ export default function ReviewSession() {
                 return (userEmail && rEmail === userEmail) || (safeName && rName === safeName);
             });
 
-            if (matching.length > 0) {
-                const sorted = matching.sort((a, b) => new Date(b.date) - new Date(a.date));
-                const result = sorted[0];
-                setAnswers(result.answers || []);
-                setScore(result.score);
-                setTotal(result.total);
-                setQuestions(qs);
-            } else {
-                setQuestions(qs);
+            if (matching.length === 0) {
+                setItems([]);
+                setLoading(false);
+                return;
             }
+
+            const sorted = matching.sort((a, b) => new Date(b.date) - new Date(a.date));
+            const result = sorted[0];
+            const rawAnswers = Array.isArray(result.answers) ? result.answers : [];
+
+            const nextItems = rawAnswers.map((a, index) => {
+                const isObject = a && typeof a === 'object';
+                const fallback = fallbackQuestions[index] || {};
+                const selected = isObject ? (a.selected || '') : (a || '');
+                const correct = isObject ? (a.correct || fallback.ReponseCorrecte || '') : (fallback.ReponseCorrecte || '');
+                const isOk = isObject && typeof a.isOk === 'boolean'
+                    ? a.isOk
+                    : (selected.trim() !== '' && selected.trim() === correct.trim());
+
+                // Les nouvelles copies contiennent l'énoncé et les options :
+                // la correction reste exacte même si la banque a changé depuis.
+                if (isObject && a.question) {
+                    return {
+                        questionId: a.questionId ?? index,
+                        Question: a.question,
+                        options: a.options || {},
+                        selected,
+                        correct,
+                        isOk,
+                        tags: a.tags || '',
+                        difficulte: a.difficulte || 'moyenne'
+                    };
+                }
+
+                return {
+                    questionId: fallback.id ?? index,
+                    Question: fallback.Question || `Question ${index + 1}`,
+                    options: optionsOf(fallback),
+                    selected,
+                    correct,
+                    isOk,
+                    tags: fallback.tags || '',
+                    difficulte: fallback.difficulte || 'moyenne'
+                };
+            });
+
+            setItems(nextItems);
+            setScore(result.score);
+            setTotal(result.total);
             setLoading(false);
         };
         load();
@@ -105,10 +145,10 @@ export default function ReviewSession() {
         </div>
     );
 
-    if (!questions.length || score === null) return (
+    if (!items.length || score === null) return (
         <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4">
             <div className="bg-slate-900 p-8 rounded-2xl border border-slate-800 text-center max-w-sm">
-                <div className="w-12 h-12 mx-auto rounded-2xl bg-indigo-500/15 border border-indigo-600/30 text-indigo-400 flex items-center justify-center mb-4">
+                <div className="w-12 h-12 mx-auto rounded-2xl bg-amber-500/15 border border-amber-600/30 text-amber-400 flex items-center justify-center mb-4">
                     <Icon name="search" size={22} />
                 </div>
                 <h2 className="text-xl font-bold text-white mb-2">Aucun resultat trouve</h2>
@@ -125,23 +165,19 @@ export default function ReviewSession() {
     const aiAvailable = aiStatus?.available === true;
 
     // Ouvre le tuteur IA sur une question précise (mauvaise réponse)
-    const openTutorForQuestion = (q, i) => {
+    const openTutorForQuestion = (item, i) => {
         const optionsList = ['A', 'B', 'C', 'D']
-            .map(l => ({ label: l, text: q['Opt' + l] }))
+            .map(l => ({ label: l, text: item.options?.['Opt' + l] }))
             .filter(o => typeof o.text === 'string' && o.text.trim() !== '');
-        const ans = answers[i];
-        const isNewFormat = ans && typeof ans === 'object';
-        const givenText = isNewFormat ? (ans.selected || '') : (ans || '');
-        const correctText = isNewFormat ? (ans.correct || q.ReponseCorrecte || '') : (q.ReponseCorrecte || '');
-        const selectedLabel = optionsList.find(o => o.text.trim() === givenText.trim())?.label || null;
-        const correctLabel = optionsList.find(o => o.text.trim() === correctText.trim())?.label || null;
+        const selectedLabel = optionsList.find(o => o.text.trim() === item.selected.trim())?.label || null;
+        const correctLabel = optionsList.find(o => o.text.trim() === item.correct.trim())?.label || null;
 
         setAiContext({
             key: `q${i}_${quizId}`,
             kind: 'question',
             quizId,
-            questionId: q.id,
-            question: q.Question,
+            questionId: item.questionId,
+            question: item.Question,
             options: optionsList,
             selected: selectedLabel,
             correct: correctLabel
@@ -155,14 +191,7 @@ export default function ReviewSession() {
         setAiOpen(true);
     };
 
-    const wrongCount = questions.reduce((acc, _q, i) => {
-        const ans = answers[i];
-        const isNewFormat = ans && typeof ans === 'object';
-        const givenText = isNewFormat ? (ans.selected || '') : (ans || '');
-        const correctText = isNewFormat ? (ans.correct || _q.ReponseCorrecte || '') : (_q.ReponseCorrecte || '');
-        const isOk = isNewFormat ? ans.isOk : (givenText.trim() !== '' && givenText.trim() === correctText.trim());
-        return isOk ? acc : acc + 1;
-    }, 0);
+    const wrongCount = items.reduce((acc, item) => acc + (item.isOk ? 0 : 1), 0);
 
     return (
         <div className="min-h-screen bg-slate-950 py-10 px-4">
@@ -172,15 +201,21 @@ export default function ReviewSession() {
                         <Icon name="arrow-left" size={14} />
                         Retour à mon espace
                     </Link>
-                    {aiAvailable && (
-                        <button
-                            onClick={openTutorGeneral}
-                            className="mb-2 inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-3.5 py-2 rounded-xl transition shadow-lg shadow-blue-600/25"
-                        >
+                    <div className="flex items-center gap-2">
+                        <Link to="/revision" className="mb-2 inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3.5 py-2 rounded-xl transition shadow-lg shadow-emerald-600/20">
                             <Icon name="sparkles" size={14} />
-                            Aide IA pour réviser
-                        </button>
-                    )}
+                            Réviser mes erreurs
+                        </Link>
+                        {aiAvailable && (
+                            <button
+                                onClick={openTutorGeneral}
+                                className="mb-2 inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-3.5 py-2 rounded-xl transition shadow-lg shadow-blue-600/25"
+                            >
+                                <Icon name="sparkles" size={14} />
+                                Aide IA pour réviser
+                            </button>
+                        )}
+                    </div>
                 </div>
 
                 {/* En-tête résumé */}
@@ -226,51 +261,52 @@ export default function ReviewSession() {
 
                 {/* Questions */}
                 <div className="space-y-5">
-                    {questions.map((q, i) => {
-                        const ans = answers[i];
-                        // Support de l'ancienne structure (string) et nouvelle structure ({selected, correct, isOk})
-                        const isNewFormat = ans && typeof ans === 'object';
-                        const givenText = isNewFormat ? (ans.selected || '') : (ans || '');
-                        const correctText = isNewFormat ? (ans.correct || q.ReponseCorrecte || '') : (q.ReponseCorrecte || '');
-                        const isOk = isNewFormat ? ans.isOk : (givenText.trim() !== '' && givenText.trim() === correctText.trim());
-                        const notAnswered = !givenText.trim();
+                    {items.map((item, i) => {
+                        const notAnswered = !item.selected.trim();
 
                         // Ordre des options identique au quiz (même seed)
                         const validOptions = ['OptA', 'OptB', 'OptC', 'OptD']
-                            .map(k => q[k]).filter(v => typeof v === 'string' && v.trim() !== '');
+                            .map(k => item.options?.[k]).filter(v => typeof v === 'string' && v.trim() !== '');
                         const shuffledOptions = seededShuffle(validOptions, safeName + '_' + i);
 
                         return (
-                            <div key={i} className={`bg-slate-900 rounded-2xl border border-slate-800 border-l-4 overflow-hidden ${isOk ? 'border-l-emerald-500' : notAnswered ? 'border-l-slate-600' : 'border-l-red-500'}`}>
+                            <div key={item.questionId ?? i} className={`bg-slate-900 rounded-2xl border border-slate-800 border-l-4 overflow-hidden ${item.isOk ? 'border-l-emerald-500' : notAnswered ? 'border-l-slate-600' : 'border-l-red-500'}`}>
                                 {/* En-tête question */}
-                                <div className="flex items-center justify-between px-6 pt-5 pb-3">
-                                    <span className={`text-xs font-black uppercase tracking-wider px-2.5 py-1 rounded-full ${isOk ? 'bg-emerald-500/15 text-emerald-300' : notAnswered ? 'bg-slate-800 text-slate-400' : 'bg-red-500/15 text-red-300'}`}>
-                                        {isOk ? 'Correct' : notAnswered ? 'Sans reponse' : 'Incorrect'} · Q{i + 1}
+                                <div className="flex items-center justify-between px-6 pt-5 pb-3 gap-2 flex-wrap">
+                                    <span className={`text-xs font-black uppercase tracking-wider px-2.5 py-1 rounded-full ${item.isOk ? 'bg-emerald-500/15 text-emerald-300' : notAnswered ? 'bg-slate-800 text-slate-400' : 'bg-red-500/15 text-red-300'}`}>
+                                        {item.isOk ? 'Correct' : notAnswered ? 'Sans reponse' : 'Incorrect'} · Q{i + 1}
                                     </span>
-                                    <span className={`font-extrabold text-sm ${isOk ? 'text-emerald-400' : 'text-red-400'}`}>
-                                        {isOk ? '+1 pt' : '0 pt'}
-                                    </span>
+                                    <div className="flex items-center gap-1.5">
+                                        {item.tags && String(item.tags).split(/[;,]/).filter(Boolean).map(tag => (
+                                            <span key={tag} className="text-[10px] font-bold text-blue-300 bg-blue-600/15 border border-blue-600/30 px-2 py-0.5 rounded-full">
+                                                {tag.trim()}
+                                            </span>
+                                        ))}
+                                        <span className={`font-extrabold text-sm ${item.isOk ? 'text-emerald-400' : 'text-red-400'}`}>
+                                            {item.isOk ? '+1 pt' : '0 pt'}
+                                        </span>
+                                    </div>
                                 </div>
 
                                 <div className="px-6 pb-6">
-                                    <h3 className="font-bold text-slate-100 mb-5 leading-relaxed">{q.Question}</h3>
+                                    <h3 className="font-bold text-slate-100 mb-5 leading-relaxed">{item.Question}</h3>
 
                                     <div className="flex flex-col gap-2">
                                         {shuffledOptions.map(val => {
                                             const cleanVal = val.trim();
-                                            const isCorrectOpt = cleanVal === correctText.trim();
-                                            const isGivenOpt = cleanVal === givenText.trim();
+                                            const isCorrectOpt = cleanVal === item.correct.trim();
+                                            const isGivenOpt = cleanVal === item.selected.trim();
 
                                             let cls = 'p-4 rounded-xl text-sm border transition font-medium ';
                                             let label = null;
 
-                                            if (isOk && isGivenOpt) {
+                                            if (item.isOk && isGivenOpt) {
                                                 cls += 'bg-emerald-950/50 border-emerald-600 text-emerald-200 font-bold';
                                                 label = <span className="ml-2 text-xs bg-emerald-600 text-white px-1.5 py-0.5 rounded-full font-bold">Votre reponse</span>;
-                                            } else if (!isOk && isGivenOpt) {
+                                            } else if (!item.isOk && isGivenOpt) {
                                                 cls += 'bg-red-950/50 border-red-600 text-red-200 font-bold';
                                                 label = <span className="ml-2 text-xs bg-red-600 text-white px-1.5 py-0.5 rounded-full font-bold">Votre reponse</span>;
-                                            } else if (!isOk && isCorrectOpt) {
+                                            } else if (!item.isOk && isCorrectOpt) {
                                                 cls += 'bg-emerald-950/50 border-emerald-600 text-emerald-200 font-bold';
                                                 label = <span className="ml-2 text-xs bg-emerald-600 text-white px-1.5 py-0.5 rounded-full font-bold">Bonne reponse</span>;
                                             } else {
@@ -289,9 +325,9 @@ export default function ReviewSession() {
                                     </div>
 
                                     {/* Aide IA sur cette question (uniquement si erreur) */}
-                                    {!isOk && aiAvailable && (
+                                    {!item.isOk && aiAvailable && (
                                         <button
-                                            onClick={() => openTutorForQuestion(q, i)}
+                                            onClick={() => openTutorForQuestion(item, i)}
                                             className="mt-4 inline-flex items-center gap-1.5 text-xs font-bold text-blue-300 hover:text-white bg-blue-950/60 hover:bg-blue-900 border border-blue-800 hover:border-blue-700 px-3.5 py-2 rounded-xl transition"
                                         >
                                             <Icon name="sparkles" size={14} />

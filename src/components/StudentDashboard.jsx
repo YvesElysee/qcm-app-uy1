@@ -40,6 +40,7 @@ export default function StudentDashboard() {
   const [allQuizzes, setAllQuizzes] = useState([]);
   const [otherLevelQuizzes, setOtherLevelQuizzes] = useState([]);
   const [myResults, setMyResults] = useState([]);
+  const [reviewStats, setReviewStats] = useState(null);
   const [nowTs, setNowTs] = useState(0);
   const [loading, setLoading] = useState(true);
 
@@ -63,13 +64,15 @@ export default function StudentDashboard() {
       // 1. Charger les UEs de la filière et du niveau sélectionné
       // 2. Charger les Quizzes de la filière et du niveau sélectionné
       // 3. Charger STRICTEMENT les résultats de CET utilisateur (filtrés par le serveur)
-      const [uesData, quizzesData, resultsData] = await Promise.all([
+      const [uesData, quizzesData, resultsData, reviewData] = await Promise.all([
         api(`/ues?filiere=${encodeURIComponent(filiere)}&niveau=${encodeURIComponent(selectedNiveau)}`),
         api(`/quizzes?filiere=${encodeURIComponent(filiere)}&sort=asc`),
-        api('/results/mine', { auth: 'student' }).catch(() => ({ results: [] }))
+        api('/results/mine', { auth: 'student' }).catch(() => ({ results: [] })),
+        api('/review/stats', { auth: 'student' }).catch(() => null)
       ]);
 
       setAvailableUes(uesData.ues);
+      setReviewStats(reviewData);
       // Épreuves du niveau actif + celles des autres niveaux (simplement signalées)
       setAllQuizzes(quizzesData.quizzes.filter(q => q.niveau === selectedNiveau));
       setOtherLevelQuizzes(
@@ -253,19 +256,59 @@ export default function StudentDashboard() {
           </div>
         </div>
 
+        {/* ── Révisions intelligentes (répétition espacée) ── */}
+        <div className="bg-slate-800/50 border border-slate-700/60 rounded-3xl p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 border ${
+              (reviewStats?.due || 0) > 0
+                ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
+                : 'bg-blue-500/15 border-blue-500/30 text-blue-400'
+            }`}>
+              <Icon name="sparkles" size={20} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-base font-black text-white">Révisions intelligentes</h3>
+                {(reviewStats?.due || 0) > 0 && (
+                  <span className="bg-emerald-500/20 text-emerald-300 text-[10px] font-black px-2 py-0.5 rounded-full">
+                    {reviewStats.due} carte(s) à réviser
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-400 mt-1">
+                {reviewStats?.total
+                  ? `${reviewStats.total} question(s) issue(s) de vos erreurs, planifiées par répétition espacée.`
+                  : 'Les questions ratées lors de vos QCM seront ajoutées ici automatiquement.'}
+              </p>
+              {reviewStats?.nextDueAt && (
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Prochaine échéance : {formatDate(reviewStats.nextDueAt)}
+                </p>
+              )}
+            </div>
+          </div>
+          <Link
+            to="/revision"
+            className="shrink-0 inline-flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black px-4 py-2.5 rounded-xl transition shadow-md shadow-emerald-600/20"
+          >
+            <Icon name="refresh" size={13} />
+            {(reviewStats?.due || 0) > 0 ? 'Réviser maintenant' : 'Ouvrir mes révisions'}
+          </Link>
+        </div>
+
         {/* ── Avertissement & Alerte Prochain Quizz (Point 4) ── */}
         {nextQuiz && (
-          <div className="bg-indigo-950/40 border border-indigo-500/30 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="bg-amber-950/40 border border-amber-500/30 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center animate-pulse shrink-0">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center animate-pulse shrink-0">
                 <Icon name="bell" size={20} />
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-black uppercase text-indigo-400 tracking-wider">
+                  <span className="text-xs font-black uppercase text-amber-400 tracking-wider">
                     Alerte Évaluation à venir
                   </span>
-                  <span className="bg-indigo-400/20 text-indigo-300 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                  <span className="bg-amber-400/20 text-amber-300 text-[10px] font-bold px-2 py-0.5 rounded-full">
                     {nextDiffMinutes <= 60
                       ? `Dans ~${nextDiffMinutes} min`
                       : nextDiffMinutes <= 1440
@@ -276,7 +319,7 @@ export default function StudentDashboard() {
                 <h3 className="text-base font-bold text-white mt-0.5">
                   QCM {nextQuiz.ue || nextQuiz.id} · {nextQuiz.filiere} ({nextQuiz.niveau})
                 </h3>
-                <p className="text-xs text-indigo-200/70">
+                <p className="text-xs text-amber-200/70">
                   Début : {formatDate(nextQuiz.launchTime)} {nextQuiz.timePerQuestion ? `• ${nextQuiz.timePerQuestion}s par question` : ''}
                 </p>
               </div>
@@ -286,7 +329,7 @@ export default function StudentDashboard() {
               {notifPermission !== 'granted' && (
                 <button
                   onClick={requestNotificationPermission}
-                  className="inline-flex items-center gap-1.5 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 text-xs font-bold px-3 py-2 rounded-xl transition border border-indigo-500/30"
+                  className="inline-flex items-center gap-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-xs font-bold px-3 py-2 rounded-xl transition border border-amber-500/30"
                 >
                   <Icon name="bell" size={13} />
                   M'avertir
@@ -294,7 +337,7 @@ export default function StudentDashboard() {
               )}
               <Link
                 to="/schedule"
-                className="bg-indigo-500 text-slate-950 hover:bg-indigo-400 text-xs font-black px-4 py-2 rounded-xl transition shadow-md"
+                className="bg-amber-500 text-slate-950 hover:bg-amber-400 text-xs font-black px-4 py-2 rounded-xl transition shadow-md"
               >
                 Voir l'emploi du temps
               </Link>
@@ -335,7 +378,7 @@ export default function StudentDashboard() {
                 const badge = notReady
                   ? { label: 'En préparation', cls: 'bg-slate-600/40 text-slate-300' }
                   : isUpcoming
-                  ? { label: 'À venir', cls: 'bg-indigo-500/20 text-indigo-300' }
+                  ? { label: 'À venir', cls: 'bg-amber-500/20 text-amber-300' }
                   : isOpen
                   ? { label: 'En cours', cls: 'bg-emerald-500/20 text-emerald-300' }
                   : isPassed
@@ -375,7 +418,7 @@ export default function StudentDashboard() {
                         Questions en préparation
                       </div>
                     ) : isUpcoming ? (
-                      <div className="w-full text-center bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 text-xs font-bold py-2.5 rounded-xl">
+                      <div className="w-full text-center bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-bold py-2.5 rounded-xl">
                         Ouverture le {formatDate(q.launchTime)}
                       </div>
                     ) : isOpen ? (
@@ -477,7 +520,7 @@ export default function StudentDashboard() {
                 const statusMeta = {
                   none: { label: 'Non programmée', cls: 'bg-slate-600/40 text-slate-300' },
                   draft: { label: 'Brouillon', cls: 'bg-slate-600/40 text-slate-300' },
-                  upcoming: { label: 'À venir', cls: 'bg-indigo-500/20 text-indigo-300' },
+                  upcoming: { label: 'À venir', cls: 'bg-amber-500/20 text-amber-300' },
                   ongoing: { label: 'En cours', cls: 'bg-emerald-500/20 text-emerald-300' },
                   missed: { label: 'Manquée', cls: 'bg-red-500/20 text-red-300' },
                   done: { label: 'Passée', cls: 'bg-indigo-500/20 text-indigo-300' }
@@ -536,7 +579,7 @@ export default function StudentDashboard() {
                         Rattraper l'épreuve
                       </button>
                     ) : state === 'upcoming' ? (
-                      <div className="mt-4 w-full text-center bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 text-[11px] font-bold py-2.5 rounded-xl">
+                      <div className="mt-4 w-full text-center bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[11px] font-bold py-2.5 rounded-xl">
                         Ouverture le {formatDate(quiz.launchTime)}
                       </div>
                     ) : (
@@ -636,7 +679,7 @@ export default function StudentDashboard() {
             <div className="my-3 py-2 px-3 bg-blue-950/60 border border-blue-900 text-blue-300 font-black rounded-xl text-lg">
               {selectedUeForStart}
             </div>
-            <div className="bg-indigo-950/50 border border-indigo-800 rounded-xl p-3 text-left text-xs text-indigo-300 space-y-1 mb-5">
+            <div className="bg-amber-950/50 border border-amber-800 rounded-xl p-3 text-left text-xs text-amber-300 space-y-1 mb-5">
               <p>• Candidat : <strong>{currentUser.name}</strong></p>
               <p>• Filière : <strong>{filiere}</strong> ({selectedNiveau})</p>
               <p>• Les questions et réponses sont mélangées automatiquement.</p>

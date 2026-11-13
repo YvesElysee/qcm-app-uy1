@@ -5,6 +5,7 @@ import QuizSession from './QuizSession';
 import Login from './components/Login';
 import Schedule from './components/Schedule';
 import ReviewSession from './components/ReviewSession';
+import RevisionSession from './components/RevisionSession';
 import StudentAuth from './components/StudentAuth';
 import StudentDashboard from './components/StudentDashboard';
 import Navbar from './components/layout/Navbar';
@@ -102,6 +103,12 @@ export default function App() {
         <Route
           path="/review/:quizId"
           element={<RequireStudent><Layout><ReviewSession /></Layout></RequireStudent>}
+        />
+
+        {/* Révisions intelligentes (répétition espacée) */}
+        <Route
+          path="/revision"
+          element={<RequireStudent><Layout><RevisionSession /></Layout></RequireStudent>}
         />
 
         {/* Espace Administrateur · portail discret, sans lien public */}

@@ -17,15 +17,17 @@ function seededShuffle(arr, seed) {
 }
 
 const STORAGE_KEY = (quizId, name) => `qcm_progress_v2_${quizId}_${name}`;
+const MAX_VIOLATIONS = 3;
 
 export default function QuizSession() {
   const { quizId } = useParams();
   const [questions, setQuestions] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [score, setScore] = useState(0);
-  const [answers, setAnswers] = useState([]); // {selected, correct, isOk}[]
+  const [total, setTotal] = useState(0);
+  const [responses, setResponses] = useState({}); // { [questionId]: option choisie }
 
-  const [selectedOption, setSelectedOption] = useState(null);   // option choisie
+  const [selectedOption, setSelectedOption] = useState(null);
 
   const [phase, setPhase] = useState('loading');
   const [countdown, setCountdown] = useState(null);
@@ -36,10 +38,20 @@ export default function QuizSession() {
   const [feedbackSent, setFeedbackSent] = useState(false);
   const [quizMeta, setQuizMeta] = useState(null);
   const [accessError, setAccessError] = useState('');
+  const [resultError, setResultError] = useState('');
+
+  // Anti-triche
+  const [violations, setViolations] = useState(0);
+  const [warningMessage, setWarningMessage] = useState('');
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const submitted = useRef(false);
   const timerInterval = useRef(null);
   const lastValidatedRef = useRef(-1);
+  const responsesRef = useRef({});
+  const phaseRef = useRef(phase);
+  const violationsRef = useRef(0);
+  const fullscreenRef = useRef(false);
 
   const user = JSON.parse(localStorage.getItem('userSession')) || { name: 'Anonyme' };
   const safeName = (user.name || 'Anonyme').trim();
@@ -49,19 +61,17 @@ export default function QuizSession() {
   const sessionIdRef = useRef(null);
   const storageKey = STORAGE_KEY(quizId, safeName);
 
+  useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
+
   // ── Chargement des questions ─────────────────────────────────────────
   const loadFresh = useCallback(async () => {
-    const data = await api(`/quizzes/${quizId}/questions`);
-    const raw = data.questions.map((data) => {
-      const q = { ...data };
-      // Normaliser ReponseCorrecte : si c'est une lettre (A/B/C/D) → convertir en texte
-      const rc = (q.ReponseCorrecte || '').trim().toUpperCase();
-      if (['A', 'B', 'C', 'D'].includes(rc)) {
-        q.ReponseCorrecte = (q['Opt' + rc] || rc).trim();
-      } else {
-        q.ReponseCorrecte = (q.ReponseCorrecte || '').trim();
-      }
-      // Nettoyer toutes les options
+    // Le serveur ne renvoie jamais la correction et applique le tirage
+    // aléatoire propre à l'étudiant connecté.
+    const data = await api(`/quizzes/${quizId}/questions`, { auth: 'student' });
+    const raw = data.questions.map((question) => {
+      const q = { ...question };
       ['Question', 'OptA', 'OptB', 'OptC', 'OptD'].forEach(k => {
         if (q[k]) q[k] = q[k].trim();
       });
@@ -106,12 +116,18 @@ export default function QuizSession() {
       const saved = localStorage.getItem(storageKey);
       if (saved) {
         try {
-          const { qs, idx, sc, ans, quizSession } = JSON.parse(saved);
+          const { qs, idx, responses: savedResponses, ans, quizSession } = JSON.parse(saved);
           if (qs && quizSession === (meta.launchTime || 0)) {
+            const restored = savedResponses || {};
+            if (!savedResponses && Array.isArray(ans)) {
+              ans.forEach((a) => {
+                if (a?.questionId != null) restored[a.questionId] = a.selected || a.chosen || '';
+              });
+            }
+            responsesRef.current = restored;
+            setResponses(restored);
             setQuestions(qs);
-            setCurrentIndex(idx);
-            setScore(sc);
-            setAnswers(ans);
+            setCurrentIndex(idx || 0);
             setPhase(meta.launchTime && meta.launchTime > Date.now() ? 'waiting' : 'quiz');
             return;
           }
@@ -129,10 +145,10 @@ export default function QuizSession() {
   useEffect(() => {
     if (phase !== 'quiz' || questions.length === 0) return;
     localStorage.setItem(storageKey, JSON.stringify({
-      qs: questions, idx: currentIndex, sc: score, ans: answers,
+      qs: questions, idx: currentIndex, responses,
       quizSession: quizMeta?.launchTime || 0
     }));
-  }, [currentIndex, score, phase, answers, questions, quizMeta?.launchTime, storageKey]);
+  }, [currentIndex, phase, responses, questions, quizMeta?.launchTime, storageKey]);
 
   // ── Salle d'attente ─────────────────────────────────────────────────
   useEffect(() => {
@@ -150,7 +166,7 @@ export default function QuizSession() {
     return () => clearInterval(iv);
   }, [phase, quizMeta]);
 
-  // ── Présence participants (heartbeat + polling, remplace onSnapshot) ──
+  // ── Présence participants (heartbeat + polling) ──────────────────────
   useEffect(() => {
     if (phase !== 'quiz') return;
     if (sessionIdRef.current === null) {
@@ -159,7 +175,6 @@ export default function QuizSession() {
     const sid = sessionIdRef.current;
     let active = true;
 
-    // Battement de cœur : annonce la présence et récupère le compteur
     const beat = async () => {
       try {
         const r = await api(`/quizzes/${quizId}/sessions`, {
@@ -172,7 +187,6 @@ export default function QuizSession() {
     beat();
     const iv = setInterval(beat, 8000);
 
-    // Sortie propre + compteur rafraîchi une dernière fois
     return () => {
       active = false;
       clearInterval(iv);
@@ -180,67 +194,93 @@ export default function QuizSession() {
     };
   }, [phase, quizId, safeName]);
 
-  // ── Validation (manuelle ou auto-timer) ─────────────────────────────
-  const finalSubmit = useCallback(async (finalScore, finalAnswers) => {
+  // ── Soumission finale (correction côté serveur) ──────────────────────
+  const finalSubmit = useCallback(async () => {
     if (submitted.current) return;
     submitted.current = true;
+    clearInterval(timerInterval.current);
     localStorage.removeItem(storageKey);
-    setPhase('finished');
 
-    const histKey = `qcm_history_${safeName}`;
-    const existing = JSON.parse(localStorage.getItem(histKey) || '[]');
-    const entry = {
-      quizId,
-      filiere: quizMeta?.filiere || '', niveau: quizMeta?.niveau || '',
-      score: finalScore, total: questions.length,
-      date: new Date().toISOString(), sessionTimestamp: quizMeta?.launchTime || 0
-    };
-    localStorage.setItem(histKey, JSON.stringify(
-      [entry, ...existing.filter(e => !(e.quizId === quizId && e.sessionTimestamp === entry.sessionTimestamp))].slice(0, 50)
-    ));
+    // Inclut le choix en cours même s'il n'a pas été validé.
+    const current = questions[currentIndex];
+    const allResponses = { ...responsesRef.current };
+    if (phaseRef.current === 'quiz' && current?.id != null && selectedOption) {
+      allResponses[current.id] = selectedOption;
+    }
 
-    await api('/results', {
-      method: 'POST',
-      auth: 'student',
-      body: {
-        ue: quizId,
-        filiere: quizMeta?.filiere || '',
-        niveau: quizMeta?.niveau || '',
-        score: finalScore,
-        total: questions.length,
-        answers: finalAnswers,
-        sessionTimestamp: quizMeta?.launchTime || 0,
-        isMakeup: isMakeupMode
+    const payload = questions.map(q => ({
+      questionId: q.id,
+      selected: allResponses[q.id] || ''
+    }));
+
+    setPhase('submitting');
+
+    try {
+      const res = await api('/results', {
+        method: 'POST',
+        auth: 'student',
+        body: {
+          ue: quizId,
+          filiere: quizMeta?.filiere || '',
+          niveau: quizMeta?.niveau || '',
+          questionIds: questions.map(q => q.id),
+          answers: payload,
+          sessionTimestamp: quizMeta?.launchTime || 0,
+          isMakeup: isMakeupMode
+        }
+      });
+
+      setScore(res.score || 0);
+      setTotal(res.total || payload.length);
+      setResultError('');
+
+      const histKey = `qcm_history_${safeName}`;
+      const existing = JSON.parse(localStorage.getItem(histKey) || '[]');
+      const entry = {
+        quizId,
+        filiere: quizMeta?.filiere || '', niveau: quizMeta?.niveau || '',
+        score: res.score || 0, total: res.total || payload.length,
+        date: new Date().toISOString(), sessionTimestamp: quizMeta?.launchTime || 0
+      };
+      localStorage.setItem(histKey, JSON.stringify(
+        [entry, ...existing.filter(e => !(e.quizId === quizId && e.sessionTimestamp === entry.sessionTimestamp))].slice(0, 50)
+      ));
+    } catch (err) {
+      console.warn('Enregistrement du résultat impossible :', err.message);
+      setResultError(err.message);
+      setScore(0);
+      setTotal(payload.length);
+    } finally {
+      setPhase('finished');
+      if (document.fullscreenElement) {
+        document.exitFullscreen?.().catch(() => {});
       }
-    }).catch(err => console.warn("Enregistrement du résultat impossible :", err.message));
-  }, [quizId, safeName, questions.length, quizMeta, storageKey, isMakeupMode]);
+    }
+  }, [quizId, safeName, questions, currentIndex, selectedOption, quizMeta, storageKey, isMakeupMode]);
 
   const handleValidate = useCallback((forced = false) => {
-    // Empêche une double validation (double-clic ou clic + fin du timer)
     if (lastValidatedRef.current === currentIndex) return;
     lastValidatedRef.current = currentIndex;
     clearInterval(timerInterval.current);
 
     const q = questions[currentIndex];
-    const correct = (q?.ReponseCorrecte || '').trim();
-    const chosen = forced ? null : selectedOption;
-    const cleanChosen = (chosen || '').trim();
-    const isOk = cleanChosen !== '' && cleanChosen === correct;
-    const newScore = isOk ? score + 1 : score;
-    const newAnswers = [...answers, { selected: cleanChosen || null, correct, isOk }];
+    const chosen = forced ? '' : (selectedOption || '');
+    if (q?.id != null) {
+      const nextResponses = { ...responsesRef.current, [q.id]: chosen };
+      responsesRef.current = nextResponses;
+      setResponses(nextResponses);
+    }
 
-    setScore(newScore);
-    setAnswers(newAnswers);
-    setSelectedOption(null);
+    setSelectedOption('');
 
     // Aucun feedback intermédiaire : la correction n'apparaît qu'à la fin.
     if (currentIndex + 1 < questions.length) {
       setCurrentIndex(i => i + 1);
       setTimeLeft(quizMeta?.timePerQuestion ? quizMeta.timePerQuestion * 1000 : null);
     } else {
-      finalSubmit(newScore, newAnswers);
+      finalSubmit();
     }
-  }, [currentIndex, questions, score, answers, selectedOption, quizMeta, finalSubmit]);
+  }, [currentIndex, questions, selectedOption, quizMeta, finalSubmit]);
 
   // ── Timer par question ───────────────────────────────────────────────
   useEffect(() => {
@@ -276,16 +316,16 @@ export default function QuizSession() {
 
     const msLeft = effectiveEndTime - Date.now();
     if (msLeft <= 0) {
-      if (!submitted.current) finalSubmit(score, answers);
+      if (!submitted.current) finalSubmit();
       return;
     }
     const t = setTimeout(() => {
-      if (!submitted.current) finalSubmit(score, answers);
+      if (!submitted.current) finalSubmit();
     }, msLeft);
     return () => clearTimeout(t);
-  }, [phase, quizMeta, makeupEndTime, isMakeupMode, score, answers, finalSubmit]);
+  }, [phase, quizMeta, makeupEndTime, isMakeupMode, finalSubmit]);
 
-  // ── Classement (polling toutes les 3s, remplace onSnapshot) ──────────
+  // ── Classement (polling toutes les 3s) ───────────────────────────────
   useEffect(() => {
     if (phase !== 'finished' || !quizMeta) return;
     const sessionTimestamp = quizMeta.launchTime || 0;
@@ -303,8 +343,93 @@ export default function QuizSession() {
     return () => { active = false; clearInterval(iv); };
   }, [phase, quizId, quizMeta]);
 
-  // ── Submit final ─────────────────────────────────────────────────────
+  // ── Anti-triche ──────────────────────────────────────────────────────
+  const registerViolation = useCallback((message) => {
+    if (phaseRef.current !== 'quiz' || submitted.current) return;
+    const next = violationsRef.current + 1;
+    violationsRef.current = next;
+    setViolations(next);
+    setWarningMessage(message);
+    if (next >= MAX_VIOLATIONS) {
+      setWarningMessage('Trop d\'infractions détectées. Votre copie est soumise automatiquement.');
+      finalSubmit();
+    }
+  }, [finalSubmit]);
 
+  const toggleFullscreen = useCallback(async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+        fullscreenRef.current = true;
+        setIsFullscreen(true);
+      } else {
+        fullscreenRef.current = false;
+        await document.exitFullscreen();
+        setIsFullscreen(false);
+      }
+    } catch {
+      registerViolation("Le plein écran n'a pas pu être activé. Vous pouvez continuer normalement.");
+    }
+  }, [registerViolation]);
+
+  useEffect(() => {
+    if (phase !== 'quiz') return;
+
+    const onVisibility = () => {
+      if (document.hidden) {
+        registerViolation("Changement d'onglet détecté. Restez sur la page de l'épreuve.");
+      }
+    };
+    const block = (e) => {
+      e.preventDefault();
+      const labels = {
+        copy: 'Copie de contenu bloquée pendant l\'épreuve.',
+        cut: 'Copie de contenu bloquée pendant l\'épreuve.',
+        paste: 'Collage de contenu bloqué pendant l\'épreuve.',
+        contextmenu: 'Menu contextuel désactivé pendant l\'épreuve.'
+      };
+      registerViolation(labels[e.type] || 'Action non autorisée pendant l\'épreuve.');
+    };
+    const onFullscreenChange = () => {
+      const active = !!document.fullscreenElement;
+      setIsFullscreen(active);
+      if (active) {
+        fullscreenRef.current = true;
+      } else if (fullscreenRef.current) {
+        fullscreenRef.current = false;
+        registerViolation('Sortie du plein écran détectée.');
+      }
+    };
+    const onBeforeUnload = (e) => {
+      if (submitted.current) return;
+      e.preventDefault();
+      e.returnValue = '';
+    };
+
+    document.addEventListener('visibilitychange', onVisibility);
+    document.addEventListener('copy', block);
+    document.addEventListener('cut', block);
+    document.addEventListener('paste', block);
+    document.addEventListener('contextmenu', block);
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    window.addEventListener('beforeunload', onBeforeUnload);
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      document.removeEventListener('copy', block);
+      document.removeEventListener('cut', block);
+      document.removeEventListener('paste', block);
+      document.removeEventListener('contextmenu', block);
+      document.removeEventListener('fullscreenchange', onFullscreenChange);
+      window.removeEventListener('beforeunload', onBeforeUnload);
+    };
+  }, [phase, registerViolation]);
+
+  useEffect(() => {
+    if (!warningMessage) return;
+    const t = setTimeout(() => setWarningMessage(''), 9000);
+    return () => clearTimeout(t);
+  }, [warningMessage]);
 
   // ── Sélection d'une option ───────────────────────────────────────────
   const handleOptionClick = useCallback((opt) => {
@@ -349,7 +474,7 @@ export default function QuizSession() {
   if (accessError) return (
     <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4">
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 max-w-md text-center">
-        <div className="w-12 h-12 mx-auto rounded-2xl bg-indigo-500/15 border border-indigo-500/30 text-indigo-400 flex items-center justify-center mb-4">
+        <div className="w-12 h-12 mx-auto rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center mb-4">
           <Icon name="lock" size={22} />
         </div>
         <h1 className="text-xl font-black text-white mb-2">Épreuve indisponible</h1>
@@ -374,6 +499,18 @@ export default function QuizSession() {
     </div>
   );
 
+  if (phase === 'submitting') return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 max-w-md text-center">
+        <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-5"></div>
+        <h1 className="text-xl font-black text-white mb-2">Correction en cours</h1>
+        <p className="text-sm text-slate-400">
+          Vos réponses sont transmises au serveur. La correction et votre note seront affichées dans un instant.
+        </p>
+      </div>
+    </div>
+  );
+
   if (phase === 'waiting') return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-slate-900 text-white p-4">
       <div className="max-w-sm w-full text-center">
@@ -392,7 +529,8 @@ export default function QuizSession() {
   if (phase === 'finished') {
     const myEntry = leaderboard.find(e => e.name === safeName);
     const myRank = leaderboard.findIndex(e => e.name === safeName) + 1;
-    const myNote = myEntry ? ((myEntry.score / myEntry.total) * 20).toFixed(2) : ((score / questions.length) * 20).toFixed(2);
+    const safeTotal = total || questions.length;
+    const myNote = myEntry ? ((myEntry.score / myEntry.total) * 20).toFixed(2) : (safeTotal ? ((score / safeTotal) * 20).toFixed(2) : '0.00');
     const participation = leaderboard.length;
     return (
       <div className="min-h-screen bg-slate-950 py-10 px-4">
@@ -402,7 +540,7 @@ export default function QuizSession() {
             <p className="opacity-80 mb-4 text-sm">{safeName}</p>
             <div className="grid grid-cols-3 gap-4">
               <div className="bg-white/10 rounded-xl p-3">
-                <div className="text-2xl font-black">{score}/{questions.length}</div>
+                <div className="text-2xl font-black">{score}/{safeTotal}</div>
                 <div className="text-xs opacity-75 mt-1">Score</div>
               </div>
               <div className="bg-white/10 rounded-xl p-3">
@@ -417,10 +555,24 @@ export default function QuizSession() {
             <p className="text-xs opacity-60 mt-3">{participation} participant(s) dans cette session</p>
           </div>
 
+          {resultError && (
+            <div className="bg-red-950/50 border border-red-800 text-red-300 text-xs rounded-xl p-3 mb-5 flex items-start gap-2">
+              <Icon name="alert" size={14} className="mt-0.5" />
+              <span>
+                Votre copie n'a pas pu être enregistrée : {resultError}. Contactez l'administration
+                si le problème persiste.
+              </span>
+            </div>
+          )}
+
           <div className="flex gap-3 mb-5">
             <Link to={`/review/${quizId}`} className="flex-1 inline-flex items-center justify-center gap-2 bg-blue-600 text-white py-3 rounded-xl font-bold text-center hover:bg-blue-500 transition shadow text-sm">
               <Icon name="eye" size={15} />
               Relire ma copie
+            </Link>
+            <Link to="/revision" className="flex-1 inline-flex items-center justify-center gap-2 bg-emerald-600 text-white py-3 rounded-xl font-bold text-center hover:bg-emerald-500 transition shadow text-sm">
+              <Icon name="sparkles" size={15} />
+              Réviser mes erreurs
             </Link>
             <Link to="/schedule" className="flex-1 inline-flex items-center justify-center gap-2 bg-slate-900 border border-slate-700 text-slate-200 py-3 rounded-xl font-bold text-center hover:bg-slate-800 hover:border-slate-600 transition text-sm">
               <Icon name="calendar" size={15} />
@@ -449,7 +601,7 @@ export default function QuizSession() {
           <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6">
             <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-3">
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                <Icon name="trophy" size={18} className="text-indigo-400" />
+                <Icon name="trophy" size={18} className="text-amber-400" />
                 Classement de la session
               </h2>
               <span className="text-xs bg-blue-600/20 text-blue-300 px-2 py-0.5 rounded-full font-bold">{participation} participants</span>
@@ -461,7 +613,7 @@ export default function QuizSession() {
                 return (
                   <div key={index} className={`flex justify-between items-center p-3 rounded-xl border ${isMe ? 'bg-blue-600/15 border-blue-600' : 'bg-slate-950 border-slate-800'}`}>
                     <div className="flex items-center gap-3">
-                      <span className={`font-black text-lg w-7 text-center ${index === 0 ? 'text-yellow-400' : index === 1 ? 'text-slate-300' : index === 2 ? 'text-indigo-500' : 'text-slate-500'}`}>#{index + 1}</span>
+                      <span className={`font-black text-lg w-7 text-center ${index === 0 ? 'text-yellow-400' : index === 1 ? 'text-slate-300' : index === 2 ? 'text-amber-500' : 'text-slate-500'}`}>#{index + 1}</span>
                       <div>
                         <span className="font-bold text-slate-200 text-sm">{entry.name}</span>
                         {isMe && <span className="ml-2 text-xs bg-blue-600 text-white px-1.5 py-0.5 rounded-full">Moi</span>}
@@ -485,7 +637,7 @@ export default function QuizSession() {
   if (questions.length === 0) return (
     <div className="min-h-screen flex items-center justify-center bg-slate-950 p-6">
       <div className="bg-slate-900 p-8 rounded-2xl border border-slate-800 text-center max-w-md">
-        <div className="w-12 h-12 mx-auto rounded-2xl bg-indigo-500/15 border border-indigo-600/30 text-indigo-400 flex items-center justify-center mb-4">
+        <div className="w-12 h-12 mx-auto rounded-2xl bg-amber-500/15 border border-amber-600/30 text-amber-400 flex items-center justify-center mb-4">
           <Icon name="alert" size={22} />
         </div>
         <h2 className="text-2xl font-bold text-white">Epreuve non disponible</h2>
@@ -507,14 +659,41 @@ export default function QuizSession() {
   const shuffledOptions = seededShuffle(validOptions, safeName + '_' + currentIndex);
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col">
+    <div className="min-h-screen bg-slate-950 flex flex-col select-none">
+      {/* Bandeau anti-triche */}
+      {warningMessage && (
+        <div className="fixed top-3 left-1/2 -translate-x-1/2 z-50 w-[min(92vw,42rem)] bg-red-950/95 border border-red-700 text-red-100 rounded-xl px-4 py-3 shadow-2xl shadow-black/50 flex items-start gap-2.5">
+          <Icon name="shield" size={17} className="mt-0.5 text-red-300" />
+          <div className="flex-1">
+            <p className="text-xs font-bold">{warningMessage}</p>
+            <p className="text-[11px] text-red-300/80 mt-0.5">
+              Avertissement {violations}/{MAX_VIOLATIONS}. Au-delà de {MAX_VIOLATIONS}, la copie est soumise automatiquement.
+            </p>
+          </div>
+          <button onClick={() => setWarningMessage('')} aria-label="Fermer l'avertissement" className="text-red-300 hover:text-white transition">
+            <Icon name="close" size={14} />
+          </button>
+        </div>
+      )}
+
       {/* Top bar */}
       <div className="bg-slate-900 border-b border-slate-800 px-4 py-3 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <span className="bg-blue-600/20 text-blue-300 text-xs font-bold px-2.5 py-1 rounded-full">{quizId}</span>
           <span className="text-slate-300 text-sm font-semibold">{safeName}</span>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
+          <span className={`flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full ${violations ? 'bg-red-950/60 text-red-300' : 'bg-slate-800 text-slate-400'}`}>
+            <Icon name="shield" size={12} />
+            {violations} alerte(s)
+          </span>
+          <button
+            onClick={toggleFullscreen}
+            className="inline-flex items-center gap-1.5 text-[11px] font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded-full transition"
+          >
+            <Icon name={isFullscreen ? 'close' : 'eye'} size={12} />
+            {isFullscreen ? 'Quitter le plein écran' : 'Plein écran'}
+          </button>
           <span className="flex items-center gap-1.5 text-xs text-slate-400 bg-slate-800 px-2.5 py-1 rounded-full">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
             {participants} en cours
@@ -544,6 +723,25 @@ export default function QuizSession() {
       {/* Question */}
       <div className="flex-1 flex flex-col items-center pt-8 px-4 pb-20">
         <div className="w-full max-w-3xl bg-slate-900 p-8 rounded-2xl border border-slate-800 shadow-xl shadow-black/30">
+          <div className="flex items-center gap-2 mb-4 flex-wrap">
+            {q.tags && String(q.tags).split(/[;,]/).filter(Boolean).map(tag => (
+              <span key={tag} className="text-[10px] font-bold text-blue-300 bg-blue-600/15 border border-blue-600/30 px-2 py-0.5 rounded-full">
+                {tag.trim()}
+              </span>
+            ))}
+            {q.difficulte && (
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                q.difficulte === 'facile'
+                  ? 'text-emerald-300 bg-emerald-600/15 border-emerald-600/30'
+                  : q.difficulte === 'difficile'
+                    ? 'text-red-300 bg-red-600/15 border-red-600/30'
+                    : 'text-amber-300 bg-amber-600/15 border-amber-600/30'
+              }`}>
+                {q.difficulte}
+              </span>
+            )}
+          </div>
+
           <h2 className="text-xl font-bold mb-8 text-slate-100 leading-relaxed">{q.Question}</h2>
 
           <div className="grid grid-cols-1 gap-3 mb-6">

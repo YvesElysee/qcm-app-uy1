@@ -255,7 +255,7 @@ export default function ContactAdmin({ onClose, preselectedUe = '' }) {
                       msg.status === 'traite'
                         ? 'bg-emerald-600/15 text-emerald-300'
                         : msg.status === 'en_cours'
-                        ? 'bg-indigo-600/15 text-indigo-300'
+                        ? 'bg-amber-600/15 text-amber-300'
                         : 'bg-slate-800 text-slate-400'
                     }`}>
                       {msg.status === 'traite' ? 'Traité' : msg.status === 'en_cours' ? 'En cours' : 'En attente'}

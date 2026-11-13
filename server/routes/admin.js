@@ -13,6 +13,7 @@ import {
   bearerToken,
   deleteAdminToken
 } from '../auth.js';
+import { createBackup, listBackups, backupPath, deleteBackup } from '../backup.js';
 
 const router = Router();
 
@@ -124,20 +125,173 @@ router.delete('/students/:id', requireAdmin, (req, res) => {
 // ── Résultats (exports CSV / PDF du panneau admin) ────────────────────
 
 /**
- * Tous les résultats d'un quiz donné (identique à l'ancienne requête where ue == quizId)
+ * Tous les résultats, éventuellement filtrés par UE.
+ * Sans paramètre `ue`, l'export complet est renvoyé.
  */
 router.get('/results', requireAdmin, (req, res) => {
   const ue = req.query.ue;
-  if (!ue) {
-    return res.status(400).json({ error: 'Paramètre "ue" requis.' });
-  }
-  const rows = db.prepare('SELECT * FROM results WHERE ue = ? ORDER BY date DESC').all(ue);
+  const rows = ue
+    ? db.prepare('SELECT * FROM results WHERE ue = ? ORDER BY date DESC').all(ue)
+    : db.prepare('SELECT * FROM results ORDER BY date DESC').all();
   const parse = (json) => {
     try { return json ? JSON.parse(json) : []; } catch { return []; }
   };
   res.json({
     results: rows.map(r => ({ ...r, answers: parse(r.answers), isMakeup: !!r.isMakeup }))
   });
+});
+
+// ── Tableau de bord analytique ─────────────────────────────────────────
+
+function parseAnswers(json) {
+  try {
+    return json ? JSON.parse(json) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Agrégats pédagogiques calculés à partir des copies corrigées :
+ * - questions les plus ratées
+ * - réussite moyenne par UE
+ * - évolution des notes dans le temps
+ */
+router.get('/analytics', requireAdmin, (_req, res) => {
+  const rows = db.prepare('SELECT * FROM results ORDER BY date ASC').all();
+  const students = new Set(rows.map(r => (r.email || r.name || '').toLowerCase()).filter(Boolean));
+
+  const questionStats = new Map();
+  const byUe = new Map();
+  const byDay = new Map();
+  let answered = 0;
+  let correct = 0;
+
+  rows.forEach((row) => {
+    const note = row.total ? (row.score / row.total) * 20 : 0;
+    const key = row.ue || '-';
+    if (!byUe.has(key)) {
+      byUe.set(key, { ue: key, attempts: 0, notes: [], students: new Set(), score: 0, total: 0 });
+    }
+    const ueStat = byUe.get(key);
+    ueStat.attempts += 1;
+    ueStat.notes.push(note);
+    ueStat.score += Number(row.score) || 0;
+    ueStat.total += Number(row.total) || 0;
+    ueStat.students.add((row.email || row.name || '').toLowerCase());
+
+    const day = String(row.date || '').slice(0, 10) || 'inconnue';
+    if (!byDay.has(day)) byDay.set(day, { date: day, notes: [], attempts: 0 });
+    const dayStat = byDay.get(day);
+    dayStat.notes.push(note);
+    dayStat.attempts += 1;
+
+    const answers = parseAnswers(row.answers);
+    answers.forEach((a) => {
+      if (!a || typeof a !== 'object' || !a.question) return;
+      answered += 1;
+      if (a.isOk) correct += 1;
+      const qKey = String(a.questionId ?? a.question);
+      if (!questionStats.has(qKey)) {
+        questionStats.set(qKey, {
+          questionId: a.questionId ?? null,
+          question: a.question,
+          ue: row.ue || '-',
+          tags: a.tags || '',
+          difficulte: a.difficulte || 'moyenne',
+          attempts: 0,
+          wrong: 0
+        });
+      }
+      const qStat = questionStats.get(qKey);
+      qStat.attempts += 1;
+      if (!a.isOk) qStat.wrong += 1;
+    });
+  });
+
+  const mostMissed = [...questionStats.values()]
+    .filter(q => q.wrong > 0)
+    .map(q => ({ ...q, wrongRate: q.attempts ? Math.round((q.wrong / q.attempts) * 100) : 0 }))
+    .sort((a, b) => b.wrongRate - a.wrongRate || b.wrong - a.wrong)
+    .slice(0, 12);
+
+  const ueStats = [...byUe.values()]
+    .map(u => ({
+      ue: u.ue,
+      attempts: u.attempts,
+      students: u.students.size,
+      averageNote: u.notes.length
+        ? Number((u.notes.reduce((a, b) => a + b, 0) / u.notes.length).toFixed(2))
+        : 0,
+      successRate: u.total ? Math.round((u.score / u.total) * 100) : 0
+    }))
+    .sort((a, b) => b.averageNote - a.averageNote);
+
+  const evolution = [...byDay.values()]
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(-30)
+    .map(d => ({
+      date: d.date,
+      attempts: d.attempts,
+      averageNote: Number((d.notes.reduce((a, b) => a + b, 0) / d.notes.length).toFixed(2))
+    }));
+
+  const averageNote = rows.length
+    ? Number((rows.reduce((acc, r) => acc + (r.total ? (r.score / r.total) * 20 : 0), 0) / rows.length).toFixed(2))
+    : 0;
+  const passed = rows.filter(r => r.total && (r.score / r.total) >= 0.5).length;
+
+  res.json({
+    totals: {
+      results: rows.length,
+      students: students.size,
+      quizzes: new Set(rows.map(r => r.ue)).size,
+      averageNote,
+      successRate: rows.length ? Math.round((passed / rows.length) * 100) : 0,
+      answered,
+      correct,
+      errorRate: answered ? Math.round(((answered - correct) / answered) * 100) : 0
+    },
+    mostMissed,
+    byUe: ueStats,
+    evolution
+  });
+});
+
+// ── Sauvegardes SQLite ─────────────────────────────────────────────────
+
+router.get('/backups', requireAdmin, (_req, res) => {
+  res.json({ backups: listBackups() });
+});
+
+router.post('/backups', requireAdmin, async (_req, res) => {
+  try {
+    const backup = await createBackup('manuel');
+    res.status(201).json({ success: true, backup });
+  } catch (err) {
+    console.error('[backup] Échec de création :', err);
+    res.status(500).json({ error: 'Impossible de créer la sauvegarde.' });
+  }
+});
+
+router.get('/backups/:name', requireAdmin, (req, res) => {
+  const full = backupPath(req.params.name);
+  if (!full) {
+    return res.status(404).json({ error: 'Sauvegarde introuvable.' });
+  }
+  res.download(full);
+});
+
+router.delete('/backups/:name', requireAdmin, (req, res) => {
+  try {
+    if (!deleteBackup(req.params.name)) {
+      return res.status(404).json({ error: 'Sauvegarde introuvable.' });
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[backup] Échec de suppression :', err);
+    res.status(500).json({ error: 'Impossible de supprimer la sauvegarde.' });
+  }
 });
 
 export default router;

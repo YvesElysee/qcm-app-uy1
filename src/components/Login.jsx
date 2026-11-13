@@ -48,7 +48,7 @@ export default function Login() {
                 </div>
 
                 {expired && (
-                    <div className="mb-5 flex items-start gap-2 bg-indigo-950/50 border border-indigo-800 text-indigo-300 text-xs rounded-xl px-3.5 py-3">
+                    <div className="mb-5 flex items-start gap-2 bg-amber-950/50 border border-amber-800 text-amber-300 text-xs rounded-xl px-3.5 py-3">
                         <Icon name="clock" size={15} className="mt-0.5" />
                         <span>
                             Session expirée ou fermée à distance. Reconnectez-vous pour

@@ -58,12 +58,14 @@ Conçue avec **React 19 + Vite 8 + Tailwind CSS** et un **backend Node.js / Expr
 - Côté Administrateur : section *Messages* permettant de filtrer par catégorie/filière, mettre à jour le statut, répondre directement par email (`mailto:`) ou supprimer.
 
 ### 6. Panneau Administrateur Réorganisé & Complet
-- **Interface repensée** : barre latérale sur desktop et onglets défilants sur mobile, sept sections claires · *Vue d'ensemble, Évaluations, Unités d'enseignement, Étudiants, Résultats, Messages, Paramètres SMTP* · dans le même thème sombre que l'espace étudiant.
+- **Interface repensée** : barre latérale sur desktop et onglets défilants sur mobile, neuf sections claires · *Vue d'ensemble, Évaluations, Analytique, Unités d'enseignement, Étudiants, Résultats, Messages, Sauvegardes, Paramètres SMTP* · dans le même thème sombre que l'espace étudiant.
 - **Vue d'ensemble** : statistiques clés (évaluations, à venir, étudiants inscrits, messages en attente) et listes des prochaines et dernières évaluations.
 - **Évaluations** :
-  - Programmation (filière, niveau, semestre, minuterie, ouverture/clôture) et import CSV regroupés côte à côte.
+  - Programmation (filière, niveau, semestre, minuterie, **nombre de questions tirées par étudiant**, ouverture/clôture) et import CSV regroupés côte à côte.
   - Liste complète avec actions : inspecter les questions, consulter les résultats, exporter CSV / procès-verbal PDF, supprimer l'évaluation (**les résultats déjà enregistrés sont conservés**).
-- **Résultats** : consultation des notes par évaluation (participants, moyenne, meilleure note) avec exports CSV / PDF.
+- **Analytique** : tableau de bord pédagogique avec les questions les plus ratées, la réussite moyenne par UE, l'évolution des notes dans le temps et les taux d'erreur globaux.
+- **Résultats** : consultation des notes par évaluation (participants, moyenne, meilleure note) avec exports CSV / PDF, plus un **export complet** de toutes les copies avec le détail de chaque réponse.
+- **Sauvegardes** : création, téléchargement et suppression des copies de sécurité SQLite (sauvegarde automatique planifiée côté serveur).
 - **Étudiants** : recherche, filtres, suppression et **export CSV** de la liste complète.
 - **Parser CSV Ultra-Flexible** :
   - Accepte tous les délimiteurs : point-virgule (`;` standard Excel français), virgule (`,`), tabulation (`\t`), pipe (`|`).
@@ -84,7 +86,14 @@ Conçue avec **React 19 + Vite 8 + Tailwind CSS** et un **backend Node.js / Expr
 - L'assistant s'identifie uniquement comme **QCM App** : il ne révèle jamais le fournisseur, le modèle ou la technologie sous-jacente.
 - **Quota anti-épuisement des tokens** : `2` questions maximum par erreur et par étudiant (persisté dans la table `ai_usage`), plus un plafond quotidien (`30` par défaut). Les boutons IA restent masqués tant que les clés ne sont pas configurées (`GET /api/ai/status`).
 
-### 8. Design Professionnel Unifié
+### 8. Évaluations sécurisées & apprentissage adaptatif
+- **Correction 100 % côté serveur** : l'API publique ne renvoie jamais `ReponseCorrecte`. L'étudiant n'envoie que ses choix ; le serveur calcule le score, la note et la correction détaillée, puis les restitue après soumission. L'inspecteur admin conserve l'accès complet via son jeton.
+- **Anti-triche pendant l'épreuve** : détection des changements d'onglet, blocage du copier/coller et du menu contextuel, avertissement visuel, plein écran proposé et **soumission automatique au 3ᵉ incident**.
+- **Banque de questions enrichie** : tags libres, niveau de difficulté (`facile`, `moyenne`, `difficile`) et nombre de questions tirées par étudiant. Le tirage est **déterministe par étudiant** (même tirage en cas de reprise, ordre différent d'un étudiant à l'autre).
+- **Révisions intelligentes** : chaque erreur crée une carte de révision planifiée par **répétition espacée** (algorithme SM-2 simplifié). L'espace `/revision` permet de réviser les cartes dues, de consulter toutes ses cartes et de suivre ses échéances par UE.
+- **Sauvegarde automatique SQLite** : copies cohérentes via `db.backup()`, rotation configurable, téléchargement et suppression depuis l'administration, et **export complet** des résultats (une ligne par réponse) au format CSV.
+
+### 9. Design Professionnel Unifié
 - **Thème sombre** cohérent sur tout le site (étudiant et administration) : fonds `slate-950/900`, bordures `slate-800`, couleur primaire `blue-600`, accents émeraude / rouge / indigo.
 - **Aucun emoji** : l'interface utilise exclusivement des icônes SVG au trait fin (`src/components/ui/icons.jsx`), alignées et lisibles à toutes les tailles.
 - Identité resserrée sur le nom **QCM App** partout (titre, emails, pied de page, procès-verbaux PDF).
@@ -164,16 +173,20 @@ npm start
 | `POST /api/auth/change-password` | étudiant | Changement de mot de passe |
 | `GET /api/quizzes` | public | Liste des QCM (filtres filière/niveau, tri) |
 | `GET /api/quizzes/:id` | public | Métadonnées d'un QCM |
-| `GET /api/quizzes/:id/questions` | public | Questions d'un QCM |
+| `GET /api/quizzes/:id/questions` | public / admin | Questions (sans correction pour les étudiants, tirage par étudiant ; correction complète avec jeton admin) |
 | `POST /api/quizzes/:id` | admin | Programmer / fusionner un QCM |
 | `POST /api/quizzes/:id/questions` | admin | Importer (remplacer) les questions |
 | `DELETE /api/quizzes/:id/questions/:qid` | admin | Supprimer une question |
 | `DELETE /api/quizzes/:id` | admin | Supprimer un QCM (questions + sessions ; **résultats conservés**) |
 | `POST /api/quizzes/:id/sessions` | public | Heartbeat présence participants |
 | `GET /api/quizzes/:id/sessions` | public | Compteur de participants |
-| `POST /api/results` | étudiant | Enregistrer une copie |
+| `POST /api/results` | étudiant | Enregistrer une copie (score et correction calculés serveur) |
 | `GET /api/results?ue=&sessionTimestamp=` | public | Classement d'une session |
-| `GET /api/results/mine` | étudiant | Historique personnel |
+| `GET /api/results/mine` | étudiant | Historique personnel (avec correction) |
+| `GET /api/review/stats` | étudiant | Statistiques de révision espacée par UE |
+| `GET /api/review` | étudiant | Cartes dues (`?all=1` pour toutes, `?ue=` pour filtrer) |
+| `POST /api/review/:id/answer` | étudiant | Réévaluer une carte (`remembered`) |
+| `DELETE /api/review/:id` | étudiant | Supprimer une carte de révision |
 | `POST /api/feedback` | étudiant | Envoyer un message/suggestion |
 | `GET /api/feedback/mine` | étudiant | Suivi de mes messages |
 | `GET /api/feedback` · `PATCH` · `DELETE` | admin | Gestion des messages |
@@ -184,7 +197,10 @@ npm start
 | `POST /api/admin/login` | public | Connexion admin → jeton |
 | `POST /api/admin/logout` | admin | Révoquer le jeton admin côté serveur |
 | `GET /api/admin/students` · `DELETE` | admin | Gestion des étudiants |
-| `GET /api/admin/results?ue=` | admin | Résultats (exports CSV/PDF) |
+| `GET /api/admin/results?ue=` | admin | Résultats (sans `ue` : export complet) |
+| `GET /api/admin/analytics` | admin | Agrégats : questions ratées, réussite par UE, évolution |
+| `GET/POST /api/admin/backups` | admin | Lister / créer une sauvegarde SQLite |
+| `GET/DELETE /api/admin/backups/:name` | admin | Télécharger / supprimer une sauvegarde |
 | `GET/PUT /api/settings/smtp` · `POST /api/settings/test-smtp` | admin | Configuration & test SMTP |
 
 ---
@@ -197,13 +213,17 @@ npm start
 │   ├── db.js                   # SQLite (better-sqlite3) & schéma
 │   ├── auth.js                 # scrypt, jetons, middlewares requireStudent/requireAdmin
 │   ├── smtp.js                 # Envoi SMTP Google (Nodemailer)
+│   ├── backup.js               # Sauvegardes SQLite planifiées (db.backup + rotation)
+│   ├── questionDraw.js         # Tirage déterministe des questions par étudiant
+│   ├── spacedRepetition.js     # Algorithme de répétition espacée (cartes d'erreurs)
 │   └── routes/
 │       ├── auth.js             # Inscription, connexion, MDP oublié (3 étapes), profil
-│       ├── quizzes.js          # QCM, questions, présence temps réel (heartbeat)
-│       ├── results.js          # Copies, classement, historique personnel
+│       ├── quizzes.js          # QCM, questions (sans correction publique), tirage, présence
+│       ├── results.js          # Copies corrigées serveur, classement, historique personnel
+│       ├── review.js           # Révisions intelligentes : cartes dues, réponses, stats
 │       ├── feedback.js         # Messages & suggestions étudiants
 │       ├── ues.js              # Unités d'enseignement
-│       ├── admin.js            # Login admin, étudiants, résultats (exports)
+│       ├── admin.js            # Login admin, étudiants, résultats, analytique, sauvegardes
 │       ├── ai.js               # Tuteur IA : proxy Groq/Gemini, quotas, identité QCM App
 │       └── settings.js         # Configuration & test SMTP
 ├── src/                        # Frontend React 19
@@ -222,6 +242,7 @@ npm start
 │   │   ├── ContactAdmin.jsx    # Formulaire de suggestions & signalements étudiants
 │   │   ├── Login.jsx           # Accès sécurisé Administrateur
 │   │   ├── ReviewSession.jsx   # Relecture détaillée d'une copie d'examen (+ Tuteur IA)
+│   │   ├── RevisionSession.jsx # Révisions espacées des erreurs (cartes dues / toutes)
 │   │   ├── Schedule.jsx        # Emploi du temps public & étudiant
 │   │   ├── StudentAuth.jsx     # Connexion, Inscription complète & Récupération MDP
 │   │   ├── StudentDashboard.jsx # Tableau de bord étudiant (Alertes, Rattrapages, QCM)
@@ -255,6 +276,7 @@ npm start
 | `/contact` | Étudiant connecté | Suggestions / contact administration |
 | `/quiz/:quizId` | Étudiant connecté | Session d'évaluation (immersif, sans navbar) |
 | `/review/:quizId` | Étudiant connecté | Relecture de copie |
+| `/revision` | Étudiant connecté | Révisions intelligentes (répétition espacée) |
 | Portail admin (URL discrète, voir `src/config.js`) | Admin | Connexion + panneau d'administration (aucun lien public) |
 | `*` | · | Page 404 |
 
@@ -279,7 +301,18 @@ La **navbar** et le **footer** sont partagés sur toutes les pages standard ; le
 
 ## Sauvegarde de la base
 
-La base est un simple fichier : `data/qcm.db`. Pour sauvegarder :
+Les sauvegardes sont **automatiques** : le serveur crée une copie cohérente de la base au démarrage (après 30 secondes) puis toutes les `BACKUP_INTERVAL_HOURS` heures (6 par défaut). Les fichiers sont stockés dans `data/backups` (ou `BACKUP_DIR`) et les plus anciens sont supprimés au-delà de `BACKUP_MAX` copies (10 par défaut).
+
+```env
+BACKUP_ENABLED=true          # false pour désactiver
+BACKUP_INTERVAL_HOURS=6      # fréquence des sauvegardes automatiques
+BACKUP_MAX=10                # nombre de copies conservées
+# BACKUP_DIR=./data/backups  # dossier de destination
+```
+
+Depuis l'administration, section **Sauvegardes**, vous pouvez créer une copie immédiate, la télécharger ou la supprimer. Pour restaurer une sauvegarde : arrêtez le serveur, remplacez `data/qcm.db` par le fichier choisi, puis redémarrez.
+
+Sauvegarde manuelle de secours :
 ```bash
 cp data/qcm.db sauvegardes/qcm-$(date +%F).db
 ```

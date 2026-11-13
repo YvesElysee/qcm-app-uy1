@@ -28,7 +28,7 @@ const FEATURES = [
     icon: 'calendar',
     title: 'Emploi du temps public',
     desc: 'La programmation des évaluations est consultable librement, même sans compte étudiant.',
-    style: 'bg-indigo-500/15 text-indigo-300'
+    style: 'bg-amber-500/15 text-amber-300'
   },
   {
     icon: 'chat',

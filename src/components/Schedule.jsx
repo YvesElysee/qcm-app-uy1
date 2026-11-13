@@ -67,7 +67,7 @@ export default function Schedule() {
   const badgeColor = (f) => {
     if (f === 'Informatique') return 'bg-blue-500/15 text-blue-300';
     if (f === 'Mathématiques') return 'bg-purple-500/15 text-purple-300';
-    if (f === 'Physique') return 'bg-indigo-500/15 text-indigo-300';
+    if (f === 'Physique') return 'bg-amber-500/15 text-amber-300';
     return 'bg-slate-800 text-slate-300';
   };
 

@@ -12,10 +12,12 @@ import { ADMIN_LOGIN_PATH } from './config';
 const SECTIONS = [
   { id: 'overview', label: "Vue d'ensemble", icon: 'chart', desc: 'Statistiques clés et prochaines évaluations' },
   { id: 'quizzes', label: 'Évaluations', icon: 'list', desc: 'Programmer, importer et gérer les QCM' },
+  { id: 'analytics', label: 'Analytique', icon: 'chart', desc: 'Questions ratées, réussite par UE et évolution des notes' },
   { id: 'ues', label: "Unités d'enseignement", icon: 'book', desc: 'Filières, niveaux et catalogue des UE' },
   { id: 'students', label: 'Étudiants', icon: 'users', desc: 'Comptes inscrits et exports' },
   { id: 'results', label: 'Résultats', icon: 'trophy', desc: 'Notes par évaluation et procès-verbaux' },
   { id: 'messages', label: 'Messages', icon: 'chat', desc: 'Suggestions et signalements des étudiants' },
+  { id: 'backups', label: 'Sauvegardes', icon: 'download', desc: 'Copies de sécurité de la base SQLite' },
   { id: 'smtp', label: 'Paramètres SMTP', icon: 'settings', desc: 'Service email de récupération de mot de passe' }
 ];
 
@@ -44,6 +46,12 @@ const btnPrimary =
 
 const formatDate = (ts) => (ts ? new Date(ts).toLocaleString('fr-FR') : '-');
 
+const formatSize = (bytes) => {
+  const value = Number(bytes) || 0;
+  if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} Mo`;
+  return `${Math.max(1, Math.round(value / 1024))} Ko`;
+};
+
 export default function AdminPanel() {
   usePageTitle('Administration');
   const [activeSection, setActiveSection] = useState('overview');
@@ -57,6 +65,7 @@ export default function AdminPanel() {
   const [launchTime, setLaunchTime] = useState('');
   const [endTime, setEndTime] = useState('');
   const [timePerQuestion, setTimePerQuestion] = useState('60');
+  const [drawCount, setDrawCount] = useState('');
 
   const [csvFile, setCsvFile] = useState(null);
   const [parsedCsvData, setParsedCsvData] = useState(null); // { questions, warnings, errors, detectedColumns }
@@ -101,6 +110,13 @@ export default function AdminPanel() {
   const [resultsList, setResultsList] = useState([]);
   const [loadingResults, setLoadingResults] = useState(false);
 
+  // ── Analytique & sauvegardes ───────────────────────────────────────────
+  const [analytics, setAnalytics] = useState(null);
+  const [loadingAnalytics, setLoadingAnalytics] = useState(true);
+  const [backups, setBackups] = useState([]);
+  const [loadingBackups, setLoadingBackups] = useState(true);
+  const [creatingBackup, setCreatingBackup] = useState(false);
+
   // ── Messages & suggestions ─────────────────────────────────────────────
   const [feedbacks, setFeedbacks] = useState([]);
   const [fbCategory, setFbCategory] = useState('');
@@ -122,6 +138,28 @@ export default function AdminPanel() {
   const fetchUes = useCallback(async () => {
     const data = await api('/ues', { auth: 'admin' });
     setAllUes(data.ues);
+  }, []);
+
+  const fetchAnalytics = useCallback(async () => {
+    try {
+      const data = await api('/admin/analytics', { auth: 'admin' });
+      setAnalytics(data);
+    } catch (err) {
+      console.warn('Erreur chargement analytique :', err);
+    } finally {
+      setLoadingAnalytics(false);
+    }
+  }, []);
+
+  const fetchBackups = useCallback(async () => {
+    try {
+      const data = await api('/admin/backups', { auth: 'admin' });
+      setBackups(data.backups);
+    } catch (err) {
+      console.warn('Erreur chargement sauvegardes :', err);
+    } finally {
+      setLoadingBackups(false);
+    }
   }, []);
 
   // Remarque : les fetchers ne déclenchent aucun setState avant leur premier
@@ -184,6 +222,15 @@ export default function AdminPanel() {
     load();
   }, [fetchFeedbacks]);
 
+  // Chargement à la demande des sections analytique et sauvegardes
+  useEffect(() => {
+    const load = async () => {
+      if (activeSection === 'analytics') await fetchAnalytics();
+      if (activeSection === 'backups') await fetchBackups();
+    };
+    load();
+  }, [activeSection, fetchAnalytics, fetchBackups]);
+
   // ─── Évaluations : import CSV robuste ─────────────────────────────────
   const handleFileSelected = async (e) => {
     const file = e.target.files[0];
@@ -205,7 +252,7 @@ export default function AdminPanel() {
     setInspectQuizId(quizId);
     setLoadingQuestions(true);
     try {
-      const data = await api(`/quizzes/${encodeURIComponent(quizId)}/questions`);
+      const data = await api(`/quizzes/${encodeURIComponent(quizId)}/questions`, { auth: 'admin' });
       setInspectQuestions(data.questions);
     } catch (err) {
       console.warn('Erreur chargement questions :', err);
@@ -239,7 +286,8 @@ export default function AdminPanel() {
           niveau,
           semestre,
           ueLabel: ueInfo?.label || targetUe,
-          timePerQuestion: parseInt(timePerQuestion) || 60
+          timePerQuestion: parseInt(timePerQuestion) || 60,
+          drawCount: drawCount === '' ? 0 : Math.max(0, parseInt(drawCount) || 0)
         }
       });
       const count = res.count;
@@ -264,6 +312,7 @@ export default function AdminPanel() {
     niveau,
     semestre,
     timePerQuestion,
+    drawCount,
     allUes,
     fetchHistory,
     fetchUpcoming,
@@ -290,6 +339,7 @@ export default function AdminPanel() {
       ue: targetUe,
       ueLabel: ueInfo?.label || targetUe,
       timePerQuestion: parseInt(timePerQuestion) || 60,
+      drawCount: drawCount === '' ? 0 : Math.max(0, parseInt(drawCount) || 0),
       launchTime: new Date(launchTime).getTime()
     };
     if (endTime) data.endTime = new Date(endTime).getTime();
@@ -299,7 +349,7 @@ export default function AdminPanel() {
     fetchHistory();
     fetchUpcoming();
     fetchUes();
-  }, [ue, filiere, niveau, semestre, timePerQuestion, launchTime, endTime, allUes, fetchHistory, fetchUpcoming, fetchUes]);
+  }, [ue, filiere, niveau, semestre, timePerQuestion, drawCount, launchTime, endTime, allUes, fetchHistory, fetchUpcoming, fetchUes]);
 
   const deleteSingleQuestion = useCallback(
     async (qId) => {
@@ -555,6 +605,122 @@ export default function AdminPanel() {
     docPdf.save(`PV_${quizId}.pdf`);
   };
 
+  /**
+   * Export complet : toutes les copies, avec le détail de chaque réponse.
+   * Une ligne par réponse permet d'analyser finement les erreurs.
+   */
+  const exportAllResultsCSV = async () => {
+    try {
+      const data = await api('/admin/results', { auth: 'admin' });
+      if (!data.results.length) {
+        alert('Aucun résultat à exporter.');
+        return;
+      }
+
+      const rows = [];
+      data.results.forEach((r) => {
+        const note = r.total ? ((r.score / r.total) * 20).toFixed(2) : '';
+        const base = {
+          Etudiant: r.name,
+          Email: r.email || '-',
+          UE: r.ue,
+          Filiere: r.filiere || '-',
+          Niveau: r.niveau || '-',
+          Score: r.score,
+          Total: r.total,
+          Note_Sur_20: note,
+          Rattrapage: r.isMakeup ? 'OUI' : 'NON',
+          Date_Copie: new Date(r.date).toLocaleString('fr-FR')
+        };
+
+        if (Array.isArray(r.answers) && r.answers.length > 0) {
+          r.answers.forEach((a, index) => {
+            const isObject = a && typeof a === 'object';
+            rows.push({
+              ...base,
+              Numero_Question: index + 1,
+              Question: isObject ? (a.question || a.Question || '') : '',
+              Reponse_Donnee: isObject ? (a.selected || '-') : (a || '-'),
+              Reponse_Correcte: isObject ? (a.correct || '') : '',
+              Resultat: isObject && typeof a.isOk === 'boolean'
+                ? (a.isOk ? 'CORRECT' : 'INCORRECT')
+                : '',
+              Tags: isObject ? (a.tags || '') : '',
+              Difficulte: isObject ? (a.difficulte || '') : ''
+            });
+          });
+        } else {
+          rows.push({
+            ...base,
+            Numero_Question: '',
+            Question: '',
+            Reponse_Donnee: '',
+            Reponse_Correcte: '',
+            Resultat: '',
+            Tags: '',
+            Difficulte: ''
+          });
+        }
+      });
+
+      const csv = Papa.unparse(rows);
+      const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Export_Complet_Resultats_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(`Export impossible : ${err.message}`);
+    }
+  };
+
+  // ─── Sauvegardes SQLite ──────────────────────────────────────────────
+  const createBackupNow = async () => {
+    setCreatingBackup(true);
+    try {
+      await api('/admin/backups', { method: 'POST', auth: 'admin' });
+      await fetchBackups();
+    } catch (err) {
+      alert(`Sauvegarde impossible : ${err.message}`);
+    } finally {
+      setCreatingBackup(false);
+    }
+  };
+
+  const downloadBackup = async (name) => {
+    try {
+      const res = await fetch(`/api/admin/backups/${encodeURIComponent(name)}`, {
+        headers: { Authorization: `Bearer ${sessionStorage.getItem('adminToken') || ''}` }
+      });
+      if (!res.ok) throw new Error(`Erreur ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(`Téléchargement impossible : ${err.message}`);
+    }
+  };
+
+  const removeBackup = async (name) => {
+    if (!confirm(`Supprimer la sauvegarde ${name} ?`)) return;
+    try {
+      await api(`/admin/backups/${encodeURIComponent(name)}`, { method: 'DELETE', auth: 'admin' });
+      await fetchBackups();
+    } catch (err) {
+      alert(`Suppression impossible : ${err.message}`);
+    }
+  };
+
   // ─── Déconnexion (révoque le jeton côté serveur) ───────────────────────
   const handleLogout = async () => {
     try {
@@ -764,7 +930,7 @@ export default function AdminPanel() {
                     icon: 'chat',
                     value: stats.pendingMessages,
                     label: 'Messages en attente',
-                    style: 'bg-indigo-600/15 text-indigo-400 border-indigo-600/30'
+                    style: 'bg-amber-600/15 text-amber-400 border-amber-600/30'
                   }
                 ].map(s => (
                   <div key={s.label} className={`${card} p-5`}>
@@ -899,6 +1065,26 @@ export default function AdminPanel() {
                               <Icon name="trash" size={14} />
                             </button>
                           </div>
+                          {(q.tags || q.difficulte) && (
+                            <div className="flex items-center gap-1.5 flex-wrap mt-2">
+                              {q.tags && String(q.tags).split(/[;,]/).filter(Boolean).map(tag => (
+                                <span key={tag} className="text-[10px] font-bold text-blue-300 bg-blue-600/15 border border-blue-600/30 px-2 py-0.5 rounded-full">
+                                  {tag.trim()}
+                                </span>
+                              ))}
+                              {q.difficulte && (
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                                  q.difficulte === 'facile'
+                                    ? 'text-emerald-300 bg-emerald-600/15 border-emerald-600/30'
+                                    : q.difficulte === 'difficile'
+                                      ? 'text-red-300 bg-red-600/15 border-red-600/30'
+                                      : 'text-amber-300 bg-amber-600/15 border-amber-600/30'
+                                }`}>
+                                  {q.difficulte}
+                                </span>
+                              )}
+                            </div>
+                          )}
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] mt-3">
                             {['A', 'B', 'C', 'D'].map(l => {
                               const val = q['Opt' + l];
@@ -968,7 +1154,7 @@ export default function AdminPanel() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                     <div>
                       <label className={label}>Unité d'enseignement</label>
                       <select
@@ -1012,7 +1198,7 @@ export default function AdminPanel() {
                         />
                       )}
                       {allUes.length === 0 && !manualUe && (
-                        <p className="text-[11px] text-indigo-400 mt-1">
+                        <p className="text-[11px] text-amber-400 mt-1">
                           Catalogue vide : ajoutez d'abord une UE dans la section « Unités d'enseignement ».
                         </p>
                       )}
@@ -1032,6 +1218,17 @@ export default function AdminPanel() {
                         className={input}
                         value={timePerQuestion}
                         onChange={e => setTimePerQuestion(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className={label}>Questions par tentative</label>
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="0 = toutes"
+                        className={input}
+                        value={drawCount}
+                        onChange={e => setDrawCount(e.target.value)}
                       />
                     </div>
                   </div>
@@ -1162,7 +1359,7 @@ export default function AdminPanel() {
                             </div>
                             <h4 className="font-black text-white text-base mt-1">{q.ue || q.id}</h4>
                             <p className="text-[11px] text-slate-500">
-                              {q.questionCount || 0} questions • {q.timePerQuestion || 60}s/question •
+                              {q.questionCount || 0} questions{q.drawCount ? ` • ${q.drawCount} tirées/étudiant` : ''} • {q.timePerQuestion || 60}s/question •
                               Ouverture : {formatDate(q.launchTime)}
                               {q.endTime ? ` • Clôture : ${formatDate(q.endTime)}` : ''}
                             </p>
@@ -1214,6 +1411,227 @@ export default function AdminPanel() {
                   </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* ════════════ ANALYTIQUE ════════════ */}
+          {activeSection === 'analytics' && (
+            <div className="space-y-6">
+              {loadingAnalytics ? (
+                <div className={`${card} p-10 text-center text-slate-500 text-xs animate-pulse`}>
+                  Chargement de l'analytique…
+                </div>
+              ) : !analytics ? (
+                <div className={`${card} p-10 text-center text-slate-500 text-xs`}>
+                  Aucune donnée analytique disponible pour le moment.
+                </div>
+              ) : (
+                <>
+                  {/* Indicateurs clés */}
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                    {[
+                      {
+                        label: 'Copies corrigées',
+                        value: analytics.totals.results,
+                        suffix: '',
+                        color: 'text-white'
+                      },
+                      {
+                        label: 'Étudiants actifs',
+                        value: analytics.totals.students,
+                        suffix: '',
+                        color: 'text-blue-400'
+                      },
+                      {
+                        label: 'Moyenne générale',
+                        value: analytics.totals.averageNote,
+                        suffix: '/20',
+                        color: 'text-emerald-400'
+                      },
+                      {
+                        label: 'Taux de réussite',
+                        value: analytics.totals.successRate,
+                        suffix: '%',
+                        color: 'text-amber-400'
+                      }
+                    ].map((item) => (
+                      <div key={item.label} className={`${card} p-5`}>
+                        <div className={`text-3xl font-black leading-none ${item.color}`}>
+                          {item.value}
+                          <span className="text-sm text-slate-500 font-bold">{item.suffix}</span>
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-1.5 font-bold uppercase tracking-wider">
+                          {item.label}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {analytics.totals.answered > 0 && (
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex items-center justify-between gap-4 flex-wrap">
+                      <div className="flex items-center gap-3">
+                        <span className="w-10 h-10 rounded-xl bg-red-500/15 border border-red-500/30 text-red-400 flex items-center justify-center shrink-0">
+                          <Icon name="alert" size={18} />
+                        </span>
+                        <div>
+                          <p className="text-sm font-black text-white">
+                            {analytics.totals.errorRate}% de réponses erronées
+                          </p>
+                          <p className="text-[11px] text-slate-500">
+                            {analytics.totals.correct} bonnes réponses sur {analytics.totals.answered} réponses analysées
+                          </p>
+                        </div>
+                      </div>
+                      <button onClick={fetchAnalytics} className={btnSecondary}>
+                        <Icon name="refresh" size={13} />
+                        Actualiser
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Questions les plus ratées */}
+                  <div className={`${card} overflow-hidden`}>
+                    <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between flex-wrap gap-2">
+                      <div>
+                        <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                          <Icon name="alert" size={15} className="text-red-400" />
+                          Questions les plus ratées
+                        </h3>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          Classement par taux d'échec sur l'ensemble des copies corrigées
+                        </p>
+                      </div>
+                      <button onClick={fetchAnalytics} className={btnSecondary}>
+                        <Icon name="refresh" size={13} />
+                        Actualiser
+                      </button>
+                    </div>
+
+                    {analytics.mostMissed.length === 0 ? (
+                      <p className="text-xs text-slate-500 text-center py-10">
+                        Aucune réponse enregistrée pour l'instant. Les statistiques apparaîtront après les premières évaluations.
+                      </p>
+                    ) : (
+                      <div className="divide-y divide-slate-800">
+                        {analytics.mostMissed.map((q, i) => (
+                          <div key={`${q.questionId}-${i}`} className="px-6 py-4 flex flex-col md:flex-row md:items-center gap-3">
+                            <span className="shrink-0 w-7 h-7 rounded-lg bg-red-500/15 text-red-300 border border-red-500/30 text-xs font-black flex items-center justify-center">
+                              {i + 1}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-bold text-slate-200 leading-relaxed">{q.question}</p>
+                              <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
+                                <span className="text-[10px] font-bold text-blue-300 bg-blue-600/15 px-2 py-0.5 rounded-full">
+                                  {q.ue}
+                                </span>
+                                {q.tags && String(q.tags).split(/[;,]/).filter(Boolean).map(tag => (
+                                  <span key={tag} className="text-[10px] font-bold text-slate-300 bg-slate-800 px-2 py-0.5 rounded-full">
+                                    {tag.trim()}
+                                  </span>
+                                ))}
+                                <span className="text-[10px] text-slate-500">
+                                  {q.wrong}/{q.attempts} échec(s)
+                                </span>
+                              </div>
+                            </div>
+                            <div className="shrink-0 w-full md:w-40">
+                              <div className="flex items-center justify-between text-[10px] font-bold mb-1">
+                                <span className="text-slate-500">Taux d'échec</span>
+                                <span className="text-red-300">{q.wrongRate}%</span>
+                              </div>
+                              <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                                <div
+                                  className={`h-2 rounded-full ${q.wrongRate >= 60 ? 'bg-red-500' : q.wrongRate >= 30 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                                  style={{ width: `${Math.min(100, q.wrongRate)}%` }}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid lg:grid-cols-2 gap-4 items-start">
+                    {/* Réussite par UE */}
+                    <div className={`${card} p-6`}>
+                      <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2 mb-4">
+                        <Icon name="book" size={15} className="text-blue-400" />
+                        Réussite par UE
+                      </h3>
+                      {analytics.byUe.length === 0 ? (
+                        <p className="text-xs text-slate-500 text-center py-6">Aucune donnée par UE.</p>
+                      ) : (
+                        <div className="space-y-3">
+                          {analytics.byUe.map((u) => (
+                            <div key={u.ue} className="bg-slate-950 border border-slate-800 rounded-xl p-3.5">
+                              <div className="flex items-center justify-between gap-2 mb-2">
+                                <span className="text-xs font-black text-white">{u.ue}</span>
+                                <span className="text-[11px] font-bold text-slate-400">
+                                  {u.averageNote}/20 · {u.successRate}% de réussite
+                                </span>
+                              </div>
+                              <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                                <div
+                                  className={`h-2 rounded-full ${u.successRate >= 70 ? 'bg-emerald-500' : u.successRate >= 50 ? 'bg-blue-500' : 'bg-amber-500'}`}
+                                  style={{ width: `${Math.min(100, u.successRate)}%` }}
+                                />
+                              </div>
+                              <p className="text-[10px] text-slate-500 mt-1.5">
+                                {u.attempts} copie(s) · {u.students} étudiant(s)
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Évolution des notes */}
+                    <div className={`${card} p-6`}>
+                      <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2 mb-4">
+                        <Icon name="chart" size={15} className="text-emerald-400" />
+                        Évolution des notes
+                      </h3>
+                      {analytics.evolution.length === 0 ? (
+                        <p className="text-xs text-slate-500 text-center py-6">Aucune évaluation enregistrée.</p>
+                      ) : (
+                        <>
+                          <div className="flex items-end gap-1.5 h-40 bg-slate-950 border border-slate-800 rounded-xl p-3">
+                            {analytics.evolution.map((d) => {
+                              const pct = Math.max(4, Math.round((d.averageNote / 20) * 100));
+                              return (
+                                <div key={d.date} className="flex-1 flex flex-col items-center justify-end h-full gap-1 group">
+                                  <span className="text-[9px] font-bold text-slate-500 opacity-0 group-hover:opacity-100 transition">
+                                    {d.averageNote}
+                                  </span>
+                                  <div
+                                    className={`w-full rounded-t ${pct >= 50 ? 'bg-emerald-500/70' : 'bg-amber-500/70'}`}
+                                    style={{ height: `${pct}%` }}
+                                    title={`${d.date} · ${d.averageNote}/20 (${d.attempts} copie(s))`}
+                                  />
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <div className="flex items-center justify-between text-[10px] text-slate-500 mt-2">
+                            <span>{analytics.evolution[0]?.date}</span>
+                            <span>{analytics.evolution[analytics.evolution.length - 1]?.date}</span>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex items-start gap-3 text-xs text-slate-400 leading-relaxed">
+                    <Icon name="info" size={16} className="text-blue-400 mt-0.5 shrink-0" />
+                    <p>
+                      Les statistiques sont calculées côté serveur à partir des copies réellement corrigées.
+                      Le taux d'échec d'une question permet d'identifier les notions à retravailler en cours
+                      et alimente les révisions intelligentes des étudiants.
+                    </p>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -1392,7 +1810,7 @@ export default function AdminPanel() {
                                 Épreuve : {formatDate(linkedQuiz.launchTime)}
                               </span>
                             ) : linkedQuiz ? (
-                              <span className="text-[10px] font-bold text-indigo-300 bg-indigo-600/15 border border-indigo-600/30 px-2 py-1 rounded-full">
+                              <span className="text-[10px] font-bold text-amber-300 bg-amber-600/15 border border-amber-600/30 px-2 py-1 rounded-full">
                                 Épreuve non programmée
                               </span>
                             ) : (
@@ -1548,18 +1966,28 @@ export default function AdminPanel() {
                       ))}
                     </select>
                   </div>
-                  {resultsQuizId && (
-                    <div className="flex gap-2">
-                      <button onClick={() => exportCSV(resultsQuizId)} className={btnSecondary}>
-                        <Icon name="download" size={13} />
-                        Exporter CSV
-                      </button>
-                      <button onClick={() => exportPDF(resultsQuizId)} className={btnPrimary}>
-                        <Icon name="document" size={13} />
-                        Procès-verbal PDF
-                      </button>
-                    </div>
-                  )}
+                  <div className="flex gap-2 flex-wrap">
+                    <button
+                      onClick={exportAllResultsCSV}
+                      title="Exporter toutes les copies, toutes évaluations confondues"
+                      className={btnSecondary}
+                    >
+                      <Icon name="download" size={13} />
+                      Exporter tout
+                    </button>
+                    {resultsQuizId && (
+                      <>
+                        <button onClick={() => exportCSV(resultsQuizId)} className={btnSecondary}>
+                          <Icon name="download" size={13} />
+                          Exporter CSV
+                        </button>
+                        <button onClick={() => exportPDF(resultsQuizId)} className={btnPrimary}>
+                          <Icon name="document" size={13} />
+                          Procès-verbal PDF
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -1595,7 +2023,7 @@ export default function AdminPanel() {
                   <div className={`${card} overflow-hidden`}>
                     <div className="px-6 py-4 border-b border-slate-800">
                       <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
-                        <Icon name="trophy" size={15} className="text-indigo-400" />
+                        <Icon name="trophy" size={15} className="text-amber-400" />
                         Résultats · {resultsQuizId}
                       </h3>
                     </div>
@@ -1738,7 +2166,7 @@ export default function AdminPanel() {
                                 f.status === 'traite'
                                   ? 'bg-emerald-500/15 text-emerald-300'
                                   : f.status === 'en_cours'
-                                    ? 'bg-indigo-500/15 text-indigo-300'
+                                    ? 'bg-amber-500/15 text-amber-300'
                                     : 'bg-slate-800 text-slate-400'
                               }`}
                             >
@@ -1781,6 +2209,119 @@ export default function AdminPanel() {
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* ════════════ SAUVEGARDES ════════════ */}
+          {activeSection === 'backups' && (
+            <div className="space-y-6">
+              <div className={`${card} p-6 flex flex-col md:flex-row md:items-center justify-between gap-4`}>
+                <div className="flex items-start gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-blue-500/15 border border-blue-500/30 text-blue-400 flex items-center justify-center shrink-0">
+                    <Icon name="download" size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black text-white">Sauvegarde automatique de la base</h3>
+                    <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                      Une copie complète et cohérente de la base SQLite est créée régulièrement.
+                      Les fichiers sont conservés côté serveur et téléchargeables ici.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={createBackupNow}
+                  disabled={creatingBackup}
+                  className={btnPrimary + ' shrink-0'}
+                >
+                  <Icon name="refresh" size={13} />
+                  {creatingBackup ? 'Sauvegarde en cours…' : 'Créer une sauvegarde'}
+                </button>
+              </div>
+
+              <div className={`${card} overflow-hidden`}>
+                <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                      <Icon name="document" size={15} className="text-blue-400" />
+                      Sauvegardes disponibles ({backups.length})
+                    </h3>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Téléchargez ou supprimez les copies de sécurité
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setLoadingBackups(true);
+                      fetchBackups();
+                    }}
+                    className={btnSecondary}
+                  >
+                    <Icon name="refresh" size={13} />
+                    Actualiser
+                  </button>
+                </div>
+
+                {loadingBackups ? (
+                  <p className="text-xs text-slate-500 text-center py-10 animate-pulse">
+                    Chargement des sauvegardes…
+                  </p>
+                ) : backups.length === 0 ? (
+                  <p className="text-xs text-slate-500 text-center py-10">
+                    Aucune sauvegarde pour le moment. La première est créée automatiquement au démarrage du serveur.
+                  </p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-xs">
+                      <thead>
+                        <tr className="bg-slate-950 border-b border-slate-800 text-slate-500 uppercase text-[10px] tracking-wider">
+                          <th className="py-2.5 px-4 text-left">Fichier</th>
+                          <th className="py-2.5 px-4 text-right">Taille</th>
+                          <th className="py-2.5 px-4 text-left">Créée le</th>
+                          <th className="py-2.5 px-4 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800">
+                        {backups.map((b) => (
+                          <tr key={b.name} className="hover:bg-slate-950/60 transition">
+                            <td className="py-3 px-4 font-mono text-slate-300 break-all">{b.name}</td>
+                            <td className="py-3 px-4 text-right text-slate-400 font-bold">{formatSize(b.size)}</td>
+                            <td className="py-3 px-4 text-slate-500">{formatDate(b.createdAt)}</td>
+                            <td className="py-3 px-4">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  onClick={() => downloadBackup(b.name)}
+                                  title="Télécharger cette sauvegarde"
+                                  className={btnSecondary}
+                                >
+                                  <Icon name="download" size={13} />
+                                  Télécharger
+                                </button>
+                                <button
+                                  onClick={() => removeBackup(b.name)}
+                                  aria-label={`Supprimer ${b.name}`}
+                                  title="Supprimer cette sauvegarde"
+                                  className="w-8 h-8 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-950/50 flex items-center justify-center transition"
+                                >
+                                  <Icon name="trash" size={14} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex items-start gap-3 text-xs text-slate-400 leading-relaxed">
+                <Icon name="shield" size={16} className="text-emerald-400 mt-0.5 shrink-0" />
+                <p>
+                  La rotation conserve uniquement les sauvegardes les plus récentes afin d'éviter
+                  de saturer le disque. Pour restaurer une copie, arrêtez le serveur puis remplacez
+                  le fichier <span className="font-mono text-slate-300">data/qcm.db</span> par la sauvegarde choisie.
+                </p>
+              </div>
             </div>
           )}
 
@@ -1948,7 +2489,7 @@ export default function AdminPanel() {
                   </p>
                 ))}
                 {parsedCsvData.warnings?.map((w, i) => (
-                  <p key={`w${i}`} className="text-[11px] text-indigo-300 flex items-start gap-1.5">
+                  <p key={`w${i}`} className="text-[11px] text-amber-300 flex items-start gap-1.5">
                     <Icon name="alert" size={12} className="mt-0.5 shrink-0" />
                     {w}
                   </p>
@@ -1964,6 +2505,26 @@ export default function AdminPanel() {
                     <span className="text-slate-500 mr-1.5">Q{i + 1}.</span>
                     {q.Question}
                   </p>
+                  {(q.Tags || q.Difficulte) && (
+                    <div className="flex items-center gap-1.5 flex-wrap mt-2">
+                      {q.Tags && String(q.Tags).split(/[;,]/).filter(Boolean).map(tag => (
+                        <span key={tag} className="text-[10px] font-bold text-blue-300 bg-blue-600/15 border border-blue-600/30 px-2 py-0.5 rounded-full">
+                          {tag.trim()}
+                        </span>
+                      ))}
+                      {q.Difficulte && (
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                          q.Difficulte === 'facile'
+                            ? 'text-emerald-300 bg-emerald-600/15 border-emerald-600/30'
+                            : q.Difficulte === 'difficile'
+                              ? 'text-red-300 bg-red-600/15 border-red-600/30'
+                              : 'text-amber-300 bg-amber-600/15 border-amber-600/30'
+                        }`}>
+                          {q.Difficulte}
+                        </span>
+                      )}
+                    </div>
+                  )}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[11px] mt-2">
                     {['A', 'B', 'C', 'D'].map(l => {
                       const val = q['Opt' + l];
