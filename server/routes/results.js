@@ -9,6 +9,7 @@ import { db } from '../db.js';
 import { requireStudent } from '../auth.js';
 import { normalizeCorrect, upsertWrongCard } from '../spacedRepetition.js';
 import { drawForStudent } from '../questionDraw.js';
+import { buildRankingGroups } from '../ranking.js';
 
 const router = Router();
 
@@ -160,6 +161,43 @@ router.get('/', (req, res) => {
   }
 
   res.json({ results: rows.map(r => toResult(r)) });
+});
+
+/**
+ * Classement de la salle (filière + niveau) de l'étudiant connecté.
+ * L'étudiant ne peut consulter que les classements de sa propre filière ;
+ * le niveau peut être celui qu'il consulte dans son espace.
+ */
+router.get('/ranking', requireStudent, (req, res) => {
+  const filiere = String(req.user.filiere || '').trim();
+  const niveau = String(req.query.niveau || req.user.niveau || '').trim();
+  const ue = String(req.query.ue || '').trim();
+  const sessionTimestamp = req.query.sessionTimestamp !== undefined
+    ? Number(req.query.sessionTimestamp)
+    : null;
+
+  let sql = 'SELECT * FROM results WHERE 1 = 1';
+  const params = [];
+  if (filiere) {
+    sql += ' AND LOWER(TRIM(filiere)) = LOWER(TRIM(?))';
+    params.push(filiere);
+  }
+  if (niveau) {
+    sql += ' AND LOWER(TRIM(niveau)) = LOWER(TRIM(?))';
+    params.push(niveau);
+  }
+  if (ue) {
+    sql += ' AND ue = ?';
+    params.push(ue);
+  }
+  if (sessionTimestamp !== null && Number.isFinite(sessionTimestamp)) {
+    sql += ' AND sessionTimestamp = ?';
+    params.push(sessionTimestamp);
+  }
+
+  const rows = db.prepare(sql).all(...params);
+  const { groups } = buildRankingGroups(rows, req.user);
+  res.json({ groups, class: { filiere, niveau } });
 });
 
 /**

@@ -84,13 +84,18 @@ Conçue avec **React 19 + Vite 8 + Tailwind CSS** et un **backend Node.js / Expr
   - Conversations guidées : le tuteur explique **pourquoi** la réponse est incorrecte au lieu de donner la lettre de la solution.
 - **Aucune clé côté navigateur** : les appels passent par le proxy serveur `/api/ai/tutor`. Les clés `GROQ_API_KEYS` / `GEMINI_API_KEYS` restent dans le `.env` du serveur, avec **rotation automatique** et **repli d'un fournisseur à l'autre** en cas d'erreur ou de quota atteint.
 - L'assistant s'identifie uniquement comme **QCM App** : il ne révèle jamais le fournisseur, le modèle ou la technologie sous-jacente.
-- **Quota anti-épuisement des tokens** : `2` questions maximum par erreur et par étudiant (persisté dans la table `ai_usage`), plus un plafond quotidien (`30` par défaut). Les boutons IA restent masqués tant que les clés ne sont pas configurées (`GET /api/ai/status`).
+- **Réponse lisible** : le tuteur rend le Markdown (gras, listes, tableaux) et les formules mathématiques LaTeX (`\(...\)`, `\[...\]`) avec **KaTeX**. L'étudiant ne voit jamais les astérisques ni les délimiteurs bruts.
+- **Réponse réellement cochée** : le contexte transmis contient le **texte exact de la case cochée** par l'étudiant (y compris pour les anciennes copies qui ne stockaient que la lettre A/B/C/D). Le tuteur ne prétend plus qu'aucune réponse n'a été donnée. Un message explicite « aucune case cochée » s'affiche uniquement lorsque c'est vrai.
+- **Quota anti-épuisement des tokens** : `2` questions maximum par erreur et par étudiant sur une **fenêtre glissante de 24 h** (persisté dans la table `ai_usage`), plus un plafond quotidien (`30` par défaut). Quitter puis revenir avant l'échéance ne réinitialise pas le compteur. Les boutons IA restent masqués tant que les clés ne sont pas configurées (`GET /api/ai/status`).
+- **Tableau de bord admin « Tuteur IA »** : nombre de requêtes (aujourd'hui, semaine, mois), requêtes réussies / en erreur / refusées par quota, **tokens consommés** (annoncés par les fournisseurs), **budget mensuel restant** (`AI_TOKEN_BUDGET` − consommation du mois), graphique des 30 derniers jours, étudiants les plus consommateurs et questions les plus travaillées.
 
 ### 8. Évaluations sécurisées & apprentissage adaptatif
 - **Correction 100 % côté serveur** : l'API publique ne renvoie jamais `ReponseCorrecte`. L'étudiant n'envoie que ses choix ; le serveur calcule le score, la note et la correction détaillée, puis les restitue après soumission. L'inspecteur admin conserve l'accès complet via son jeton.
 - **Anti-triche pendant l'épreuve** : détection des changements d'onglet, blocage du copier/coller et du menu contextuel, avertissement visuel, plein écran proposé et **soumission automatique au 3ᵉ incident**.
 - **Banque de questions enrichie** : tags libres, niveau de difficulté (`facile`, `moyenne`, `difficile`) et nombre de questions tirées par étudiant. Le tirage est **déterministe par étudiant** (même tirage en cas de reprise, ordre différent d'un étudiant à l'autre).
 - **Révisions intelligentes** : chaque erreur crée une carte de révision planifiée par **répétition espacée** (algorithme SM-2 simplifié). L'espace `/revision` permet de réviser les cartes dues, de consulter toutes ses cartes et de suivre ses échéances par UE.
+- **Correction visible après l'épreuve** : à la fin du QCM, l'étudiant voit immédiatement les cases qu'il a cochées et la bonne réponse pour chaque question. La correction reste **inaccessible pendant l'épreuve** ; elle est également disponible dans « Relire ma copie » (y compris pour les anciennes copies).
+- **Classements par salle** : une salle correspond à la classe de l'étudiant (**filière + niveau**). L'administration dispose d'un onglet *Classements* filtrable par UE, filière et niveau, avec **export CSV et PDF**. Chaque étudiant peut afficher le classement de sa propre salle depuis son espace, **uniquement après avoir cliqué sur « Classement »** : chaque personne est classée sur sa meilleure tentative, par épreuve et par session.
 - **Sauvegarde automatique SQLite** : copies cohérentes via `db.backup()`, rotation configurable, téléchargement et suppression depuis l'administration, et **export complet** des résultats (une ligne par réponse) au format CSV.
 
 ### 9. Design Professionnel Unifié
@@ -131,9 +136,14 @@ GEMINI_API_KEYS=cle_gemini_1,cle_gemini_2,cle_gemini_3
 # GEMINI_MODEL=gemini-2.0-flash
 # AI_MAX_QUESTIONS_PER_ERROR=2
 # AI_DAILY_LIMIT=30
+
+# Budget mensuel de tokens (tableau de bord admin) · 0 = illimité
+# AI_TOKEN_BUDGET=1000000
 ```
 
 Le serveur alterne les clés à chaque requête et bascule automatiquement vers une autre clé ou l'autre fournisseur en cas d'échec. Sans aucune clé, `GET /api/ai/status` renvoie `available: false` et les boutons IA sont masqués dans l'interface.
+
+Le budget `AI_TOKEN_BUDGET` est comparé aux tokens réellement annoncés par les fournisseurs (`usage` / `usageMetadata`). Le tableau de bord **Administration → Tuteur IA** affiche le restant du mois, la consommation quotidienne, les refus de quota et les étudiants les plus consommateurs. Les requêtes sont journalisées dans la table `ai_requests` (statut, fournisseur, modèle, tokens).
 
 ---
 
@@ -182,6 +192,7 @@ npm start
 | `GET /api/quizzes/:id/sessions` | public | Compteur de participants |
 | `POST /api/results` | étudiant | Enregistrer une copie (score et correction calculés serveur) |
 | `GET /api/results?ue=&sessionTimestamp=` | public | Classement d'une session |
+| `GET /api/results/ranking?niveau=&ue=&sessionTimestamp=` | étudiant | Classement de sa salle (filière forcée côté serveur) |
 | `GET /api/results/mine` | étudiant | Historique personnel (avec correction) |
 | `GET /api/review/stats` | étudiant | Statistiques de révision espacée par UE |
 | `GET /api/review` | étudiant | Cartes dues (`?all=1` pour toutes, `?ue=` pour filtrer) |
@@ -192,13 +203,15 @@ npm start
 | `GET /api/feedback` · `PATCH` · `DELETE` | admin | Gestion des messages |
 | `GET /api/ues` | public | Liste des UEs |
 | `POST /api/ues` · `DELETE /api/ues/:id` | admin | Gestion des UEs |
-| `GET /api/ai/status` | étudiant | Disponibilité de l'assistant + quotas restants |
-| `POST /api/ai/tutor` | étudiant | Question au tuteur (rotation de clés, quota 2/erreur) |
+| `GET /api/ai/status` | étudiant | Disponibilité de l'assistant + quotas restants (dont fenêtre 24 h par question) |
+| `POST /api/ai/tutor` | étudiant | Question au tuteur (rotation de clés, quota 2/erreur sur 24 h) |
+| `GET /api/admin/ai-usage` | admin | Requêtes, tokens consommés et budget mensuel restant |
 | `POST /api/admin/login` | public | Connexion admin → jeton |
 | `POST /api/admin/logout` | admin | Révoquer le jeton admin côté serveur |
 | `GET /api/admin/students` · `DELETE` | admin | Gestion des étudiants |
 | `GET /api/admin/results?ue=` | admin | Résultats (sans `ue` : export complet) |
 | `GET /api/admin/analytics` | admin | Agrégats : questions ratées, réussite par UE, évolution |
+| `GET /api/admin/rankings?ue=&filiere=&niveau=` | admin | Classements par salle (filière + niveau), par épreuve et session |
 | `GET/POST /api/admin/backups` | admin | Lister / créer une sauvegarde SQLite |
 | `GET/DELETE /api/admin/backups/:name` | admin | Télécharger / supprimer une sauvegarde |
 | `GET/PUT /api/settings/smtp` · `POST /api/settings/test-smtp` | admin | Configuration & test SMTP |
@@ -215,6 +228,7 @@ npm start
 │   ├── smtp.js                 # Envoi SMTP Google (Nodemailer)
 │   ├── backup.js               # Sauvegardes SQLite planifiées (db.backup + rotation)
 │   ├── questionDraw.js         # Tirage déterministe des questions par étudiant
+│   ├── ranking.js              # Classements par salle (filière + niveau), meilleure tentative
 │   ├── spacedRepetition.js     # Algorithme de répétition espacée (cartes d'erreurs)
 │   └── routes/
 │       ├── auth.js             # Inscription, connexion, MDP oublié (3 étapes), profil
@@ -223,8 +237,8 @@ npm start
 │       ├── review.js           # Révisions intelligentes : cartes dues, réponses, stats
 │       ├── feedback.js         # Messages & suggestions étudiants
 │       ├── ues.js              # Unités d'enseignement
-│       ├── admin.js            # Login admin, étudiants, résultats, analytique, sauvegardes
-│       ├── ai.js               # Tuteur IA : proxy Groq/Gemini, quotas, identité QCM App
+│       ├── admin.js            # Login admin, étudiants, résultats, analytique, IA, classements
+│       ├── ai.js               # Tuteur IA : proxy Groq/Gemini, quotas 24 h, tokens, identité QCM App
 │       └── settings.js         # Configuration & test SMTP
 ├── src/                        # Frontend React 19
 │   ├── components/
@@ -236,7 +250,8 @@ npm start
 │   │   │   ├── ContactPage.jsx # Page « Contacter l'administration » (espace étudiant)
 │   │   │   └── NotFound.jsx    # Page 404
 │   │   ├── ai/
-│   │   │   └── AiTutor.jsx     # Drawer « Tuteur IA » (proxy serveur, quotas)
+│   │   │   ├── AiTutor.jsx     # Drawer « Tuteur IA » (proxy serveur, quotas 24 h)
+│   │   │   └── AiMarkdown.jsx  # Rendu Markdown + formules LaTeX (KaTeX)
 │   │   ├── ui/
 │   │   │   └── icons.jsx       # Bibliothèque d'icônes SVG au trait (aucun emoji)
 │   │   ├── ContactAdmin.jsx    # Formulaire de suggestions & signalements étudiants

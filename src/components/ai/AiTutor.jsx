@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Icon from '../ui/icons.jsx';
+import AiMarkdown from './AiMarkdown.jsx';
 import { askTutor, fetchAiStatus } from '../../services/aiService.js';
 
 /**
@@ -55,25 +56,36 @@ export default function AiTutor({ open, onClose, context, status }) {
   const [remaining, setRemaining] = useState(status?.maxPerError ?? null);
   const [limit, setLimit] = useState(status?.maxPerError ?? 2);
   const [quotaReached, setQuotaReached] = useState(false);
+  const [resetAt, setResetAt] = useState(null);
   const scrollRef = useRef(null);
 
   const unavailable = aiStatus ? aiStatus.available === false : false;
   const blocked = unavailable || quotaReached || remaining === 0;
 
+  // Le quota est propre à la question ouverte : on interroge le serveur à
+  // chaque ouverture (et à chaque changement de contexte) pour afficher le
+  // restant réel, même après une fermeture / réouverture avant 24 h.
   useEffect(() => {
-    if (!open || aiStatus) return undefined;
+    if (!open) return undefined;
     let active = true;
-    fetchAiStatus()
+
+    fetchAiStatus({ context })
       .then((next) => {
         if (!active) return;
         setAiStatus(next);
-        setLimit(next.maxPerError || 2);
-        setRemaining(next.maxPerError || 2);
-        if (!next.available) setError("L'assistant IA n'est pas encore activé sur cette plateforme.");
+        const nextLimit = Number.isFinite(next.maxPerError) ? next.maxPerError : 2;
+        const nextRemaining = Number.isFinite(next.remainingForContext)
+          ? next.remainingForContext
+          : nextLimit;
+        setLimit(nextLimit);
+        setRemaining(nextRemaining);
+        setQuotaReached(nextRemaining === 0);
+        setResetAt(next.contextResetAt || null);
+        setError(next.available ? null : "L'assistant IA n'est pas encore activé sur cette plateforme.");
       })
       .catch(() => { /* indisponibilité silencieuse : le bouton reste masqué */ });
     return () => { active = false; };
-  }, [open, aiStatus]);
+  }, [open, context]);
 
   // Défilement automatique vers le dernier message
   useEffect(() => {
@@ -106,11 +118,13 @@ export default function AiTutor({ open, onClose, context, status }) {
         setHistory((h) => [...h, { role: 'assistant', content: data.reply, id: newId() }]);
         if (Number.isFinite(data.limit)) setLimit(data.limit);
         if (Number.isFinite(data.remaining)) setRemaining(data.remaining);
+        if (data.resetAt) setResetAt(data.resetAt);
         if (data.remaining === 0) setQuotaReached(true);
       } catch (e) {
         if (e?.status === 429) {
           setQuotaReached(true);
           setRemaining(0);
+          if (e?.data?.resetAt) setResetAt(e.data.resetAt);
         }
         setError(e.message || 'Une erreur inattendue est survenue.');
       } finally {
@@ -123,6 +137,14 @@ export default function AiTutor({ open, onClose, context, status }) {
   const quickPrompts =
     context?.kind === 'question' ? QUICK_PROMPTS_QUESTION : QUICK_PROMPTS_GENERAL;
   const quotaLabel = context?.kind === 'question' ? 'cette erreur' : 'ce QCM';
+  const resetLabel = resetAt && Number.isFinite(Date.parse(resetAt))
+    ? new Date(resetAt).toLocaleString('fr-FR', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      })
+    : null;
 
   return (
     <div
@@ -183,14 +205,20 @@ export default function AiTutor({ open, onClose, context, status }) {
               <span>Question en cours · {context.quizId}</span>
             </div>
             <p className="text-slate-200 leading-relaxed line-clamp-3">{context.question}</p>
-            <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1">
-              <span className="inline-flex items-center gap-1.5 text-red-400">
-                <Icon name="x-circle" size={13} />
-                Votre réponse : {context.selected || 'aucune'}
+            <div className="mt-2.5 flex flex-col gap-1.5">
+              <span className="inline-flex items-start gap-1.5 text-red-400">
+                <Icon name="x-circle" size={13} className="mt-0.5 shrink-0" />
+                <span>
+                  <span className="font-bold">Votre réponse :</span>{' '}
+                  {context.selected || 'aucune case cochée'}
+                </span>
               </span>
-              <span className="inline-flex items-center gap-1.5 text-emerald-400">
-                <Icon name="check-circle" size={13} />
-                Réponse correcte : {context.correct}
+              <span className="inline-flex items-start gap-1.5 text-emerald-400">
+                <Icon name="check-circle" size={13} className="mt-0.5 shrink-0" />
+                <span>
+                  <span className="font-bold">Réponse correcte :</span>{' '}
+                  {context.correct || 'non renseignée'}
+                </span>
               </span>
             </div>
           </div>
@@ -235,13 +263,13 @@ export default function AiTutor({ open, onClose, context, status }) {
               className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               <div
-                className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed whitespace-pre-wrap ${
+                className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed ${
                   m.role === 'user'
-                    ? 'bg-blue-600 text-white rounded-br-sm'
+                    ? 'bg-blue-600 text-white rounded-br-sm whitespace-pre-wrap'
                     : 'bg-slate-800 text-slate-200 border border-slate-700 rounded-bl-sm'
                 }`}
               >
-                {m.content}
+                {m.role === 'assistant' ? <AiMarkdown content={m.content} /> : m.content}
               </div>
             </div>
           ))}
@@ -260,8 +288,10 @@ export default function AiTutor({ open, onClose, context, status }) {
             <div className="flex items-start gap-2 bg-indigo-950/50 border border-indigo-800 text-indigo-300 text-xs rounded-xl px-3.5 py-3">
               <Icon name="info" size={15} className="mt-0.5" />
               <p>
-                Limite atteinte : {limit} questions maximum pour {quotaLabel}.
-                Continuez à relire la correction, vous pouvez revenir demain.
+                Limite atteinte : {limit} questions maximum pour {quotaLabel} sur 24 h.
+                {resetLabel
+                  ? ` Vous pourrez à nouveau poser une question à partir du ${resetLabel}.`
+                  : ' Continuez à relire la correction en attendant la réinitialisation.'}
               </p>
             </div>
           )}
@@ -309,7 +339,9 @@ export default function AiTutor({ open, onClose, context, status }) {
             <Icon name="info" size={11} />
             {unavailable
               ? 'Assistant pédagogique QCM App · bientôt disponible'
-              : `${remaining ?? limit} question(s) restante(s) pour ${quotaLabel} · assistant QCM App`}
+              : remaining === 0 && resetLabel
+                ? `Quota épuisé pour ${quotaLabel} · réinitialisation le ${resetLabel}`
+                : `${remaining ?? limit} question(s) restante(s) pour ${quotaLabel} · assistant QCM App`}
           </p>
         </div>
       </aside>

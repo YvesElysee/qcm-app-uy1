@@ -25,6 +25,7 @@ export default function QuizSession() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [score, setScore] = useState(0);
   const [total, setTotal] = useState(0);
+  const [correctedAnswers, setCorrectedAnswers] = useState([]);
   const [responses, setResponses] = useState({}); // { [questionId]: option choisie }
 
   const [selectedOption, setSelectedOption] = useState(null);
@@ -232,6 +233,7 @@ export default function QuizSession() {
 
       setScore(res.score || 0);
       setTotal(res.total || payload.length);
+      setCorrectedAnswers(Array.isArray(res.answers) ? res.answers : []);
       setResultError('');
 
       const histKey = `qcm_history_${safeName}`;
@@ -250,6 +252,21 @@ export default function QuizSession() {
       setResultError(err.message);
       setScore(0);
       setTotal(payload.length);
+      // Même si la copie n'a pas pu être enregistrée, l'étudiant peut revoir
+      // les cases qu'il a cochées (sans la correction serveur).
+      setCorrectedAnswers(questions.map((q) => ({
+        questionId: q.id,
+        question: q.Question,
+        options: {
+          OptA: q.OptA || '',
+          OptB: q.OptB || '',
+          OptC: q.OptC || '',
+          OptD: q.OptD || ''
+        },
+        selected: allResponses[q.id] || '',
+        correct: '',
+        isOk: false
+      })));
     } finally {
       setPhase('finished');
       if (document.fullscreenElement) {
@@ -579,6 +596,99 @@ export default function QuizSession() {
               Emploi du temps
             </Link>
           </div>
+
+          {/* Détail des réponses · uniquement APRÈS la soumission finale */}
+          {correctedAnswers.length > 0 && (
+            <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6 mb-5">
+              <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
+                <div>
+                  <h2 className="text-base font-bold text-slate-200 flex items-center gap-2">
+                    <Icon name="check-circle" size={16} className="text-emerald-400" />
+                    Vos réponses et la correction
+                  </h2>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Les cases que vous avez cochées, avec la bonne réponse pour chaque question.
+                  </p>
+                </div>
+                <span className="text-[10px] font-black px-2 py-1 rounded-full bg-blue-600/20 text-blue-300">
+                  {score}/{safeTotal} bonnes réponses
+                </span>
+              </div>
+
+              <div className="space-y-3 max-h-[30rem] overflow-y-auto pr-1">
+                {correctedAnswers.map((a, index) => {
+                  const opts = ['A', 'B', 'C', 'D']
+                    .map(l => ({ label: l, text: a.options?.['Opt' + l] }))
+                    .filter(o => typeof o.text === 'string' && o.text.trim() !== '');
+                  const selected = typeof a.selected === 'string' ? a.selected.trim() : '';
+                  const correct = typeof a.correct === 'string' ? a.correct.trim() : '';
+                  const notAnswered = !selected;
+                  const selectedFound = opts.some(o => o.text.trim() === selected);
+                  const badge = notAnswered
+                    ? { label: 'Sans réponse', cls: 'bg-slate-800 text-slate-400' }
+                    : a.isOk
+                      ? { label: 'Correct', cls: 'bg-emerald-500/15 text-emerald-300' }
+                      : { label: 'Incorrect', cls: 'bg-red-500/15 text-red-300' };
+
+                  return (
+                    <div key={a.questionId ?? index} className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
+                      <div className="flex items-start justify-between gap-3 mb-3">
+                        <p className="text-xs font-bold text-slate-100 leading-relaxed">
+                          <span className="text-slate-500 mr-1">Q{index + 1}.</span>
+                          {a.question}
+                        </p>
+                        <span className={`shrink-0 text-[10px] font-black px-2 py-0.5 rounded-full ${badge.cls}`}>
+                          {badge.label}
+                        </span>
+                      </div>
+
+                      <div className="flex flex-col gap-1.5">
+                        {opts.map(option => {
+                          const text = option.text.trim();
+                          const isGiven = !!selected && text === selected;
+                          const isCorrect = !!correct && text === correct;
+
+                          let cls = 'flex items-start gap-2 rounded-lg border px-3 py-2 text-xs ';
+                          if (isGiven && isCorrect) {
+                            cls += 'border-emerald-600 bg-emerald-950/40 text-emerald-200';
+                          } else if (isGiven) {
+                            cls += 'border-red-600 bg-red-950/40 text-red-200';
+                          } else if (isCorrect) {
+                            cls += 'border-emerald-700/60 bg-emerald-950/20 text-emerald-300';
+                          } else {
+                            cls += 'border-slate-800 bg-slate-900/60 text-slate-400';
+                          }
+
+                          return (
+                            <div key={option.label} className={cls}>
+                              <span className="font-black w-4 shrink-0">{option.label}</span>
+                              <span className="flex-1">{option.text}</span>
+                              {isGiven && (
+                                <span className="shrink-0 text-[9px] font-black bg-blue-600 text-white px-1.5 py-0.5 rounded-full">
+                                  Votre case cochée
+                                </span>
+                              )}
+                              {!isGiven && isCorrect && (
+                                <span className="shrink-0 text-[9px] font-black bg-emerald-600 text-white px-1.5 py-0.5 rounded-full">
+                                  Bonne réponse
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+
+                        {selected && !selectedFound && (
+                          <p className="text-[11px] text-slate-300 bg-slate-900 border border-slate-800 rounded-lg px-3 py-2">
+                            Votre réponse : <strong>{selected}</strong>
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6 mb-5">
             <h2 className="text-base font-bold text-slate-200 mb-3 flex items-center gap-2">

@@ -164,6 +164,22 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_ai_usage_updated ON ai_usage(updatedAt);
 
+  -- Journal des requêtes IA · nombre de requêtes et tokens réellement consommés
+  CREATE TABLE IF NOT EXISTS ai_requests (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    userId          TEXT NOT NULL,
+    contextKey      TEXT,
+    provider        TEXT,                      -- 'groq' | 'gemini' (usage interne admin)
+    model           TEXT,
+    status          TEXT NOT NULL DEFAULT 'ok', -- 'ok' | 'error' | 'quota'
+    promptTokens    INTEGER NOT NULL DEFAULT 0,
+    completionTokens INTEGER NOT NULL DEFAULT 0,
+    totalTokens     INTEGER NOT NULL DEFAULT 0,
+    createdAt       TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_ai_requests_created ON ai_requests(createdAt);
+  CREATE INDEX IF NOT EXISTS idx_ai_requests_user ON ai_requests(userId);
+
   -- Cartes de révision espacée · créées à partir des erreurs du QCM
   CREATE TABLE IF NOT EXISTS review_cards (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,

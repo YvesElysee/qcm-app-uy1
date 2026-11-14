@@ -11,21 +11,42 @@ const DEFAULT_STATUS = {
   available: false,
   maxPerError: 2,
   dailyLimit: 0,
-  remainingToday: 0
+  remainingToday: 0,
+  remainingForContext: null,
+  contextLimit: null,
+  contextResetAt: null,
+  contextWindowHours: 24
 };
 
 /**
  * Récupère la disponibilité de l'assistant et les quotas de l'étudiant.
+ * Quand `context` est fourni, le serveur renvoie aussi le restant propre à
+ * cette question (fenêtre de 24 h), ce qui évite de réafficher un faux quota.
  * En cas d'erreur réseau/session, l'assistant est considéré indisponible.
  */
-export async function fetchAiStatus({ signal } = {}) {
+export async function fetchAiStatus({ context, signal } = {}) {
   try {
-    const data = await api('/ai/status', { auth: 'student', signal });
+    const params = new URLSearchParams();
+    if (context && (context.kind === 'question' || context.kind === 'general')) {
+      params.set('kind', context.kind);
+      if (context.quizId) params.set('quizId', String(context.quizId));
+      if (context.questionId !== undefined && context.questionId !== null) {
+        params.set('questionId', String(context.questionId));
+      }
+      if (context.question) params.set('question', String(context.question));
+    }
+    const query = params.toString();
+    const data = await api(`/ai/status${query ? `?${query}` : ''}`, { auth: 'student', signal });
     return {
       available: !!data.available,
       maxPerError: Number.isFinite(data.maxPerError) ? data.maxPerError : DEFAULT_STATUS.maxPerError,
       dailyLimit: Number.isFinite(data.dailyLimit) ? data.dailyLimit : 0,
-      remainingToday: Number.isFinite(data.remainingToday) ? data.remainingToday : 0
+      remainingToday: Number.isFinite(data.remainingToday) ? data.remainingToday : 0,
+      contextKey: data.contextKey || null,
+      contextLimit: Number.isFinite(data.contextLimit) ? data.contextLimit : null,
+      remainingForContext: Number.isFinite(data.remainingForContext) ? data.remainingForContext : null,
+      contextResetAt: data.contextResetAt || null,
+      contextWindowHours: Number.isFinite(data.contextWindowHours) ? data.contextWindowHours : 24
     };
   } catch (err) {
     if (err?.name === 'AbortError') throw err;
@@ -40,7 +61,7 @@ export async function fetchAiStatus({ signal } = {}) {
  * @param {string} params.message   Message de l'étudiant
  * @param {Array<{role:'user'|'assistant', content:string}>} [params.history]
  * @param {AbortSignal} [params.signal]
- * @returns {Promise<{reply:string, remaining:number, limit:number, remainingToday:number}>}
+ * @returns {Promise<{reply:string, remaining:number, limit:number, remainingToday:number, resetAt?:string}>}
  */
 export async function askTutor({ context, message, history = [], signal } = {}) {
   const controller = new AbortController();

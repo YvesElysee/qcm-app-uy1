@@ -13,9 +13,11 @@ const SECTIONS = [
   { id: 'overview', label: "Vue d'ensemble", icon: 'chart', desc: 'Statistiques clés et prochaines évaluations' },
   { id: 'quizzes', label: 'Évaluations', icon: 'list', desc: 'Programmer, importer et gérer les QCM' },
   { id: 'analytics', label: 'Analytique', icon: 'chart', desc: 'Questions ratées, réussite par UE et évolution des notes' },
+  { id: 'ai', label: 'Tuteur IA', icon: 'sparkles', desc: 'Requêtes, tokens consommés et budget mensuel' },
   { id: 'ues', label: "Unités d'enseignement", icon: 'book', desc: 'Filières, niveaux et catalogue des UE' },
   { id: 'students', label: 'Étudiants', icon: 'users', desc: 'Comptes inscrits et exports' },
   { id: 'results', label: 'Résultats', icon: 'trophy', desc: 'Notes par évaluation et procès-verbaux' },
+  { id: 'rankings', label: 'Classements', icon: 'trophy', desc: 'Classements par salle (filière + niveau) et exports' },
   { id: 'messages', label: 'Messages', icon: 'chat', desc: 'Suggestions et signalements des étudiants' },
   { id: 'backups', label: 'Sauvegardes', icon: 'download', desc: 'Copies de sécurité de la base SQLite' },
   { id: 'smtp', label: 'Paramètres SMTP', icon: 'settings', desc: 'Service email de récupération de mot de passe' }
@@ -45,6 +47,40 @@ const btnPrimary =
   'inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-3 py-2 rounded-xl transition disabled:opacity-50';
 
 const formatDate = (ts) => (ts ? new Date(ts).toLocaleString('fr-FR') : '-');
+
+const formatNumber = (value) => new Intl.NumberFormat('fr-FR').format(Number(value) || 0);
+
+const formatTokens = (value) => {
+  const n = Number(value) || 0;
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)} Md`;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)} M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)} k`;
+  return formatNumber(n);
+};
+
+const AI_STATUS_LABELS = {
+  ok: { label: 'Réussie', cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' },
+  error: { label: 'Erreur fournisseur', cls: 'bg-amber-500/15 text-amber-300 border-amber-500/30' },
+  quota: { label: 'Quota refusé', cls: 'bg-slate-700/60 text-slate-300 border-slate-600' }
+};
+
+const formatContextKey = (key) => {
+  if (!key) return '—';
+  const [kind, quizId, detail] = String(key).split(':');
+  if (kind === 'general') return `Conseils généraux · ${quizId || 'QCM'}`;
+  if (kind === 'question') {
+    return detail
+      ? `${quizId || 'QCM'} · question ${detail.length > 12 ? `${detail.slice(0, 12)}…` : detail}`
+      : `${quizId || 'QCM'} · question`;
+  }
+  return key;
+};
+
+const sessionLabel = (timestamp) => {
+  const ts = Number(timestamp);
+  if (!ts) return 'Session non datée';
+  return `Session du ${new Date(ts).toLocaleString('fr-FR')}`;
+};
 
 const formatSize = (bytes) => {
   const value = Number(bytes) || 0;
@@ -123,6 +159,15 @@ export default function AdminPanel() {
   const [fbFiliere, setFbFiliere] = useState('');
   const [loadingFb, setLoadingFb] = useState(true);
 
+  // ── Tuteur IA : requêtes et consommation de tokens ─────────────────────
+  const [aiUsage, setAiUsage] = useState(null);
+  const [loadingAi, setLoadingAi] = useState(true);
+
+  // ── Classements par salle (filière + niveau) ────────────────────────────
+  const [rankings, setRankings] = useState([]);
+  const [loadingRankings, setLoadingRankings] = useState(true);
+  const [rankingFilters, setRankingFilters] = useState({ ue: '', filiere: '', niveau: '' });
+
   // ─── Data fetchers ────────────────────────────────────────────────────
   const fetchHistory = useCallback(async () => {
     const data = await api('/quizzes?sort=desc', { auth: 'admin' });
@@ -159,6 +204,35 @@ export default function AdminPanel() {
       console.warn('Erreur chargement sauvegardes :', err);
     } finally {
       setLoadingBackups(false);
+    }
+  }, []);
+
+  const fetchAiUsage = useCallback(async () => {
+    try {
+      const data = await api('/admin/ai-usage', { auth: 'admin' });
+      setAiUsage(data);
+    } catch (err) {
+      console.warn('Erreur chargement consommation IA :', err);
+      setAiUsage(null);
+    } finally {
+      setLoadingAi(false);
+    }
+  }, []);
+
+  const fetchRankings = useCallback(async (filters = {}) => {
+    try {
+      const params = new URLSearchParams();
+      if (filters.ue) params.set('ue', filters.ue);
+      if (filters.filiere) params.set('filiere', filters.filiere);
+      if (filters.niveau) params.set('niveau', filters.niveau);
+      const query = params.toString();
+      const data = await api(`/admin/rankings${query ? `?${query}` : ''}`, { auth: 'admin' });
+      setRankings(Array.isArray(data.groups) ? data.groups : []);
+    } catch (err) {
+      console.warn('Erreur chargement classements :', err);
+      setRankings([]);
+    } finally {
+      setLoadingRankings(false);
     }
   }, []);
 
@@ -222,14 +296,23 @@ export default function AdminPanel() {
     load();
   }, [fetchFeedbacks]);
 
-  // Chargement à la demande des sections analytique et sauvegardes
+  // Chargement à la demande des sections analytique, sauvegardes, IA et classements
   useEffect(() => {
     const load = async () => {
       if (activeSection === 'analytics') await fetchAnalytics();
       if (activeSection === 'backups') await fetchBackups();
+      if (activeSection === 'ai') await fetchAiUsage();
+      if (activeSection === 'rankings') await fetchRankings(rankingFilters);
     };
     load();
-  }, [activeSection, fetchAnalytics, fetchBackups]);
+  }, [
+    activeSection,
+    fetchAnalytics,
+    fetchBackups,
+    fetchAiUsage,
+    fetchRankings,
+    rankingFilters
+  ]);
 
   // ─── Évaluations : import CSV robuste ─────────────────────────────────
   const handleFileSelected = async (e) => {
@@ -676,6 +759,93 @@ export default function AdminPanel() {
     } catch (err) {
       alert(`Export impossible : ${err.message}`);
     }
+  };
+
+  // ─── Classements par salle : filtres et exports ───────────────────────
+  const updateRankingFilter = (key, value) => {
+    setLoadingRankings(true);
+    setRankingFilters((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const rankingsFlatRows = () => {
+    const rows = [];
+    rankings.forEach((group) => {
+      group.participants.forEach((p) => {
+        rows.push({
+          Salle: group.salle,
+          UE: group.ue,
+          Session: sessionLabel(group.sessionTimestamp),
+          Rang: p.rank,
+          Etudiant: p.name,
+          Score: `${p.score}/${p.total}`,
+          Note_Sur_20: Number(p.note).toFixed(2),
+          Type: p.isMakeup ? 'Rattrapage' : 'Régulier',
+          Tentatives: p.attempts
+        });
+      });
+    });
+    return rows;
+  };
+
+  const exportRankingsCSV = () => {
+    const rows = rankingsFlatRows();
+    if (!rows.length) {
+      alert('Aucun classement à exporter.');
+      return;
+    }
+    const csv = Papa.unparse(rows, { delimiter: ';' });
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Classements_par_salle_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const exportRankingsPDF = () => {
+    if (!rankings.length) {
+      alert('Aucun classement à exporter.');
+      return;
+    }
+
+    const docPdf = new jsPDF();
+    docPdf.setFontSize(14);
+    docPdf.text('Classements par salle', 14, 14);
+    docPdf.setFontSize(9);
+    docPdf.text(`Généré le ${new Date().toLocaleString('fr-FR')} • QCM App`, 14, 21);
+
+    const body = [];
+    rankings.forEach((group) => {
+      body.push([
+        {
+          content: `${group.salle} · ${group.ue} — ${sessionLabel(group.sessionTimestamp)} (${group.count} étudiant(s))`,
+          colSpan: 6,
+          styles: { fillColor: [30, 58, 138], textColor: 255, fontStyle: 'bold' }
+        }
+      ]);
+      group.participants.forEach((p) => {
+        body.push([
+          p.rank,
+          p.name,
+          `${p.score}/${p.total}`,
+          Number(p.note).toFixed(2),
+          p.isMakeup ? 'Rattrapage' : 'Régulier',
+          p.attempts
+        ]);
+      });
+    });
+
+    docPdf.autoTable({
+      startY: 28,
+      head: [['Rang', 'Étudiant', 'Score', 'Note /20', 'Type', 'Tentatives']],
+      body,
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [30, 58, 138] }
+    });
+    docPdf.save(`Classements_par_salle_${new Date().toISOString().slice(0, 10)}.pdf`);
   };
 
   // ─── Sauvegardes SQLite ──────────────────────────────────────────────
@@ -1635,6 +1805,305 @@ export default function AdminPanel() {
             </div>
           )}
 
+          {/* ════════════ TUTEUR IA · REQUÊTES & TOKENS ════════════ */}
+          {activeSection === 'ai' && (
+            <div className="space-y-6">
+              {loadingAi ? (
+                <div className={`${card} p-10 text-center text-slate-500 text-xs animate-pulse`}>
+                  Chargement de la consommation du tuteur IA…
+                </div>
+              ) : !aiUsage ? (
+                <div className={`${card} p-10 text-center text-slate-500 text-xs`}>
+                  Données de consommation indisponibles pour le moment.
+                </div>
+              ) : (
+                <>
+                  {/* Budget mensuel */}
+                  <div className={`${card} p-6`}>
+                    <div className="flex items-start justify-between gap-4 flex-wrap">
+                      <div className="flex items-start gap-3">
+                        <div className="w-11 h-11 rounded-2xl bg-purple-500/15 border border-purple-500/30 text-purple-400 flex items-center justify-center shrink-0">
+                          <Icon name="sparkles" size={20} />
+                        </div>
+                        <div>
+                          <h3 className="text-sm font-black text-white">Budget de tokens du tuteur IA</h3>
+                          <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                            Budget mensuel configurable via <span className="font-mono text-slate-300">AI_TOKEN_BUDGET</span>,
+                            comparé aux tokens réellement annoncés par les fournisseurs.
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setLoadingAi(true);
+                          fetchAiUsage();
+                        }}
+                        className={btnSecondary}
+                      >
+                        <Icon name="refresh" size={13} />
+                        Actualiser
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
+                      {[
+                        {
+                          label: 'Budget mensuel',
+                          value: aiUsage.budget.monthlyTokens > 0
+                            ? formatTokens(aiUsage.budget.monthlyTokens)
+                            : 'Illimité',
+                          sub: aiUsage.budget.monthlyTokens > 0 ? 'tokens' : 'aucun plafond',
+                          color: 'text-white'
+                        },
+                        {
+                          label: 'Consommés ce mois',
+                          value: formatTokens(aiUsage.budget.usedTokens),
+                          sub: aiUsage.budget.usedPercent === null
+                            ? 'budget illimité'
+                            : `${aiUsage.budget.usedPercent}% du budget`,
+                          color: 'text-blue-400'
+                        },
+                        {
+                          label: 'Tokens restants',
+                          value: aiUsage.budget.remainingTokens === null
+                            ? 'Illimité'
+                            : formatTokens(aiUsage.budget.remainingTokens),
+                          sub: aiUsage.budget.remainingTokens === null ? 'aucun plafond' : 'ce mois-ci',
+                          color: aiUsage.budget.remainingTokens !== null && aiUsage.budget.usedPercent >= 90
+                            ? 'text-red-400'
+                            : 'text-emerald-400'
+                        },
+                        {
+                          label: 'Requêtes ce mois',
+                          value: formatNumber(aiUsage.month.requests),
+                          sub: `${formatNumber(aiUsage.today.requests)} aujourd'hui · ${formatNumber(aiUsage.month.quotaBlocked)} refus`,
+                          color: 'text-amber-400'
+                        }
+                      ].map((item) => (
+                        <div key={item.label} className="bg-slate-950 border border-slate-800 rounded-xl p-4">
+                          <div className={`text-2xl font-black leading-none ${item.color}`}>{item.value}</div>
+                          <div className="text-[10px] text-slate-500 mt-1.5 font-bold uppercase tracking-wider">
+                            {item.label}
+                          </div>
+                          <div className="text-[10px] text-slate-500 mt-1">{item.sub}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {aiUsage.budget.monthlyTokens > 0 ? (
+                      <div className="mt-5">
+                        <div className="flex items-center justify-between text-[11px] font-bold text-slate-400">
+                          <span>Consommation du budget mensuel</span>
+                          <span>
+                            {formatNumber(aiUsage.budget.usedTokens)} / {formatNumber(aiUsage.budget.monthlyTokens)} tokens
+                          </span>
+                        </div>
+                        <div className="h-2.5 bg-slate-950 border border-slate-800 rounded-full overflow-hidden mt-1.5">
+                          <div
+                            className={`h-full transition-all ${
+                              aiUsage.budget.usedPercent >= 90
+                                ? 'bg-red-500'
+                                : aiUsage.budget.usedPercent >= 70
+                                  ? 'bg-amber-500'
+                                  : 'bg-blue-500'
+                            }`}
+                            style={{ width: `${Math.min(100, aiUsage.budget.usedPercent || 0)}%` }}
+                          />
+                        </div>
+                        {aiUsage.budget.remainingTokens === 0 && (
+                          <p className="text-[11px] text-red-400 font-bold mt-2 flex items-center gap-1.5">
+                            <Icon name="alert" size={13} />
+                            Budget mensuel épuisé : augmentez AI_TOKEN_BUDGET ou attendez le mois suivant.
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-slate-500 mt-5 flex items-center gap-1.5">
+                        <Icon name="info" size={13} className="text-blue-400" />
+                        Budget illimité (AI_TOKEN_BUDGET = 0). La consommation reste suivie ci-dessous.
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Consommation quotidienne */}
+                  <div className={`${card} overflow-hidden`}>
+                    <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between flex-wrap gap-2">
+                      <div>
+                        <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                          <Icon name="chart" size={15} className="text-blue-400" />
+                          Consommation des 30 derniers jours
+                        </h3>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          Tokens consommés par jour · cette semaine : {formatTokens(aiUsage.week.tokens)} tokens
+                        </p>
+                      </div>
+                    </div>
+
+                    {aiUsage.byDay.length === 0 ? (
+                      <p className="text-xs text-slate-500 text-center py-10">
+                        Aucune requête enregistrée sur les 30 derniers jours.
+                      </p>
+                    ) : (() => {
+                      const maxTokens = Math.max(1, ...aiUsage.byDay.map((d) => d.tokens));
+                      return (
+                        <div className="p-6">
+                          <div className="flex items-end gap-1.5 h-40">
+                            {aiUsage.byDay.map((d) => (
+                              <div
+                                key={d.date}
+                                className="flex-1 min-w-[8px] flex flex-col items-center justify-end h-full"
+                                title={`${new Date(d.date).toLocaleDateString('fr-FR')} · ${formatNumber(d.requests)} requête(s) · ${formatNumber(d.tokens)} tokens`}
+                              >
+                                <div
+                                  className="w-full rounded-t bg-blue-500/70 hover:bg-blue-400 transition-colors"
+                                  style={{ height: `${Math.max(3, (d.tokens / maxTokens) * 100)}%` }}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                          <div className="flex items-center justify-between text-[10px] text-slate-500 mt-2">
+                            <span>{new Date(aiUsage.byDay[0].date).toLocaleDateString('fr-FR')}</span>
+                            <span>{new Date(aiUsage.byDay[aiUsage.byDay.length - 1].date).toLocaleDateString('fr-FR')}</span>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                  <div className="grid lg:grid-cols-2 gap-4">
+                    {/* Étudiants les plus consommateurs */}
+                    <div className={`${card} overflow-hidden`}>
+                      <div className="px-6 py-4 border-b border-slate-800">
+                        <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                          <Icon name="users" size={15} className="text-purple-400" />
+                          Étudiants les plus consommateurs
+                        </h3>
+                        <p className="text-[11px] text-slate-500 mt-0.5">Sur le mois en cours</p>
+                      </div>
+                      {aiUsage.topUsers.length === 0 ? (
+                        <p className="text-xs text-slate-500 text-center py-10">
+                          Aucune requête étudiante ce mois-ci.
+                        </p>
+                      ) : (
+                        <table className="min-w-full text-xs">
+                          <thead>
+                            <tr className="bg-slate-950 border-b border-slate-800 text-slate-500 uppercase text-[10px] tracking-wider">
+                              <th className="py-2.5 px-4 text-left">Étudiant</th>
+                              <th className="py-2.5 px-4 text-right">Requêtes</th>
+                              <th className="py-2.5 px-4 text-right">Tokens</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-800">
+                            {aiUsage.topUsers.map((u) => (
+                              <tr key={u.email || u.name} className="hover:bg-slate-950/60 transition">
+                                <td className="py-2.5 px-4">
+                                  <div className="font-bold text-slate-200">{u.name}</div>
+                                  {u.email && <div className="text-[10px] text-slate-500">{u.email}</div>}
+                                </td>
+                                <td className="py-2.5 px-4 text-right text-slate-300 font-bold">{formatNumber(u.requests)}</td>
+                                <td className="py-2.5 px-4 text-right text-blue-300 font-bold">{formatTokens(u.tokens)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+
+                    {/* Questions les plus travaillées */}
+                    <div className={`${card} overflow-hidden`}>
+                      <div className="px-6 py-4 border-b border-slate-800">
+                        <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                          <Icon name="chat" size={15} className="text-amber-400" />
+                          Questions les plus travaillées
+                        </h3>
+                        <p className="text-[11px] text-slate-500 mt-0.5">Contextes ayant consommé le plus de tokens</p>
+                      </div>
+                      {aiUsage.topContexts.length === 0 ? (
+                        <p className="text-xs text-slate-500 text-center py-10">
+                          Aucun contexte enregistré ce mois-ci.
+                        </p>
+                      ) : (
+                        <div className="divide-y divide-slate-800">
+                          {aiUsage.topContexts.map((c) => (
+                            <div key={c.contextKey} className="px-6 py-3 flex items-center justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="text-xs font-bold text-slate-200 truncate">
+                                  {formatContextKey(c.contextKey)}
+                                </p>
+                                <p className="text-[10px] text-slate-500 mt-0.5">
+                                  {formatNumber(c.requests)} requête(s)
+                                </p>
+                              </div>
+                              <span className="shrink-0 text-[11px] font-black text-amber-300">
+                                {formatTokens(c.tokens)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Dernières requêtes */}
+                  <div className={`${card} overflow-hidden`}>
+                    <div className="px-6 py-4 border-b border-slate-800">
+                      <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                        <Icon name="clock" size={15} className="text-slate-400" />
+                        Dernières requêtes
+                      </h3>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Succès, erreurs fournisseur et refus de quota, avec les tokens consommés
+                      </p>
+                    </div>
+
+                    {aiUsage.recent.length === 0 ? (
+                      <p className="text-xs text-slate-500 text-center py-10">
+                        Aucune requête enregistrée pour le moment.
+                      </p>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full text-xs">
+                          <thead>
+                            <tr className="bg-slate-950 border-b border-slate-800 text-slate-500 uppercase text-[10px] tracking-wider">
+                              <th className="py-2.5 px-4 text-left">Date</th>
+                              <th className="py-2.5 px-4 text-left">Étudiant</th>
+                              <th className="py-2.5 px-4 text-left">Contexte</th>
+                              <th className="py-2.5 px-4 text-left">Statut</th>
+                              <th className="py-2.5 px-4 text-right">Tokens</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-800">
+                            {aiUsage.recent.map((r) => {
+                              const status = AI_STATUS_LABELS[r.status] || AI_STATUS_LABELS.ok;
+                              return (
+                                <tr key={r.id} className="hover:bg-slate-950/60 transition">
+                                  <td className="py-2.5 px-4 text-slate-500 whitespace-nowrap">{formatDate(r.createdAt)}</td>
+                                  <td className="py-2.5 px-4">
+                                    <div className="font-bold text-slate-200">{r.name}</div>
+                                    {r.email && <div className="text-[10px] text-slate-500">{r.email}</div>}
+                                  </td>
+                                  <td className="py-2.5 px-4 text-slate-400">{formatContextKey(r.contextKey)}</td>
+                                  <td className="py-2.5 px-4">
+                                    <span className={`inline-flex items-center text-[10px] font-bold px-2 py-0.5 rounded-full border ${status.cls}`}>
+                                      {status.label}
+                                    </span>
+                                  </td>
+                                  <td className="py-2.5 px-4 text-right font-bold text-slate-300">
+                                    {formatNumber(r.tokens)}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
           {/* ════════════ UNITÉS D'ENSEIGNEMENT ════════════ */}
           {activeSection === 'ues' && (
             <div className="space-y-6">
@@ -2091,6 +2560,171 @@ export default function AdminPanel() {
                 <p className="text-xs text-slate-500 text-center py-6">
                   Sélectionnez une évaluation pour afficher les notes et générer les exports.
                 </p>
+              )}
+            </div>
+          )}
+
+          {/* ════════════ CLASSEMENTS PAR SALLE ════════════ */}
+          {activeSection === 'rankings' && (
+            <div className="space-y-6">
+              <div className={`${card} p-6`}>
+                <div className="grid md:grid-cols-3 gap-4">
+                  <div>
+                    <label className={label}>UE</label>
+                    <select
+                      className={selectCls}
+                      value={rankingFilters.ue}
+                      onChange={(e) => updateRankingFilter('ue', e.target.value)}
+                    >
+                      <option value="">Toutes les UE</option>
+                      {allUes.map((u) => (
+                        <option key={u.id} value={u.code || u.id}>
+                          {(u.code || u.id)} · {u.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={label}>Filière</label>
+                    <select
+                      className={selectCls}
+                      value={rankingFilters.filiere}
+                      onChange={(e) => updateRankingFilter('filiere', e.target.value)}
+                    >
+                      <option value="">Toutes les filières</option>
+                      {filieres.map((f) => (
+                        <option key={f} value={f}>{f}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={label}>Niveau</label>
+                    <select
+                      className={selectCls}
+                      value={rankingFilters.niveau}
+                      onChange={(e) => updateRankingFilter('niveau', e.target.value)}
+                    >
+                      <option value="">Tous les niveaux</option>
+                      {niveaux.map((n) => (
+                        <option key={n} value={n}>{n}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-3 flex-wrap mt-5">
+                  <p className="text-[11px] text-slate-500 max-w-xl leading-relaxed">
+                    Une salle correspond à la classe de l'étudiant (filière + niveau). Chaque étudiant est
+                    classé sur sa meilleure tentative, par épreuve et par session. Les exports reprennent
+                    exactement les filtres appliqués.
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={exportRankingsCSV}
+                      disabled={!rankings.length}
+                      className={btnSecondary + ' disabled:opacity-50'}
+                    >
+                      <Icon name="download" size={13} />
+                      Exporter CSV
+                    </button>
+                    <button
+                      onClick={exportRankingsPDF}
+                      disabled={!rankings.length}
+                      className={btnPrimary}
+                    >
+                      <Icon name="document" size={13} />
+                      Exporter PDF
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {loadingRankings ? (
+                <div className={`${card} p-10 text-center text-slate-500 text-xs animate-pulse`}>
+                  Chargement des classements…
+                </div>
+              ) : rankings.length === 0 ? (
+                <div className={`${card} p-10 text-center text-slate-500 text-xs`}>
+                  Aucun classement trouvé pour ces filtres. Les classements apparaissent après les premières copies corrigées.
+                </div>
+              ) : (
+                rankings.map((group) => (
+                  <div key={group.key} className={`${card} overflow-hidden`}>
+                    <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between gap-3 flex-wrap">
+                      <div>
+                        <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                          <Icon name="trophy" size={15} className="text-amber-400" />
+                          {group.salle} · {group.ue}
+                        </h3>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          {sessionLabel(group.sessionTimestamp)} · {group.count} étudiant(s) classé(s)
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 text-[10px] font-bold flex-wrap">
+                        <span className="px-2 py-1 rounded-full bg-blue-600/15 text-blue-300 border border-blue-600/30">
+                          Moyenne : {Number(group.averageNote).toFixed(2)}/20
+                        </span>
+                        <span className="px-2 py-1 rounded-full bg-emerald-600/15 text-emerald-300 border border-emerald-600/30">
+                          Meilleure note : {Number(group.bestNote).toFixed(2)}/20
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full text-xs">
+                        <thead>
+                          <tr className="bg-slate-950 border-b border-slate-800 text-slate-500 uppercase text-[10px] tracking-wider">
+                            <th className="py-2.5 px-4 text-left">Rang</th>
+                            <th className="py-2.5 px-4 text-left">Étudiant</th>
+                            <th className="py-2.5 px-4 text-right">Score</th>
+                            <th className="py-2.5 px-4 text-right">Note /20</th>
+                            <th className="py-2.5 px-4 text-left">Type</th>
+                            <th className="py-2.5 px-4 text-right">Tentatives</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800">
+                          {group.participants.map((p) => {
+                            const rankCls = p.rank === 1
+                              ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                              : p.rank === 2
+                                ? 'bg-slate-400/20 text-slate-200 border-slate-400/40'
+                                : p.rank === 3
+                                  ? 'bg-orange-600/20 text-orange-300 border-orange-600/40'
+                                  : 'bg-slate-800 text-slate-400 border-slate-700';
+                            return (
+                              <tr
+                                key={`${group.key}-${p.name}-${p.rank}`}
+                                className={p.isMe ? 'bg-blue-600/10' : 'hover:bg-slate-950/60 transition'}
+                              >
+                                <td className="py-2.5 px-4">
+                                  <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg border text-[11px] font-black ${rankCls}`}>
+                                    {p.rank}
+                                  </span>
+                                </td>
+                                <td className="py-2.5 px-4">
+                                  <span className="font-bold text-slate-200">{p.name}</span>
+                                  {p.isMe && (
+                                    <span className="ml-2 text-[9px] font-black text-blue-300 bg-blue-600/20 border border-blue-600/40 px-1.5 py-0.5 rounded-full">
+                                      Moi
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="py-2.5 px-4 text-right font-bold text-slate-300">{p.score}/{p.total}</td>
+                                <td className="py-2.5 px-4 text-right font-black text-white">{Number(p.note).toFixed(2)}</td>
+                                <td className="py-2.5 px-4">
+                                  <span className={p.isMakeup ? 'text-amber-400 font-bold' : 'text-slate-400'}>
+                                    {p.isMakeup ? 'Rattrapage' : 'Régulier'}
+                                  </span>
+                                </td>
+                                <td className="py-2.5 px-4 text-right text-slate-400">{p.attempts}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ))
               )}
             </div>
           )}

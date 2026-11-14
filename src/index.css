@@ -5,3 +5,140 @@
     @apply bg-gray-50 text-gray-800;
   }
 }
+
+/* ── Réponses du tuteur IA (Markdown + formules KaTeX) ───────────────── */
+.ai-markdown {
+  font-size: 0.76rem;
+  line-height: 1.65;
+  word-break: break-word;
+}
+
+.ai-markdown > :first-child {
+  margin-top: 0;
+}
+
+.ai-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.ai-markdown p {
+  margin: 0.4rem 0;
+}
+
+.ai-markdown strong {
+  color: #f8fafc;
+  font-weight: 700;
+}
+
+.ai-markdown em {
+  color: #cbd5e1;
+}
+
+.ai-markdown ul,
+.ai-markdown ol {
+  margin: 0.45rem 0;
+  padding-left: 1.15rem;
+}
+
+.ai-markdown ul {
+  list-style: disc;
+}
+
+.ai-markdown ol {
+  list-style: decimal;
+}
+
+.ai-markdown li {
+  margin: 0.15rem 0;
+}
+
+.ai-markdown li > p {
+  margin: 0;
+}
+
+.ai-markdown h1,
+.ai-markdown h2,
+.ai-markdown h3,
+.ai-markdown h4 {
+  color: #f8fafc;
+  font-weight: 800;
+  line-height: 1.3;
+  margin: 0.65rem 0 0.3rem;
+}
+
+.ai-markdown h1 { font-size: 0.95rem; }
+.ai-markdown h2 { font-size: 0.88rem; }
+.ai-markdown h3 { font-size: 0.82rem; }
+.ai-markdown h4 { font-size: 0.78rem; }
+
+.ai-markdown code {
+  background: rgba(2, 6, 23, 0.9);
+  border: 1px solid #334155;
+  border-radius: 0.35rem;
+  padding: 0.06rem 0.3rem;
+  font-size: 0.72rem;
+}
+
+.ai-markdown pre {
+  background: #020617;
+  border: 1px solid #334155;
+  border-radius: 0.6rem;
+  padding: 0.6rem;
+  overflow-x: auto;
+  margin: 0.5rem 0;
+}
+
+.ai-markdown pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+}
+
+.ai-markdown blockquote {
+  border-left: 3px solid #3b82f6;
+  color: #cbd5e1;
+  margin: 0.5rem 0;
+  padding-left: 0.6rem;
+}
+
+.ai-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.5rem 0;
+  font-size: 0.7rem;
+}
+
+.ai-markdown th,
+.ai-markdown td {
+  border: 1px solid #334155;
+  padding: 0.3rem 0.4rem;
+  text-align: left;
+}
+
+.ai-markdown th {
+  background: rgba(30, 41, 59, 0.7);
+  color: #f8fafc;
+}
+
+.ai-markdown a {
+  color: #60a5fa;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Les formules doivent rester lisibles sur le fond sombre du tuteur. */
+.ai-markdown .katex {
+  color: #e2e8f0;
+  font-size: 1.02em;
+}
+
+.ai-markdown .katex-display {
+  margin: 0.55rem 0;
+  padding: 0.15rem 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.ai-markdown .katex-display > .katex {
+  white-space: normal;
+}

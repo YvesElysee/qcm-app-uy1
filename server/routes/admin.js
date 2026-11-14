@@ -14,6 +14,7 @@ import {
   deleteAdminToken
 } from '../auth.js';
 import { createBackup, listBackups, backupPath, deleteBackup } from '../backup.js';
+import { buildRankingGroups } from '../ranking.js';
 
 const router = Router();
 
@@ -255,6 +256,201 @@ router.get('/analytics', requireAdmin, (_req, res) => {
     mostMissed,
     byUe: ueStats,
     evolution
+  });
+});
+
+// ── Classements par salle (filière + niveau) ──────────────────────────
+
+/**
+ * Classements regroupés par épreuve, session et salle. Les filtres sont
+ * facultatifs : sans filtre, l'administration obtient toutes les salles.
+ */
+router.get('/rankings', requireAdmin, (req, res) => {
+  const ue = String(req.query.ue || '').trim();
+  const filiere = String(req.query.filiere || '').trim();
+  const niveau = String(req.query.niveau || '').trim();
+  const sessionTimestamp = req.query.sessionTimestamp !== undefined
+    ? Number(req.query.sessionTimestamp)
+    : null;
+
+  let sql = 'SELECT * FROM results WHERE 1 = 1';
+  const params = [];
+  if (ue) {
+    sql += ' AND ue = ?';
+    params.push(ue);
+  }
+  if (filiere) {
+    sql += ' AND LOWER(TRIM(filiere)) = LOWER(TRIM(?))';
+    params.push(filiere);
+  }
+  if (niveau) {
+    sql += ' AND LOWER(TRIM(niveau)) = LOWER(TRIM(?))';
+    params.push(niveau);
+  }
+  if (sessionTimestamp !== null && Number.isFinite(sessionTimestamp)) {
+    sql += ' AND sessionTimestamp = ?';
+    params.push(sessionTimestamp);
+  }
+
+  const rows = db.prepare(sql).all(...params);
+  const { groups } = buildRankingGroups(rows);
+  res.json({ groups });
+});
+
+// ── Tableau de bord du tuteur IA (requêtes et tokens) ─────────────────
+
+function aiMonthStartIso() {
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString();
+}
+
+function aiDaysAgoIso(days) {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - Math.max(0, days));
+  return d.toISOString();
+}
+
+function aiDayStartIso() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString();
+}
+
+function aiTokenBudget() {
+  const value = Number.parseInt(process.env.AI_TOKEN_BUDGET || '', 10);
+  if (!Number.isFinite(value)) return 1000000;
+  return Math.max(0, value);
+}
+
+function aiStatsSince(sinceIso) {
+  const row = db.prepare(`
+    SELECT
+      COUNT(*) AS requests,
+      COALESCE(SUM(totalTokens), 0) AS tokens,
+      COALESCE(SUM(promptTokens), 0) AS promptTokens,
+      COALESCE(SUM(completionTokens), 0) AS completionTokens,
+      COALESCE(SUM(CASE WHEN status = 'ok' THEN 1 ELSE 0 END), 0) AS ok,
+      COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0) AS errors,
+      COALESCE(SUM(CASE WHEN status = 'quota' THEN 1 ELSE 0 END), 0) AS quotaBlocked
+    FROM ai_requests
+    WHERE createdAt >= ?
+  `).get(sinceIso);
+
+  return {
+    requests: Number(row?.requests) || 0,
+    tokens: Number(row?.tokens) || 0,
+    promptTokens: Number(row?.promptTokens) || 0,
+    completionTokens: Number(row?.completionTokens) || 0,
+    ok: Number(row?.ok) || 0,
+    errors: Number(row?.errors) || 0,
+    quotaBlocked: Number(row?.quotaBlocked) || 0
+  };
+}
+
+/**
+ * Tableau de bord IA : nombre de requêtes, consommation réelle de tokens
+ * annoncée par les fournisseurs, et budget mensuel restant.
+ */
+router.get('/ai-usage', requireAdmin, (_req, res) => {
+  const monthStart = aiMonthStartIso();
+  const month = aiStatsSince(monthStart);
+  const budget = aiTokenBudget();
+  const remainingTokens = budget > 0 ? Math.max(0, budget - month.tokens) : null;
+  const usedPercent = budget > 0
+    ? Math.min(100, Math.round((month.tokens / budget) * 100))
+    : null;
+
+  const byDay = db.prepare(`
+    SELECT
+      substr(createdAt, 1, 10) AS date,
+      COUNT(*) AS requests,
+      COALESCE(SUM(totalTokens), 0) AS tokens
+    FROM ai_requests
+    WHERE createdAt >= ?
+    GROUP BY date
+    ORDER BY date ASC
+  `).all(aiDaysAgoIso(29)).map((d) => ({
+    date: d.date,
+    requests: Number(d.requests) || 0,
+    tokens: Number(d.tokens) || 0
+  }));
+
+  const recent = db.prepare(`
+    SELECT
+      r.id,
+      r.contextKey,
+      r.status,
+      r.totalTokens,
+      r.createdAt,
+      COALESCE(u.name, r.userId) AS name,
+      u.email
+    FROM ai_requests r
+    LEFT JOIN users u ON u.id = r.userId
+    ORDER BY r.createdAt DESC
+    LIMIT 60
+  `).all().map((r) => ({
+    id: r.id,
+    contextKey: r.contextKey,
+    status: r.status,
+    tokens: Number(r.totalTokens) || 0,
+    createdAt: r.createdAt,
+    name: r.name || 'Étudiant',
+    email: r.email || ''
+  }));
+
+  const topUsers = db.prepare(`
+    SELECT
+      COALESCE(u.name, r.userId) AS name,
+      u.email,
+      COUNT(*) AS requests,
+      COALESCE(SUM(r.totalTokens), 0) AS tokens
+    FROM ai_requests r
+    LEFT JOIN users u ON u.id = r.userId
+    WHERE r.createdAt >= ?
+    GROUP BY r.userId
+    ORDER BY tokens DESC, requests DESC
+    LIMIT 10
+  `).all(monthStart).map((u) => ({
+    name: u.name || 'Étudiant',
+    email: u.email || '',
+    requests: Number(u.requests) || 0,
+    tokens: Number(u.tokens) || 0
+  }));
+
+  const topContexts = db.prepare(`
+    SELECT
+      contextKey,
+      COUNT(*) AS requests,
+      COALESCE(SUM(totalTokens), 0) AS tokens
+    FROM ai_requests
+    WHERE createdAt >= ? AND contextKey IS NOT NULL
+    GROUP BY contextKey
+    ORDER BY tokens DESC, requests DESC
+    LIMIT 8
+  `).all(monthStart).map((c) => ({
+    contextKey: c.contextKey,
+    requests: Number(c.requests) || 0,
+    tokens: Number(c.tokens) || 0
+  }));
+
+  res.json({
+    generatedAt: new Date().toISOString(),
+    budget: {
+      monthlyTokens: budget,
+      monthStart,
+      usedTokens: month.tokens,
+      remainingTokens,
+      usedPercent
+    },
+    totals: aiStatsSince('1970-01-01T00:00:00.000Z'),
+    today: aiStatsSince(aiDayStartIso()),
+    week: aiStatsSince(aiDaysAgoIso(6)),
+    month,
+    byDay,
+    recent,
+    topUsers,
+    topContexts
   });
 });
 

@@ -27,6 +27,46 @@ function optionsOf(question) {
     };
 }
 
+function optionsListOf(options) {
+    return ['A', 'B', 'C', 'D']
+        .map(label => ({ label, text: options?.['Opt' + label] }))
+        .filter(o => typeof o.text === 'string' && o.text.trim() !== '');
+}
+
+/**
+ * Retrouve l'option réellement cochée, que la copie stocke le texte complet
+ * (nouvelles copies) ou seulement la lettre A/B/C/D (anciennes copies).
+ */
+function resolveChoice(raw, optionsList) {
+    const value = typeof raw === 'string' ? raw.trim() : '';
+    if (!value) return null;
+
+    const lower = value.toLowerCase();
+    const byText = optionsList.find(o => o.text.trim() === value);
+    if (byText) return byText;
+
+    const letter = lower.match(/^([a-f])[).\-:]?\s*$/);
+    if (letter) {
+        const byLabel = optionsList.find(o => o.label.toLowerCase() === letter[1]);
+        if (byLabel) return byLabel;
+    }
+
+    const prefixed = optionsList.find(o => {
+        const t = o.text.trim();
+        return value === `${o.label}. ${t}` ||
+            value === `${o.label}) ${t}` ||
+            value === `${o.label} - ${t}` ||
+            value === `${o.label}.${t}`;
+    });
+    if (prefixed) return prefixed;
+
+    const byLooseText = optionsList.find(o => o.text.trim().toLowerCase() === lower);
+    if (byLooseText) return byLooseText;
+
+    // Valeur inconnue (copie ancienne sans options) : on l'affiche telle quelle.
+    return { label: null, text: value };
+}
+
 export default function ReviewSession() {
     const { quizId } = useParams();
     usePageTitle(`Correction · ${quizId || ''}`);
@@ -87,17 +127,24 @@ export default function ReviewSession() {
                 const fallback = fallbackQuestions[index] || {};
                 const selected = isObject ? (a.selected || '') : (a || '');
                 const correct = isObject ? (a.correct || fallback.ReponseCorrecte || '') : (fallback.ReponseCorrecte || '');
+                const itemOptions = isObject && a.question ? (a.options || {}) : optionsOf(fallback);
+                const itemOptionsList = optionsListOf(itemOptions);
+                const selectedChoice = resolveChoice(selected, itemOptionsList);
+                const correctChoice = resolveChoice(correct, itemOptionsList);
+
+                // `isOk` est fourni par le serveur pour les copies récentes.
+                // Pour les anciennes copies (lettres A/B/C/D), on compare les
+                // textes résolus afin de retrouver la bonne case cochée.
                 const isOk = isObject && typeof a.isOk === 'boolean'
                     ? a.isOk
-                    : (selected.trim() !== '' && selected.trim() === correct.trim());
+                    : !!(selectedChoice && correctChoice &&
+                        selectedChoice.text.trim() === correctChoice.text.trim());
 
-                // Les nouvelles copies contiennent l'énoncé et les options :
-                // la correction reste exacte même si la banque a changé depuis.
                 if (isObject && a.question) {
                     return {
                         questionId: a.questionId ?? index,
                         Question: a.question,
-                        options: a.options || {},
+                        options: itemOptions,
                         selected,
                         correct,
                         isOk,
@@ -109,7 +156,7 @@ export default function ReviewSession() {
                 return {
                     questionId: fallback.id ?? index,
                     Question: fallback.Question || `Question ${index + 1}`,
-                    options: optionsOf(fallback),
+                    options: itemOptions,
                     selected,
                     correct,
                     isOk,
@@ -166,11 +213,9 @@ export default function ReviewSession() {
 
     // Ouvre le tuteur IA sur une question précise (mauvaise réponse)
     const openTutorForQuestion = (item, i) => {
-        const optionsList = ['A', 'B', 'C', 'D']
-            .map(l => ({ label: l, text: item.options?.['Opt' + l] }))
-            .filter(o => typeof o.text === 'string' && o.text.trim() !== '');
-        const selectedLabel = optionsList.find(o => o.text.trim() === item.selected.trim())?.label || null;
-        const correctLabel = optionsList.find(o => o.text.trim() === item.correct.trim())?.label || null;
+        const optionsList = optionsListOf(item.options);
+        const selectedChoice = resolveChoice(item.selected, optionsList);
+        const correctChoice = resolveChoice(item.correct, optionsList);
 
         setAiContext({
             key: `q${i}_${quizId}`,
@@ -179,8 +224,10 @@ export default function ReviewSession() {
             questionId: item.questionId,
             question: item.Question,
             options: optionsList,
-            selected: selectedLabel,
-            correct: correctLabel
+            // On transmet le texte exact de la case cochée : l'IA ne doit plus
+            // répondre « aucune réponse » alors que l'étudiant a bien choisi.
+            selected: selectedChoice?.text || '',
+            correct: correctChoice?.text || item.correct || ''
         });
         setAiOpen(true);
     };
@@ -262,7 +309,10 @@ export default function ReviewSession() {
                 {/* Questions */}
                 <div className="space-y-5">
                     {items.map((item, i) => {
-                        const notAnswered = !item.selected.trim();
+                        const choiceOptions = optionsListOf(item.options);
+                        const selectedChoice = resolveChoice(item.selected, choiceOptions);
+                        const correctChoice = resolveChoice(item.correct, choiceOptions);
+                        const notAnswered = !selectedChoice;
 
                         // Ordre des options identique au quiz (même seed)
                         const validOptions = ['OptA', 'OptB', 'OptC', 'OptD']
@@ -289,13 +339,20 @@ export default function ReviewSession() {
                                 </div>
 
                                 <div className="px-6 pb-6">
-                                    <h3 className="font-bold text-slate-100 mb-5 leading-relaxed">{item.Question}</h3>
+                                    <h3 className="font-bold text-slate-100 mb-3 leading-relaxed">{item.Question}</h3>
+
+                                    {notAnswered && (
+                                        <p className="mb-3 inline-flex items-center gap-1.5 text-xs text-slate-400 bg-slate-950/60 border border-slate-800 rounded-lg px-2.5 py-1.5">
+                                            <Icon name="info" size={12} />
+                                            Vous n'avez coché aucune case pour cette question.
+                                        </p>
+                                    )}
 
                                     <div className="flex flex-col gap-2">
                                         {shuffledOptions.map(val => {
                                             const cleanVal = val.trim();
-                                            const isCorrectOpt = cleanVal === item.correct.trim();
-                                            const isGivenOpt = cleanVal === item.selected.trim();
+                                            const isCorrectOpt = correctChoice ? cleanVal === correctChoice.text.trim() : false;
+                                            const isGivenOpt = selectedChoice ? cleanVal === selectedChoice.text.trim() : false;
 
                                             let cls = 'p-4 rounded-xl text-sm border transition font-medium ';
                                             let label = null;
@@ -323,6 +380,17 @@ export default function ReviewSession() {
                                             );
                                         })}
                                     </div>
+
+                                    {selectedChoice && !shuffledOptions.some(v => v.trim() === selectedChoice.text.trim()) && (
+                                        <p className="mt-3 text-xs text-slate-300 bg-slate-950/60 border border-slate-800 rounded-lg px-3 py-2">
+                                            Votre réponse enregistrée : <strong className="text-white">{selectedChoice.text}</strong>
+                                        </p>
+                                    )}
+                                    {correctChoice && !shuffledOptions.some(v => v.trim() === correctChoice.text.trim()) && (
+                                        <p className="mt-2 text-xs text-emerald-300 bg-emerald-950/40 border border-emerald-800/60 rounded-lg px-3 py-2">
+                                            Bonne réponse : <strong className="text-white">{correctChoice.text}</strong>
+                                        </p>
+                                    )}
 
                                     {/* Aide IA sur cette question (uniquement si erreur) */}
                                     {!item.isOk && aiAvailable && (

@@ -44,6 +44,12 @@ export default function StudentDashboard() {
   const [nowTs, setNowTs] = useState(0);
   const [loading, setLoading] = useState(true);
 
+  // Classement de la salle (filière + niveau) · chargé uniquement sur demande
+  const [showRankings, setShowRankings] = useState(false);
+  const [rankings, setRankings] = useState([]);
+  const [loadingRankings, setLoadingRankings] = useState(false);
+  const [rankingsError, setRankingsError] = useState('');
+
   // Modales
   const [showContactModal, setShowContactModal] = useState(false);
   const [selectedUeForStart, setSelectedUeForStart] = useState('');
@@ -114,6 +120,34 @@ export default function StudentDashboard() {
         body: `Rappels activés pour la filière ${filiere} !`,
         icon: '/favicon.ico'
       });
+    }
+  };
+
+  /**
+   * Affiche le classement de la salle de l'étudiant (filière + niveau).
+   * Les données ne sont demandées au serveur qu'après un clic explicite sur
+   * « Classement » : rien n'est préchargé dans l'espace personnel.
+   */
+  const toggleRankings = async () => {
+    if (showRankings) {
+      setShowRankings(false);
+      return;
+    }
+
+    setShowRankings(true);
+    setLoadingRankings(true);
+    setRankingsError('');
+    try {
+      const data = await api(
+        `/results/ranking?niveau=${encodeURIComponent(selectedNiveau)}`,
+        { auth: 'student' }
+      );
+      setRankings(Array.isArray(data.groups) ? data.groups : []);
+    } catch (err) {
+      setRankingsError(err.message || 'Classement momentanément indisponible.');
+      setRankings([]);
+    } finally {
+      setLoadingRankings(false);
     }
   };
 
@@ -237,7 +271,10 @@ export default function StudentDashboard() {
                   return (
                     <button
                       key={niv}
-                      onClick={() => setSelectedNiveau(niv)}
+                      onClick={() => {
+                        setSelectedNiveau(niv);
+                        setShowRankings(false);
+                      }}
                       className={`px-3 py-1.5 rounded-xl text-xs font-black transition relative ${
                         isCurrent
                           ? 'bg-blue-600 text-white shadow-md shadow-blue-500/30'
@@ -472,7 +509,10 @@ export default function StudentDashboard() {
                       return (
                         <button
                           key={niv}
-                          onClick={() => setSelectedNiveau(niv)}
+                          onClick={() => {
+                        setSelectedNiveau(niv);
+                        setShowRankings(false);
+                      }}
                           className="inline-flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-blue-500/50 text-slate-200 text-xs font-bold px-3 py-1.5 rounded-xl transition"
                         >
                           <Icon name="graduation" size={13} className="text-blue-400" />
@@ -658,6 +698,120 @@ export default function StudentDashboard() {
                   </div>
                 );
               })}
+            </div>
+          )}
+        </div>
+
+        {/* ── Classement de ma salle (chargé uniquement après clic) ── */}
+        <div className="bg-slate-800/50 border border-slate-700/60 rounded-3xl p-6">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <h3 className="text-lg font-black text-white flex items-center gap-2">
+                <Icon name="trophy" size={18} className="text-amber-400" />
+                Classement
+              </h3>
+              <p className="text-xs text-slate-400 mt-1">
+                Votre salle : <strong className="text-slate-200">{filiere} · {selectedNiveau}</strong>.
+                Chaque étudiant est classé sur sa meilleure tentative, par épreuve et par session.
+              </p>
+            </div>
+            <button
+              onClick={toggleRankings}
+              className={`shrink-0 inline-flex items-center gap-1.5 text-xs font-black px-4 py-2.5 rounded-xl transition border ${
+                showRankings
+                  ? 'bg-slate-900 text-slate-300 border-slate-700 hover:bg-slate-800'
+                  : 'bg-amber-500/15 text-amber-300 border-amber-500/40 hover:bg-amber-500/25'
+              }`}
+            >
+              <Icon name={showRankings ? 'close' : 'trophy'} size={13} />
+              {showRankings ? 'Masquer le classement' : 'Classement'}
+            </button>
+          </div>
+
+          {showRankings && (
+            <div className="mt-5">
+              {loadingRankings ? (
+                <p className="text-xs text-slate-500 text-center py-8 animate-pulse">
+                  Chargement du classement…
+                </p>
+              ) : rankingsError ? (
+                <p className="text-xs text-red-400 text-center py-8">{rankingsError}</p>
+              ) : rankings.length === 0 ? (
+                <p className="text-xs text-slate-500 text-center py-8">
+                  Aucune copie corrigée pour votre salle pour le moment.
+                </p>
+              ) : (
+                <div className="space-y-4">
+                  {rankings.map(group => (
+                    <div
+                      key={group.key}
+                      className="bg-slate-900/70 border border-slate-700/80 rounded-2xl overflow-hidden"
+                    >
+                      <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between gap-2 flex-wrap">
+                        <div>
+                          <p className="text-sm font-black text-white">{group.ue}</p>
+                          <p className="text-[11px] text-slate-500">
+                            {group.salle} · {formatDate(group.sessionTimestamp)}
+                          </p>
+                        </div>
+                        <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-blue-600/15 text-blue-300 border border-blue-600/30">
+                          {group.count} étudiant(s) · moyenne {Number(group.averageNote).toFixed(2)}/20
+                        </span>
+                      </div>
+
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full text-xs">
+                          <thead>
+                            <tr className="bg-slate-950/80 border-b border-slate-800 text-slate-500 uppercase text-[10px] tracking-wider">
+                              <th className="py-2 px-4 text-left">Rang</th>
+                              <th className="py-2 px-4 text-left">Étudiant</th>
+                              <th className="py-2 px-4 text-right">Score</th>
+                              <th className="py-2 px-4 text-right">Note /20</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-800">
+                            {group.participants.map(p => {
+                              const rankCls = p.rank === 1
+                                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                                : p.rank === 2
+                                  ? 'bg-slate-400/20 text-slate-200 border-slate-400/40'
+                                  : p.rank === 3
+                                    ? 'bg-orange-600/20 text-orange-300 border-orange-600/40'
+                                    : 'bg-slate-800 text-slate-400 border-slate-700';
+                              return (
+                                <tr
+                                  key={`${group.key}-${p.rank}-${p.name}`}
+                                  className={p.isMe ? 'bg-blue-600/10' : ''}
+                                >
+                                  <td className="py-2.5 px-4">
+                                    <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg border text-[11px] font-black ${rankCls}`}>
+                                      {p.rank}
+                                    </span>
+                                  </td>
+                                  <td className="py-2.5 px-4">
+                                    <span className="font-bold text-slate-200">{p.name}</span>
+                                    {p.isMe && (
+                                      <span className="ml-2 text-[9px] font-black text-blue-300 bg-blue-600/20 border border-blue-600/40 px-1.5 py-0.5 rounded-full">
+                                        Moi
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="py-2.5 px-4 text-right text-slate-400 font-bold">
+                                    {p.score}/{p.total}
+                                  </td>
+                                  <td className="py-2.5 px-4 text-right font-black text-white">
+                                    {Number(p.note).toFixed(2)}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
