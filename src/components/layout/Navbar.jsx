@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { getCurrentUser, logoutStudent } from '../../services/authService';
 import StudentProfile from '../StudentProfile';
+import NotificationBell from '../NotificationBell';
 import Icon from '../ui/icons.jsx';
 
 /**
@@ -56,6 +57,7 @@ export default function Navbar() {
     { to: '/schedule', label: 'Planning' },
     ...(user
       ? [
+          { to: '/resources', label: 'Ressources' },
           { to: '/contact', label: 'Contact' },
           { to: '/dashboard', label: 'Mon espace' }
         ]
@@ -116,6 +118,7 @@ export default function Navbar() {
 
           {/* ── Zone droite ── */}
           <div className="flex items-center gap-2">
+            {user && <NotificationBell />}
             {user ? (
               <div className="relative hidden md:block" ref={userMenuRef}>
                 <button
@@ -158,6 +161,14 @@ export default function Navbar() {
                       >
                         <Icon name="graduation" size={15} />
                         Mon espace
+                      </NavLink>
+                      <NavLink
+                        to="/resources"
+                        onClick={() => setUserMenuOpen(false)}
+                        className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-slate-200 hover:bg-slate-700 hover:text-white transition"
+                      >
+                        <Icon name="book" size={15} />
+                        Ressources de cours
                       </NavLink>
                       <button
                         type="button"

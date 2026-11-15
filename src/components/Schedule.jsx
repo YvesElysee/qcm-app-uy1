@@ -14,8 +14,10 @@ export default function Schedule() {
   // Identité figée pour la durée de la page (évite de relancer l'effet à chaque rendu)
   const [user] = useState(getCurrentUser);
 
-  // Si l'utilisateur est connecté, sa filière est verrouillée (Point 3)
+  // Si l'utilisateur est connecté, sa filière, sa faculté et son niveau sont
+  // verrouillés : il ne voit jamais les épreuves d'un autre parcours.
   const userFiliere = user?.filiere || '';
+  const userFaculte = user?.faculte || '';
   const userNiveau = user?.niveau || 'L1';
 
   const [filter, setFilter] = useState({
@@ -25,11 +27,21 @@ export default function Schedule() {
 
   const [myResults, setMyResults] = useState([]);
   const [nowTs, setNowTs] = useState(0);
+  const [catalogFilieres, setCatalogFilieres] = useState([]);
+
+  useEffect(() => {
+    api('/catalog')
+      .then(data => setCatalogFilieres(Array.isArray(data.filieres) ? data.filieres : []))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const load = async () => {
       try {
-        const data = await api('/quizzes?sort=asc');
+        const scope = user
+          ? `?filiere=${encodeURIComponent(userFiliere)}&niveau=${encodeURIComponent(userNiveau)}&faculte=${encodeURIComponent(userFaculte)}&sort=asc`
+          : '?sort=asc';
+        const data = await api(`/quizzes${scope}`);
         const all = data.quizzes;
         const now = Date.now();
         setNowTs(now);
@@ -47,7 +59,7 @@ export default function Schedule() {
       }
     };
     load();
-  }, [user]);
+  }, [user, userFaculte, userFiliere, userNiveau]);
 
   const passedUes = new Set(myResults.map(r => r.ue));
 
@@ -241,43 +253,55 @@ export default function Schedule() {
 
         {/* Barre de Filtres */}
         <div className="bg-slate-900 rounded-2xl p-4 border border-slate-800 flex gap-3 flex-wrap items-center">
-          {/* Si utilisateur connecté, filière fixe avec badge (Point 3) */}
+          {/* Étudiant connecté : parcours entièrement verrouillé */}
           {user ? (
-            <div className="flex items-center gap-2 bg-blue-950/50 border border-blue-900/60 px-3 py-2 rounded-xl text-xs">
-              <span className="text-slate-400">Filière (liée à votre compte) :</span>
-              <strong className="text-blue-300 font-extrabold">{user.filiere}</strong>
-            </div>
+            <>
+              <div className="flex items-center gap-2 bg-blue-950/50 border border-blue-900/60 px-3 py-2 rounded-xl text-xs">
+                <Icon name="lock" size={13} className="text-blue-400" />
+                <span className="text-slate-400">Filière :</span>
+                <strong className="text-blue-300 font-extrabold">{user.filiere}</strong>
+              </div>
+              <div className="flex items-center gap-2 bg-blue-950/50 border border-blue-900/60 px-3 py-2 rounded-xl text-xs">
+                <Icon name="graduation" size={13} className="text-blue-400" />
+                <span className="text-slate-400">Niveau :</span>
+                <strong className="text-blue-300 font-extrabold">{user.niveau}</strong>
+              </div>
+              {userFaculte && (
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">
+                  {userFaculte}
+                </span>
+              )}
+            </>
           ) : (
-            <select
-              className="flex-1 min-w-32 p-2.5 border border-slate-800 bg-slate-950 text-slate-200 rounded-xl text-xs outline-none focus:border-blue-600 transition"
-              value={filter.filiere}
-              onChange={e => setFilter(f => ({ ...f, filiere: e.target.value }))}
-            >
-              <option value="">Toutes filières</option>
-              <option>Informatique</option>
-              <option>Mathématiques</option>
-              <option>Physique</option>
-              <option>Chimie</option>
-              <option>Biologie</option>
-            </select>
-          )}
+            <>
+              <select
+                className="flex-1 min-w-32 p-2.5 border border-slate-800 bg-slate-950 text-slate-200 rounded-xl text-xs outline-none focus:border-blue-600 transition"
+                value={filter.filiere}
+                onChange={e => setFilter(f => ({ ...f, filiere: e.target.value }))}
+              >
+                <option value="">Toutes filières</option>
+                {[...new Set(catalogFilieres.map(f => f.label))].map(label => (
+                  <option key={label} value={label}>{label}</option>
+                ))}
+              </select>
 
-          {/* Sélecteur de niveau au sein de la filière */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-400 font-bold">Niveau :</span>
-            <select
-              className="p-2 border border-slate-800 bg-slate-950 text-slate-200 rounded-xl text-xs outline-none focus:border-blue-600 transition font-bold"
-              value={filter.niveau}
-              onChange={e => setFilter(f => ({ ...f, niveau: e.target.value }))}
-            >
-              <option value="">Tous niveaux</option>
-              <option>L1</option>
-              <option>L2</option>
-              <option>L3</option>
-              <option>M1</option>
-              <option>M2</option>
-            </select>
-          </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400 font-bold">Niveau :</span>
+                <select
+                  className="p-2 border border-slate-800 bg-slate-950 text-slate-200 rounded-xl text-xs outline-none focus:border-blue-600 transition font-bold"
+                  value={filter.niveau}
+                  onChange={e => setFilter(f => ({ ...f, niveau: e.target.value }))}
+                >
+                  <option value="">Tous niveaux</option>
+                  <option>L1</option>
+                  <option>L2</option>
+                  <option>L3</option>
+                  <option>M1</option>
+                  <option>M2</option>
+                </select>
+              </div>
+            </>
+          )}
         </div>
 
         {loading ? (

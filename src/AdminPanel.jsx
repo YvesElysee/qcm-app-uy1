@@ -14,16 +14,20 @@ const SECTIONS = [
   { id: 'quizzes', label: 'Évaluations', icon: 'list', desc: 'Programmer, importer et gérer les QCM' },
   { id: 'analytics', label: 'Analytique', icon: 'chart', desc: 'Questions ratées, réussite par UE et évolution des notes' },
   { id: 'ai', label: 'Tuteur IA', icon: 'sparkles', desc: 'Requêtes, tokens consommés et budget mensuel' },
-  { id: 'ues', label: "Unités d'enseignement", icon: 'book', desc: 'Filières, niveaux et catalogue des UE' },
-  { id: 'students', label: 'Étudiants', icon: 'users', desc: 'Comptes inscrits et exports' },
+  { id: 'ai-generator', label: 'Génération QCM IA', icon: 'lightbulb', desc: 'Générer des questions à partir de documents de référence' },
+  { id: 'ues', label: "Unités d'enseignement", icon: 'book', desc: 'Catalogue des UE par faculté et niveau' },
+  { id: 'catalogue', label: 'Facultés & filières', icon: 'graduation', desc: 'Gérer le catalogue des facultés et des filières' },
+  { id: 'requests', label: 'Demandes de filière', icon: 'mail', desc: 'Filières signalées par les étudiants à ajouter' },
+  { id: 'quiz-requests', label: 'Demandes de QCM', icon: 'lightbulb', desc: 'Pétitions étudiantes : épreuves manquantes par filière, niveau et UE' },
+  { id: 'students', label: 'Étudiants', icon: 'users', desc: 'Comptes inscrits et exports par faculté / filière' },
   { id: 'results', label: 'Résultats', icon: 'trophy', desc: 'Notes par évaluation et procès-verbaux' },
   { id: 'rankings', label: 'Classements', icon: 'trophy', desc: 'Classements par salle (filière + niveau) et exports' },
+  { id: 'resources', label: 'Ressources', icon: 'book', desc: 'Modération des documents partagés par les étudiants' },
   { id: 'messages', label: 'Messages', icon: 'chat', desc: 'Suggestions et signalements des étudiants' },
   { id: 'backups', label: 'Sauvegardes', icon: 'download', desc: 'Copies de sécurité de la base SQLite' },
   { id: 'smtp', label: 'Paramètres SMTP', icon: 'settings', desc: 'Service email de récupération de mot de passe' }
 ];
 
-const FILIERES_DEFAULT = ['Informatique', 'Mathématiques', 'Physique', 'Chimie', 'Biologie'];
 const NIVEAUX_DEFAULT = ['L1', 'L2', 'L3', 'M1', 'M2'];
 
 const FEEDBACK_CATEGORIES = [
@@ -92,8 +96,13 @@ export default function AdminPanel() {
   usePageTitle('Administration');
   const [activeSection, setActiveSection] = useState('overview');
 
+  // ── Catalogue facultés / filières (chargé depuis le serveur) ───────────
+  const [facultes, setFacultes] = useState([]);
+  const [catalogFilieres, setCatalogFilieres] = useState([]);
+
   // ── Évaluations : programmation & import CSV ──────────────────────────
-  const [filiere, setFiliere] = useState('Informatique');
+  const [faculte, setFaculte] = useState('');
+  const [filiere, setFiliere] = useState('');
   const [niveau, setNiveau] = useState('L1');
   const [semestre, setSemestre] = useState('1');
   const [ue, setUe] = useState('');
@@ -114,21 +123,84 @@ export default function AdminPanel() {
   const [loadingQuestions, setLoadingQuestions] = useState(false);
 
   // ── Unités d'enseignement ──────────────────────────────────────────────
-  const [filieres, setFilieres] = useState(FILIERES_DEFAULT);
   const [niveaux, setNiveaux] = useState(NIVEAUX_DEFAULT);
-  const [newFiliere, setNewFiliere] = useState('');
   const [newNiveau, setNewNiveau] = useState('');
   const [newUeCode, setNewUeCode] = useState('');
   const [newUeLabel, setNewUeLabel] = useState('');
-  const [newUeFiliere, setNewUeFiliere] = useState('Informatique');
+  const [newUeFaculte, setNewUeFaculte] = useState('');
+  const [newUeFiliere, setNewUeFiliere] = useState('');
   const [newUeNiveau, setNewUeNiveau] = useState('L1');
   const [allUes, setAllUes] = useState([]);
+
+  // ── Gestion du catalogue (facultés & filières) ─────────────────────────
+  const [newFaculteLabel, setNewFaculteLabel] = useState('');
+  const [newCatalogueFiliere, setNewCatalogueFiliere] = useState({ faculte: '', label: '' });
+  const [catalogueBusy, setCatalogueBusy] = useState(false);
+
+  // ── Demandes de filière ────────────────────────────────────────────────
+  const [filiereRequests, setFiliereRequests] = useState([]);
+  const [loadingRequests, setLoadingRequests] = useState(true);
+  const [requestStatusFilter, setRequestStatusFilter] = useState('pending');
+  const [requestNotes, setRequestNotes] = useState({});
+
+  // ── Demandes de QCM (pétitions étudiantes) ─────────────────────────────
+  const [quizRequestGroups, setQuizRequestGroups] = useState([]);
+  const [quizRequestRows, setQuizRequestRows] = useState([]);
+  const [loadingQuizRequests, setLoadingQuizRequests] = useState(true);
+  const [quizRequestFilters, setQuizRequestFilters] = useState({
+    faculte: '',
+    filiere: '',
+    niveau: '',
+    status: ''
+  });
+  const [quizRequestNotes, setQuizRequestNotes] = useState({});
+
+  // ── Ressources de cours (modération) ───────────────────────────────────
+  const [adminResources, setAdminResources] = useState([]);
+  const [loadingResources, setLoadingResources] = useState(true);
+  const [resourceFilters, setResourceFilters] = useState({ faculte: '', filiere: '', niveau: '' });
+  const [resourceForm, setResourceForm] = useState({
+    title: '',
+    description: '',
+    ue: '',
+    faculte: '',
+    filiere: '',
+    niveau: 'L1'
+  });
+  const [resourceFile, setResourceFile] = useState(null);
+  const [resourceUploading, setResourceUploading] = useState(false);
+  const [resourceError, setResourceError] = useState('');
+
+  // ── Génération de QCM par IA ───────────────────────────────────────────
+  const [aiDocs, setAiDocs] = useState([]);
+  const [loadingAiDocs, setLoadingAiDocs] = useState(true);
+  const [aiDocFile, setAiDocFile] = useState(null);
+  const [aiDocUploading, setAiDocUploading] = useState(false);
+  const [aiDocError, setAiDocError] = useState('');
+  const [genPrompt, setGenPrompt] = useState('');
+  const [genCount, setGenCount] = useState('10');
+  const [genDifficulte, setGenDifficulte] = useState('moyenne');
+  const [genFaculte, setGenFaculte] = useState('');
+  const [genFiliere, setGenFiliere] = useState('');
+  const [genNiveau, setGenNiveau] = useState('L1');
+  const [genUe, setGenUe] = useState('');
+  const [genSemestre, setGenSemestre] = useState('1');
+  const [genQuizId, setGenQuizId] = useState('');
+  const [genSave, setGenSave] = useState(false);
+  const [genTimePerQuestion, setGenTimePerQuestion] = useState('60');
+  const [genDocIds, setGenDocIds] = useState([]);
+  const [generating, setGenerating] = useState(false);
+  const [genError, setGenError] = useState('');
+  const [genNotice, setGenNotice] = useState('');
+  const [genQuestions, setGenQuestions] = useState([]);
 
   // ── Étudiants ──────────────────────────────────────────────────────────
   const [students, setStudents] = useState([]);
   const [loadingStudents, setLoadingStudents] = useState(true);
   const [studentSearch, setStudentSearch] = useState('');
   const [studentFilterFiliere, setStudentFilterFiliere] = useState('');
+  const [studentFilterFaculte, setStudentFilterFaculte] = useState('');
+  const [studentFilterNiveau, setStudentFilterNiveau] = useState('');
 
   // ── SMTP ───────────────────────────────────────────────────────────────
   const [smtpEmail, setSmtpEmail] = useState('');
@@ -163,10 +235,25 @@ export default function AdminPanel() {
   const [aiUsage, setAiUsage] = useState(null);
   const [loadingAi, setLoadingAi] = useState(true);
 
+  // ── Analytique : filtres par faculté / filière / niveau ────────────────
+  const [analyticsFilters, setAnalyticsFilters] = useState({ faculte: '', filiere: '', niveau: '' });
+
   // ── Classements par salle (filière + niveau) ────────────────────────────
   const [rankings, setRankings] = useState([]);
   const [loadingRankings, setLoadingRankings] = useState(true);
-  const [rankingFilters, setRankingFilters] = useState({ ue: '', filiere: '', niveau: '' });
+  const [rankingFilters, setRankingFilters] = useState({ ue: '', faculte: '', filiere: '', niveau: '' });
+
+  // Filières du catalogue filtrées par la faculté active de l'évaluation
+  const filieres = useMemo(
+    () => catalogFilieres.filter(f => !faculte || f.faculte === faculte).map(f => f.label),
+    [catalogFilieres, faculte]
+  );
+  const allFiliereLabels = useMemo(
+    () => [...new Set(catalogFilieres.map(f => f.label))],
+    [catalogFilieres]
+  );
+  const filieresForFaculte = (fac) =>
+    catalogFilieres.filter(f => !fac || f.faculte === fac).map(f => f.label);
 
   // ─── Data fetchers ────────────────────────────────────────────────────
   const fetchHistory = useCallback(async () => {
@@ -185,14 +272,113 @@ export default function AdminPanel() {
     setAllUes(data.ues);
   }, []);
 
-  const fetchAnalytics = useCallback(async () => {
+  const fetchCatalogue = useCallback(async () => {
     try {
-      const data = await api('/admin/analytics', { auth: 'admin' });
+      const [facRes, filRes] = await Promise.all([
+        api('/admin/facultes', { auth: 'admin' }),
+        api('/admin/filieres', { auth: 'admin' })
+      ]);
+      const facs = Array.isArray(facRes.facultes) ? facRes.facultes : [];
+      const fils = Array.isArray(filRes.filieres) ? filRes.filieres : [];
+      setFacultes(facs);
+      setCatalogFilieres(fils);
+
+      const defaultFac = facs[0]?.id || '';
+      const defaultFil = fils.find(f => f.faculte === defaultFac)?.label || fils[0]?.label || '';
+      setFaculte(prev => prev || defaultFac);
+      setFiliere(prev => prev || defaultFil);
+      setNewUeFaculte(prev => prev || defaultFac);
+      setNewUeFiliere(prev => prev || defaultFil);
+      setNewCatalogueFiliere(prev => ({ ...prev, faculte: prev.faculte || defaultFac }));
+      setGenFaculte(prev => prev || defaultFac);
+      setGenFiliere(prev => prev || defaultFil);
+      setResourceForm(prev => ({
+        ...prev,
+        faculte: prev.faculte || defaultFac,
+        filiere: prev.filiere || defaultFil
+      }));
+    } catch (err) {
+      console.warn('Erreur chargement catalogue :', err);
+    }
+  }, []);
+
+  const fetchAnalytics = useCallback(async (filters = {}) => {
+    try {
+      const params = new URLSearchParams();
+      if (filters.faculte) params.set('faculte', filters.faculte);
+      if (filters.filiere) params.set('filiere', filters.filiere);
+      if (filters.niveau) params.set('niveau', filters.niveau);
+      const query = params.toString();
+      const data = await api(`/admin/analytics${query ? `?${query}` : ''}`, { auth: 'admin' });
       setAnalytics(data);
     } catch (err) {
       console.warn('Erreur chargement analytique :', err);
     } finally {
       setLoadingAnalytics(false);
+    }
+  }, []);
+
+  const fetchFiliereRequests = useCallback(async (status = '') => {
+    try {
+      const data = await api(
+        `/admin/filiere-requests${status ? `?status=${encodeURIComponent(status)}` : ''}`,
+        { auth: 'admin' }
+      );
+      setFiliereRequests(Array.isArray(data.requests) ? data.requests : []);
+    } catch (err) {
+      console.warn('Erreur chargement demandes de filière :', err);
+      setFiliereRequests([]);
+    } finally {
+      setLoadingRequests(false);
+    }
+  }, []);
+
+  const fetchQuizRequests = useCallback(async (filters = {}) => {
+    try {
+      const params = new URLSearchParams();
+      if (filters.faculte) params.set('faculte', filters.faculte);
+      if (filters.filiere) params.set('filiere', filters.filiere);
+      if (filters.niveau) params.set('niveau', filters.niveau);
+      if (filters.status) params.set('status', filters.status);
+      const query = params.toString();
+      const data = await api(`/admin/quiz-requests${query ? `?${query}` : ''}`, { auth: 'admin' });
+      setQuizRequestGroups(Array.isArray(data.groups) ? data.groups : []);
+      setQuizRequestRows(Array.isArray(data.requests) ? data.requests : []);
+    } catch (err) {
+      console.warn('Erreur chargement demandes de QCM :', err);
+      setQuizRequestGroups([]);
+      setQuizRequestRows([]);
+    } finally {
+      setLoadingQuizRequests(false);
+    }
+  }, []);
+
+  const fetchResources = useCallback(async (filters = {}) => {
+    try {
+      const params = new URLSearchParams();
+      if (filters.faculte) params.set('faculte', filters.faculte);
+      if (filters.filiere) params.set('filiere', filters.filiere);
+      if (filters.niveau) params.set('niveau', filters.niveau);
+      const query = params.toString();
+      const data = await api(`/resources${query ? `?${query}` : ''}`, { auth: 'admin' });
+      setAdminResources(Array.isArray(data.resources) ? data.resources : []);
+    } catch (err) {
+      console.warn('Erreur chargement ressources :', err);
+      setAdminResources([]);
+    } finally {
+      setLoadingResources(false);
+    }
+  }, []);
+
+  const fetchAiDocs = useCallback(async () => {
+    try {
+      const data = await api('/ai-generation/documents', { auth: 'admin' });
+      setAiDocs(Array.isArray(data.documents) ? data.documents : []);
+    } catch (err) {
+      console.warn('Erreur chargement documents IA :', err);
+      setAiDocs([]);
+    } finally {
+      setLoadingAiDocs(false);
     }
   }, []);
 
@@ -223,6 +409,7 @@ export default function AdminPanel() {
     try {
       const params = new URLSearchParams();
       if (filters.ue) params.set('ue', filters.ue);
+      if (filters.faculte) params.set('faculte', filters.faculte);
       if (filters.filiere) params.set('filiere', filters.filiere);
       if (filters.niveau) params.set('niveau', filters.niveau);
       const query = params.toString();
@@ -282,11 +469,12 @@ export default function AdminPanel() {
         fetchUpcoming(),
         fetchUes(),
         fetchStudents(),
-        fetchSmtpConfig()
+        fetchSmtpConfig(),
+        fetchCatalogue()
       ]);
     };
     load();
-  }, [fetchHistory, fetchUpcoming, fetchUes, fetchStudents, fetchSmtpConfig]);
+  }, [fetchHistory, fetchUpcoming, fetchUes, fetchStudents, fetchSmtpConfig, fetchCatalogue]);
 
   // Les filtres messages relancent le chargement
   useEffect(() => {
@@ -296,13 +484,19 @@ export default function AdminPanel() {
     load();
   }, [fetchFeedbacks]);
 
-  // Chargement à la demande des sections analytique, sauvegardes, IA et classements
+  // Chargement à la demande des sections analytique, sauvegardes, IA,
+  // classements, catalogue, demandes de filière et ressources
   useEffect(() => {
     const load = async () => {
-      if (activeSection === 'analytics') await fetchAnalytics();
+      if (activeSection === 'analytics') await fetchAnalytics(analyticsFilters);
       if (activeSection === 'backups') await fetchBackups();
       if (activeSection === 'ai') await fetchAiUsage();
       if (activeSection === 'rankings') await fetchRankings(rankingFilters);
+      if (activeSection === 'catalogue') await fetchCatalogue();
+      if (activeSection === 'requests') await fetchFiliereRequests(requestStatusFilter);
+      if (activeSection === 'quiz-requests') await fetchQuizRequests(quizRequestFilters);
+      if (activeSection === 'resources') await fetchResources(resourceFilters);
+      if (activeSection === 'ai-generator') await fetchAiDocs();
     };
     load();
   }, [
@@ -311,7 +505,16 @@ export default function AdminPanel() {
     fetchBackups,
     fetchAiUsage,
     fetchRankings,
-    rankingFilters
+    fetchCatalogue,
+    fetchFiliereRequests,
+    fetchQuizRequests,
+    fetchResources,
+    fetchAiDocs,
+    analyticsFilters,
+    rankingFilters,
+    requestStatusFilter,
+    quizRequestFilters,
+    resourceFilters
   ]);
 
   // ─── Évaluations : import CSV robuste ─────────────────────────────────
@@ -365,6 +568,7 @@ export default function AdminPanel() {
         auth: 'admin',
         body: {
           questions: parsedCsvData.questions,
+          faculte,
           filiere,
           niveau,
           semestre,
@@ -391,6 +595,7 @@ export default function AdminPanel() {
   }, [
     ue,
     parsedCsvData,
+    faculte,
     filiere,
     niveau,
     semestre,
@@ -416,6 +621,7 @@ export default function AdminPanel() {
     }
     const ueInfo = allUes.find(u => (u.code || u.id || '').toUpperCase() === targetUe);
     const data = {
+      faculte,
       filiere,
       niveau,
       semestre,
@@ -432,7 +638,7 @@ export default function AdminPanel() {
     fetchHistory();
     fetchUpcoming();
     fetchUes();
-  }, [ue, filiere, niveau, semestre, timePerQuestion, drawCount, launchTime, endTime, allUes, fetchHistory, fetchUpcoming, fetchUes]);
+  }, [ue, faculte, filiere, niveau, semestre, timePerQuestion, drawCount, launchTime, endTime, allUes, fetchHistory, fetchUpcoming, fetchUes]);
 
   const deleteSingleQuestion = useCallback(
     async (qId) => {
@@ -502,14 +708,7 @@ export default function AdminPanel() {
     loadResults(quizId);
   };
 
-  // ─── UE & filières ────────────────────────────────────────────────────
-  const addFiliere = () => {
-    const f = newFiliere.trim();
-    if (!f || filieres.includes(f)) return;
-    setFilieres([...filieres, f]);
-    setNewFiliere('');
-  };
-
+  // ─── UE & catalogue ───────────────────────────────────────────────────
   const addNiveau = () => {
     const n = newNiveau.trim().toUpperCase();
     if (!n || niveaux.includes(n)) return;
@@ -517,10 +716,78 @@ export default function AdminPanel() {
     setNewNiveau('');
   };
 
+  const createFaculte = useCallback(async () => {
+    const label = newFaculteLabel.trim();
+    if (!label) {
+      alert('Entrez le nom de la faculté.');
+      return;
+    }
+    setCatalogueBusy(true);
+    try {
+      await api('/admin/facultes', { method: 'POST', auth: 'admin', body: { label } });
+      setNewFaculteLabel('');
+      await fetchCatalogue();
+    } catch (err) {
+      alert(`Ajout impossible : ${err.message}`);
+    } finally {
+      setCatalogueBusy(false);
+    }
+  }, [newFaculteLabel, fetchCatalogue]);
+
+  const deleteFaculte = useCallback(async (id) => {
+    if (!confirm(`Supprimer la faculté « ${id} » ?`)) return;
+    try {
+      await api(`/admin/facultes/${encodeURIComponent(id)}`, { method: 'DELETE', auth: 'admin' });
+      await fetchCatalogue();
+    } catch (err) {
+      alert(`Suppression impossible : ${err.message}`);
+    }
+  }, [fetchCatalogue]);
+
+  const createCatalogueFiliere = useCallback(async () => {
+    const label = newCatalogueFiliere.label.trim();
+    const fac = newCatalogueFiliere.faculte;
+    if (!fac || !label) {
+      alert('Choisissez une faculté et saisissez le nom de la filière.');
+      return;
+    }
+    setCatalogueBusy(true);
+    try {
+      const res = await api('/admin/filieres', {
+        method: 'POST',
+        auth: 'admin',
+        body: { label, faculte: fac }
+      });
+      setNewCatalogueFiliere(prev => ({ ...prev, label: '' }));
+      await fetchCatalogue();
+      if (res.notifiedUsers > 0) {
+        alert(`Filière ajoutée. ${res.notifiedUsers} étudiant(s) notifié(s).`);
+      }
+    } catch (err) {
+      alert(`Ajout impossible : ${err.message}`);
+    } finally {
+      setCatalogueBusy(false);
+    }
+  }, [newCatalogueFiliere, fetchCatalogue]);
+
+  const deleteCatalogueFiliere = useCallback(async (id) => {
+    if (!confirm('Supprimer cette filière du catalogue ?')) return;
+    try {
+      await api(`/admin/filieres/${encodeURIComponent(id)}`, { method: 'DELETE', auth: 'admin' });
+      await fetchCatalogue();
+    } catch (err) {
+      alert(`Suppression impossible : ${err.message}`);
+    }
+  }, [fetchCatalogue]);
+
   const addUe = useCallback(async () => {
     const code = newUeCode.trim().toUpperCase();
     if (!code) {
       alert('Entrez un code UE.');
+      return;
+    }
+    if (!newUeFaculte || !newUeFiliere) {
+      alert('Choisissez la faculté et la filière de cette UE.');
       return;
     }
     await api('/ues', {
@@ -529,6 +796,7 @@ export default function AdminPanel() {
       body: {
         code,
         label: newUeLabel.trim() || code,
+        faculte: newUeFaculte,
         filiere: newUeFiliere,
         niveau: newUeNiveau
       }
@@ -537,7 +805,269 @@ export default function AdminPanel() {
     setNewUeCode('');
     setNewUeLabel('');
     fetchUes();
-  }, [newUeCode, newUeLabel, newUeFiliere, newUeNiveau, fetchUes]);
+  }, [newUeCode, newUeLabel, newUeFaculte, newUeFiliere, newUeNiveau, fetchUes]);
+
+  // ─── Demandes de filière ──────────────────────────────────────────────
+  const approveFiliereRequest = useCallback(async (request) => {
+    const note = requestNotes[request.id] || '';
+    try {
+      const res = await api(`/admin/filiere-requests/${encodeURIComponent(request.id)}/approve`, {
+        method: 'POST',
+        auth: 'admin',
+        body: { faculte: request.faculte, filiere: request.filiere, note }
+      });
+      alert(
+        `Filière « ${request.filiere} » validée. ` +
+        `${res.notifiedUsers || 0} étudiant(s) notifié(s) dans l'application et par email.`
+      );
+      await Promise.all([
+        fetchFiliereRequests(requestStatusFilter),
+        fetchCatalogue()
+      ]);
+    } catch (err) {
+      alert(`Validation impossible : ${err.message}`);
+    }
+  }, [requestNotes, requestStatusFilter, fetchFiliereRequests, fetchCatalogue]);
+
+  const rejectFiliereRequest = useCallback(async (request) => {
+    const note = requestNotes[request.id] || '';
+    if (!confirm(`Rejeter la demande de filière « ${request.filiere} » ?`)) return;
+    try {
+      await api(`/admin/filiere-requests/${encodeURIComponent(request.id)}/reject`, {
+        method: 'POST',
+        auth: 'admin',
+        body: { note }
+      });
+      await fetchFiliereRequests(requestStatusFilter);
+    } catch (err) {
+      alert(`Rejet impossible : ${err.message}`);
+    }
+  }, [requestNotes, requestStatusFilter, fetchFiliereRequests]);
+
+  // ─── Demandes de QCM (modération) ─────────────────────────────────────
+  const approveQuizRequest = useCallback(async (group) => {
+    if (!group?.id) return;
+    if (!confirm(`Accepter la demande de QCM ${group.ue} (${group.filiere} · ${group.niveau}) ?`)) return;
+    try {
+      await api(`/admin/quiz-requests/${encodeURIComponent(group.id)}/approve`, {
+        method: 'POST',
+        auth: 'admin',
+        body: { note: quizRequestNotes[group.id] || '' }
+      });
+      await fetchQuizRequests(quizRequestFilters);
+    } catch (err) {
+      alert(`Validation impossible : ${err.message}`);
+    }
+  }, [quizRequestNotes, quizRequestFilters, fetchQuizRequests]);
+
+  const rejectQuizRequest = useCallback(async (group) => {
+    if (!group?.id) return;
+    if (!confirm(`Rejeter la demande de QCM ${group.ue} (${group.filiere} · ${group.niveau}) ?`)) return;
+    try {
+      await api(`/admin/quiz-requests/${encodeURIComponent(group.id)}/reject`, {
+        method: 'POST',
+        auth: 'admin',
+        body: { note: quizRequestNotes[group.id] || '' }
+      });
+      await fetchQuizRequests(quizRequestFilters);
+    } catch (err) {
+      alert(`Rejet impossible : ${err.message}`);
+    }
+  }, [quizRequestNotes, quizRequestFilters, fetchQuizRequests]);
+
+  const prepareQuizFromRequest = useCallback((group) => {
+    if (!group) return;
+    setFaculte(group.faculte || '');
+    setFiliere(group.filiere || '');
+    setNiveau(group.niveau || 'L1');
+    setUe(group.ue || '');
+    setManualUe(true);
+    setActiveSection('quizzes');
+  }, []);
+
+  // ─── Ressources de cours (administration) ─────────────────────────────
+  const uploadAdminResource = useCallback(async (e) => {
+    e.preventDefault();
+    setResourceError('');
+    if (!resourceFile) {
+      setResourceError('Sélectionnez un fichier à publier.');
+      return;
+    }
+    if (!resourceForm.faculte || !resourceForm.filiere || !resourceForm.niveau) {
+      setResourceError('Faculté, filière et niveau sont requis.');
+      return;
+    }
+    setResourceUploading(true);
+    try {
+      const token = sessionStorage.getItem('adminToken') || '';
+      const body = new FormData();
+      body.append('title', resourceForm.title.trim() || resourceFile.name);
+      body.append('description', resourceForm.description.trim());
+      body.append('ue', resourceForm.ue.trim());
+      body.append('faculte', resourceForm.faculte);
+      body.append('filiere', resourceForm.filiere);
+      body.append('niveau', resourceForm.niveau);
+      body.append('file', resourceFile);
+
+      const res = await fetch('/api/resources', {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Publication impossible.');
+
+      setResourceForm(prev => ({ ...prev, title: '', description: '', ue: '' }));
+      setResourceFile(null);
+      await fetchResources(resourceFilters);
+    } catch (err) {
+      setResourceError(err.message || 'Publication impossible.');
+    } finally {
+      setResourceUploading(false);
+    }
+  }, [resourceFile, resourceForm, resourceFilters, fetchResources]);
+
+  const downloadAdminResource = useCallback(async (item) => {
+    try {
+      const res = await fetch(`/api/resources/${item.id}/download`, {
+        headers: { Authorization: `Bearer ${sessionStorage.getItem('adminToken') || ''}` }
+      });
+      if (!res.ok) throw new Error(`Erreur ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = item.originalName || 'ressource';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    } catch (err) {
+      alert(`Téléchargement impossible : ${err.message}`);
+    }
+  }, []);
+
+  const deleteAdminResource = useCallback(async (item) => {
+    if (!confirm(`Supprimer « ${item.title} » ?`)) return;
+    try {
+      await api(`/resources/${item.id}`, { method: 'DELETE', auth: 'admin' });
+      setAdminResources(prev => prev.filter(r => r.id !== item.id));
+    } catch (err) {
+      alert(`Suppression impossible : ${err.message}`);
+    }
+  }, []);
+
+  // ─── Génération de QCM par IA ─────────────────────────────────────────
+  const uploadAiDoc = useCallback(async (e) => {
+    e.preventDefault();
+    setAiDocError('');
+    if (!aiDocFile) {
+      setAiDocError('Sélectionnez un document PDF, TXT, MD, CSV ou JSON.');
+      return;
+    }
+    setAiDocUploading(true);
+    try {
+      const token = sessionStorage.getItem('adminToken') || '';
+      const body = new FormData();
+      body.append('file', aiDocFile);
+      const res = await fetch('/api/ai-generation/documents', {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Dépôt impossible.');
+
+      setAiDocFile(null);
+      await fetchAiDocs();
+    } catch (err) {
+      setAiDocError(err.message || 'Dépôt impossible.');
+    } finally {
+      setAiDocUploading(false);
+    }
+  }, [aiDocFile, fetchAiDocs]);
+
+  const deleteAiDoc = useCallback(async (doc) => {
+    if (!confirm(`Supprimer le document « ${doc.originalName} » ?`)) return;
+    try {
+      await api(`/ai-generation/documents/${doc.id}`, { method: 'DELETE', auth: 'admin' });
+      setGenDocIds(prev => prev.filter(id => id !== doc.id));
+      await fetchAiDocs();
+    } catch (err) {
+      alert(`Suppression impossible : ${err.message}`);
+    }
+  }, [fetchAiDocs]);
+
+  const toggleGenDoc = (id) => {
+    setGenDocIds(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
+  };
+
+  const handleGenerateQuestions = useCallback(async () => {
+    setGenError('');
+    setGenNotice('');
+    if (!genPrompt.trim() && genDocIds.length === 0 && aiDocs.length === 0) {
+      setGenError('Ajoutez un prompt ou déposez au moins un document de référence.');
+      return;
+    }
+    if (genSave && !genQuizId.trim()) {
+      setGenError("Indiquez le code de l'épreuve dans laquelle enregistrer les questions.");
+      return;
+    }
+    setGenerating(true);
+    try {
+      const data = await api('/ai-generation/generate', {
+        method: 'POST',
+        auth: 'admin',
+        body: {
+          prompt: genPrompt.trim(),
+          count: parseInt(genCount) || 10,
+          difficulte: genDifficulte,
+          faculte: genFaculte,
+          filiere: genFiliere,
+          niveau: genNiveau,
+          ue: genUe.trim(),
+          semestre: genSemestre,
+          documentIds: genDocIds,
+          save: genSave,
+          quizId: genSave ? genQuizId.trim().toUpperCase() : '',
+          timePerQuestion: parseInt(genTimePerQuestion) || 60
+        }
+      });
+      setGenQuestions(Array.isArray(data.questions) ? data.questions : []);
+      if (data.saved) {
+        setGenNotice(
+          `Questions générées et enregistrées dans l'épreuve ${genQuizId.trim().toUpperCase()} ` +
+          `(${data.questions.length} question(s)).`
+        );
+        fetchHistory();
+        fetchUpcoming();
+        fetchUes();
+      } else {
+        setGenNotice(`${data.questions.length} question(s) générée(s). Vérifiez-les avant de les enregistrer.`);
+      }
+    } catch (err) {
+      setGenError(err.message || 'La génération a échoué.');
+    } finally {
+      setGenerating(false);
+    }
+  }, [
+    genPrompt,
+    genCount,
+    genDifficulte,
+    genFaculte,
+    genFiliere,
+    genNiveau,
+    genUe,
+    genSemestre,
+    genDocIds,
+    genSave,
+    genQuizId,
+    genTimePerQuestion,
+    aiDocs,
+    fetchHistory,
+    fetchUpcoming,
+    fetchUes
+  ]);
 
   const deleteUe = useCallback(
     async (id) => {
@@ -566,6 +1096,7 @@ export default function AdminPanel() {
     const rows = students.map(s => ({
       Nom: s.name,
       Email: s.email,
+      Faculte: s.faculte || '-',
       Filiere: s.filiere,
       Niveau: s.niveau,
       'Annee Academique': s.anneeAcademique || '-',
@@ -934,8 +1465,10 @@ export default function AdminPanel() {
     const term = studentSearch.toLowerCase();
     const matchText =
       (s.name || '').toLowerCase().includes(term) || (s.email || '').toLowerCase().includes(term);
+    const matchFaculte = !studentFilterFaculte || s.faculte === studentFilterFaculte;
     const matchFiliere = !studentFilterFiliere || s.filiere === studentFilterFiliere;
-    return matchText && matchFiliere;
+    const matchNiveau = !studentFilterNiveau || s.niveau === studentFilterNiveau;
+    return matchText && matchFaculte && matchFiliere && matchNiveau;
   });
 
   const filteredHistory = [...history].sort((a, b) => (b.launchTime || 0) - (a.launchTime || 0));
@@ -1305,10 +1838,29 @@ export default function AdminPanel() {
                     </p>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className={label}>Faculté</label>
+                      <select
+                        className={selectCls}
+                        value={faculte}
+                        onChange={e => {
+                          const value = e.target.value;
+                          setFaculte(value);
+                          const next = filieresForFaculte(value)[0] || '';
+                          setFiliere(next);
+                        }}
+                      >
+                        {facultes.length === 0 && <option value="">Chargement…</option>}
+                        {facultes.map(f => (
+                          <option key={f.id} value={f.id}>{f.label || f.id}</option>
+                        ))}
+                      </select>
+                    </div>
                     <div>
                       <label className={label}>Filière</label>
                       <select className={selectCls} value={filiere} onChange={e => setFiliere(e.target.value)}>
+                        {filieres.length === 0 && <option value="">Aucune filière</option>}
                         {filieres.map(f => (
                           <option key={f}>{f}</option>
                         ))}
@@ -1339,20 +1891,23 @@ export default function AdminPanel() {
                           }
                           setManualUe(false);
                           setUe(value);
-                          // La filière et le niveau sont hérités du catalogue UE
+                          // La faculté, la filière et le niveau sont hérités du catalogue UE
                           const info = allUes.find(u => (u.code || u.id) === value);
                           if (info) {
+                            if (info.faculte) setFaculte(info.faculte);
                             if (info.filiere) setFiliere(info.filiere);
                             if (info.niveau) setNiveau(info.niveau);
                           }
                         }}
                       >
                         <option value="">Sélectionner une UE…</option>
-                        {allUes.map(u => (
-                          <option key={u.id} value={u.code || u.id}>
-                            {(u.code || u.id)} · {u.label} ({u.filiere} {u.niveau})
-                          </option>
-                        ))}
+                        {allUes
+                          .filter(u => !faculte || u.faculte === faculte)
+                          .map(u => (
+                            <option key={u.id} value={u.code || u.id}>
+                              {(u.code || u.id)} · {u.label} ({u.filiere} {u.niveau})
+                            </option>
+                          ))}
                         {ue && !allUes.some(u => (u.code || u.id) === ue) && (
                           <option value={ue}>{ue} (hors catalogue)</option>
                         )}
@@ -1587,6 +2142,69 @@ export default function AdminPanel() {
           {/* ════════════ ANALYTIQUE ════════════ */}
           {activeSection === 'analytics' && (
             <div className="space-y-6">
+              <div className={`${card} p-4`}>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
+                  <div>
+                    <label className={label}>Faculté</label>
+                    <select
+                      className={selectCls}
+                      value={analyticsFilters.faculte}
+                      onChange={e => {
+                        setLoadingAnalytics(true);
+                        setAnalyticsFilters(prev => ({ ...prev, faculte: e.target.value, filiere: '' }));
+                      }}
+                    >
+                      <option value="">Toutes les facultés</option>
+                      {facultes.map(f => (
+                        <option key={f.id} value={f.id}>{f.label || f.id}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={label}>Filière</label>
+                    <select
+                      className={selectCls}
+                      value={analyticsFilters.filiere}
+                      onChange={e => {
+                        setLoadingAnalytics(true);
+                        setAnalyticsFilters(prev => ({ ...prev, filiere: e.target.value }));
+                      }}
+                    >
+                      <option value="">Toutes les filières</option>
+                      {filieresForFaculte(analyticsFilters.faculte).map(f => (
+                        <option key={f} value={f}>{f}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={label}>Niveau</label>
+                    <select
+                      className={selectCls}
+                      value={analyticsFilters.niveau}
+                      onChange={e => {
+                        setLoadingAnalytics(true);
+                        setAnalyticsFilters(prev => ({ ...prev, niveau: e.target.value }));
+                      }}
+                    >
+                      <option value="">Tous les niveaux</option>
+                      {niveaux.map(n => (
+                        <option key={n} value={n}>{n}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setLoadingAnalytics(true);
+                      setAnalyticsFilters({ faculte: '', filiere: '', niveau: '' });
+                    }}
+                    className={btnSecondary + ' justify-center'}
+                  >
+                    <Icon name="refresh" size={13} />
+                    Réinitialiser
+                  </button>
+                </div>
+              </div>
+
               {loadingAnalytics ? (
                 <div className={`${card} p-10 text-center text-slate-500 text-xs animate-pulse`}>
                   Chargement de l'analytique…
@@ -1652,7 +2270,7 @@ export default function AdminPanel() {
                           </p>
                         </div>
                       </div>
-                      <button onClick={fetchAnalytics} className={btnSecondary}>
+                      <button onClick={() => fetchAnalytics(analyticsFilters)} className={btnSecondary}>
                         <Icon name="refresh" size={13} />
                         Actualiser
                       </button>
@@ -1671,7 +2289,7 @@ export default function AdminPanel() {
                           Classement par taux d'échec sur l'ensemble des copies corrigées
                         </p>
                       </div>
-                      <button onClick={fetchAnalytics} className={btnSecondary}>
+                      <button onClick={() => fetchAnalytics(analyticsFilters)} className={btnSecondary}>
                         <Icon name="refresh" size={13} />
                         Actualiser
                       </button>
@@ -2141,13 +2759,33 @@ export default function AdminPanel() {
                       />
                     </div>
                     <div>
+                      <label className={label}>Faculté</label>
+                      <select
+                        className={selectCls}
+                        value={newUeFaculte}
+                        onChange={e => {
+                          const value = e.target.value;
+                          setNewUeFaculte(value);
+                          setNewUeFiliere(filieresForFaculte(value)[0] || '');
+                        }}
+                      >
+                        {facultes.length === 0 && <option value="">Chargement…</option>}
+                        {facultes.map(f => (
+                          <option key={f.id} value={f.id}>{f.label || f.id}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
                       <label className={label}>Filière</label>
                       <select
                         className={selectCls}
                         value={newUeFiliere}
                         onChange={e => setNewUeFiliere(e.target.value)}
                       >
-                        {filieres.map(f => (
+                        {filieresForFaculte(newUeFaculte).length === 0 && (
+                          <option value="">Aucune filière</option>
+                        )}
+                        {filieresForFaculte(newUeFaculte).map(f => (
                           <option key={f}>{f}</option>
                         ))}
                       </select>
@@ -2171,43 +2809,51 @@ export default function AdminPanel() {
                   </button>
                 </div>
 
-                {/* Filières & niveaux */}
+                {/* Parcours du catalogue */}
                 <div className={`${card} p-6 space-y-5`}>
                   <div className="border-b border-slate-800 pb-3">
                     <h3 className="text-sm font-black text-white flex items-center gap-2">
                       <Icon name="graduation" size={15} className="text-blue-400" />
-                      Filières & niveaux
+                      Parcours du catalogue
                     </h3>
                     <p className="text-[11px] text-slate-500 mt-0.5">
-                      Personnalisez les listes proposées aux étudiants
+                      Facultés et filières proposées aux étudiants
                     </p>
                   </div>
-                  <div>
-                    <label className={label}>Filières ({filieres.length})</label>
-                    <div className="flex flex-wrap gap-1.5 mb-2">
-                      {filieres.map(f => (
-                        <span
-                          key={f}
-                          className="text-[11px] font-bold text-blue-300 bg-blue-600/15 border border-blue-600/30 px-2.5 py-1 rounded-full"
-                        >
-                          {f}
-                        </span>
-                      ))}
-                    </div>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        placeholder="Nouvelle filière"
-                        className={input}
-                        value={newFiliere}
-                        onChange={e => setNewFiliere(e.target.value)}
-                      />
-                      <button onClick={addFiliere} className={btnSecondary}>
-                        <Icon name="plus" size={13} strokeWidth={3} />
-                        Ajouter
-                      </button>
-                    </div>
+
+                  <div className="space-y-2">
+                    {facultes.length === 0 ? (
+                      <p className="text-xs text-slate-500">Aucune faculté au catalogue.</p>
+                    ) : (
+                      facultes.map((fac) => {
+                        const list = catalogFilieres.filter(f => f.faculte === fac.id);
+                        return (
+                          <div key={fac.id} className="bg-slate-950 border border-slate-800 rounded-xl p-3">
+                            <div className="flex items-center justify-between gap-2 mb-2">
+                              <span className="text-xs font-black text-white">{fac.label || fac.id}</span>
+                              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                                {list.length} filière(s)
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {list.map(f => (
+                                <span
+                                  key={f.id}
+                                  className="text-[10px] font-bold text-blue-300 bg-blue-600/15 border border-blue-600/30 px-2 py-0.5 rounded-full"
+                                >
+                                  {f.label}
+                                </span>
+                              ))}
+                              {list.length === 0 && (
+                                <span className="text-[10px] text-slate-500">Aucune filière</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
                   </div>
+
                   <div>
                     <label className={label}>Niveaux ({niveaux.length})</label>
                     <div className="flex flex-wrap gap-1.5 mb-2">
@@ -2234,6 +2880,14 @@ export default function AdminPanel() {
                       </button>
                     </div>
                   </div>
+
+                  <button
+                    onClick={() => setActiveSection('catalogue')}
+                    className={btnPrimary}
+                  >
+                    <Icon name="graduation" size={14} />
+                    Gérer les facultés & filières
+                  </button>
                 </div>
               </div>
 
@@ -2262,8 +2916,13 @@ export default function AdminPanel() {
                       return (
                         <div key={u.id} className="px-6 py-3.5 flex items-center justify-between gap-3">
                           <div className="min-w-0">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <span className="font-black text-white text-sm">{u.code}</span>
+                              {u.faculte && (
+                                <span className="text-[10px] font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                                  {u.faculte}
+                                </span>
+                              )}
                               <span className="text-[10px] font-bold text-blue-300 bg-blue-600/15 px-2 py-0.5 rounded-full">
                                 {u.filiere}
                               </span>
@@ -2351,12 +3010,35 @@ export default function AdminPanel() {
                 </div>
                 <select
                   className={selectCls + ' w-auto min-w-40'}
+                  value={studentFilterFaculte}
+                  onChange={e => {
+                    setStudentFilterFaculte(e.target.value);
+                    setStudentFilterFiliere('');
+                  }}
+                >
+                  <option value="">Toutes facultés</option>
+                  {facultes.map(f => (
+                    <option key={f.id} value={f.id}>{f.label || f.id}</option>
+                  ))}
+                </select>
+                <select
+                  className={selectCls + ' w-auto min-w-40'}
                   value={studentFilterFiliere}
                   onChange={e => setStudentFilterFiliere(e.target.value)}
                 >
                   <option value="">Toutes filières</option>
-                  {filieres.map(f => (
+                  {filieresForFaculte(studentFilterFaculte).map(f => (
                     <option key={f}>{f}</option>
+                  ))}
+                </select>
+                <select
+                  className={selectCls + ' w-auto min-w-32'}
+                  value={studentFilterNiveau}
+                  onChange={e => setStudentFilterNiveau(e.target.value)}
+                >
+                  <option value="">Tous niveaux</option>
+                  {niveaux.map(n => (
+                    <option key={n}>{n}</option>
                   ))}
                 </select>
               </div>
@@ -2374,6 +3056,7 @@ export default function AdminPanel() {
                       <tr className="bg-slate-950 border-b border-slate-800 text-slate-500 uppercase text-[10px] tracking-wider">
                         <th className="py-2.5 px-4 text-left">Nom / Pseudo</th>
                         <th className="py-2.5 px-4 text-left">Email</th>
+                        <th className="py-2.5 px-4 text-left">Faculté</th>
                         <th className="py-2.5 px-4 text-left">Filière</th>
                         <th className="py-2.5 px-4 text-left">Niveau</th>
                         <th className="py-2.5 px-4 text-left">Année</th>
@@ -2386,6 +3069,11 @@ export default function AdminPanel() {
                         <tr key={s.id} className="hover:bg-slate-950/60 transition">
                           <td className="py-3 px-4 font-bold text-white">{s.name}</td>
                           <td className="py-3 px-4 text-slate-400 font-mono">{s.email}</td>
+                          <td className="py-3 px-4">
+                            <span className="text-[10px] font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                              {s.faculte || '-'}
+                            </span>
+                          </td>
                           <td className="py-3 px-4">
                             <span className="text-blue-300 bg-blue-600/15 px-2 py-0.5 rounded-full font-bold">
                               {s.filiere}
@@ -2568,7 +3256,7 @@ export default function AdminPanel() {
           {activeSection === 'rankings' && (
             <div className="space-y-6">
               <div className={`${card} p-6`}>
-                <div className="grid md:grid-cols-3 gap-4">
+                <div className="grid md:grid-cols-4 gap-4">
                   <div>
                     <label className={label}>UE</label>
                     <select
@@ -2585,6 +3273,22 @@ export default function AdminPanel() {
                     </select>
                   </div>
                   <div>
+                    <label className={label}>Faculté</label>
+                    <select
+                      className={selectCls}
+                      value={rankingFilters.faculte}
+                      onChange={(e) => {
+                        updateRankingFilter('faculte', e.target.value);
+                        updateRankingFilter('filiere', '');
+                      }}
+                    >
+                      <option value="">Toutes les facultés</option>
+                      {facultes.map((f) => (
+                        <option key={f.id} value={f.id}>{f.label || f.id}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
                     <label className={label}>Filière</label>
                     <select
                       className={selectCls}
@@ -2592,7 +3296,7 @@ export default function AdminPanel() {
                       onChange={(e) => updateRankingFilter('filiere', e.target.value)}
                     >
                       <option value="">Toutes les filières</option>
-                      {filieres.map((f) => (
+                      {filieresForFaculte(rankingFilters.faculte).map((f) => (
                         <option key={f} value={f}>{f}</option>
                       ))}
                     </select>
@@ -2729,6 +3433,1037 @@ export default function AdminPanel() {
             </div>
           )}
 
+          {/* ════════════ FACULTÉS & FILIÈRES ════════════ */}
+          {activeSection === 'catalogue' && (
+            <div className="space-y-6">
+              <div className="grid lg:grid-cols-2 gap-4 items-start">
+                {/* Ajouter une faculté */}
+                <div className={`${card} p-6 space-y-4`}>
+                  <div className="border-b border-slate-800 pb-3">
+                    <h3 className="text-sm font-black text-white flex items-center gap-2">
+                      <Icon name="plus" size={15} className="text-blue-400" />
+                      Ajouter une faculté
+                    </h3>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Une faculté regroupe plusieurs filières et détermine la portée des données
+                    </p>
+                  </div>
+                  <div>
+                    <label className={label}>Nom de la faculté</label>
+                    <input
+                      type="text"
+                      placeholder="Ex: Faculté des Sciences"
+                      className={input}
+                      value={newFaculteLabel}
+                      onChange={e => setNewFaculteLabel(e.target.value)}
+                    />
+                  </div>
+                  <button
+                    onClick={createFaculte}
+                    disabled={catalogueBusy}
+                    className={btnPrimary}
+                  >
+                    <Icon name="plus" size={14} strokeWidth={3} />
+                    Ajouter la faculté
+                  </button>
+                </div>
+
+                {/* Ajouter une filière */}
+                <div className={`${card} p-6 space-y-4`}>
+                  <div className="border-b border-slate-800 pb-3">
+                    <h3 className="text-sm font-black text-white flex items-center gap-2">
+                      <Icon name="graduation" size={15} className="text-blue-400" />
+                      Ajouter une filière
+                    </h3>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Les demandes en attente pour cette filière seront validées et notifiées
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className={label}>Faculté</label>
+                      <select
+                        className={selectCls}
+                        value={newCatalogueFiliere.faculte}
+                        onChange={e => setNewCatalogueFiliere(prev => ({ ...prev, faculte: e.target.value }))}
+                      >
+                        {facultes.length === 0 && <option value="">Chargement…</option>}
+                        {facultes.map(f => (
+                          <option key={f.id} value={f.id}>{f.label || f.id}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className={label}>Nom de la filière</label>
+                      <input
+                        type="text"
+                        placeholder="Ex: Journalisme"
+                        className={input}
+                        value={newCatalogueFiliere.label}
+                        onChange={e => setNewCatalogueFiliere(prev => ({ ...prev, label: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <button
+                    onClick={createCatalogueFiliere}
+                    disabled={catalogueBusy}
+                    className={btnPrimary}
+                  >
+                    <Icon name="plus" size={14} strokeWidth={3} />
+                    Ajouter la filière
+                  </button>
+                </div>
+              </div>
+
+              {/* Liste des facultés et filières */}
+              <div className={`${card} overflow-hidden`}>
+                <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                      <Icon name="graduation" size={15} className="text-blue-400" />
+                      Catalogue ({facultes.length} faculté(s))
+                    </h3>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Chaque filière est rattachée à une seule faculté
+                    </p>
+                  </div>
+                  <button onClick={fetchCatalogue} className={btnSecondary}>
+                    <Icon name="refresh" size={13} />
+                    Actualiser
+                  </button>
+                </div>
+
+                {facultes.length === 0 ? (
+                  <p className="text-xs text-slate-500 text-center py-10">
+                    Aucune faculté enregistrée pour le moment.
+                  </p>
+                ) : (
+                  <div className="divide-y divide-slate-800">
+                    {facultes.map(fac => {
+                      const list = catalogFilieres.filter(f => f.faculte === fac.id);
+                      return (
+                        <div key={fac.id} className="px-6 py-4">
+                          <div className="flex items-start justify-between gap-3 flex-wrap">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-black text-white text-sm">{fac.label || fac.id}</span>
+                                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                                  {fac.id}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-slate-500 mt-0.5">
+                                {list.length} filière(s) · {fac.studentCount || 0} étudiant(s)
+                              </p>
+                            </div>
+                            <button
+                              onClick={() => deleteFaculte(fac.id)}
+                              className="inline-flex items-center gap-1.5 border border-red-900/60 hover:border-red-700 text-red-400 hover:text-red-300 hover:bg-red-950/40 font-bold text-xs px-3 py-2 rounded-xl transition"
+                            >
+                              <Icon name="trash" size={13} />
+                              Supprimer
+                            </button>
+                          </div>
+
+                          <div className="flex flex-wrap gap-2 mt-3">
+                            {list.map(f => (
+                              <span
+                                key={f.id}
+                                className="inline-flex items-center gap-1.5 text-[11px] font-bold text-blue-300 bg-blue-600/15 border border-blue-600/30 pl-2.5 pr-1 py-1 rounded-full"
+                              >
+                                {f.label}
+                                <span className="text-[10px] text-slate-400 font-normal">
+                                  ({f.studentCount || 0})
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => deleteCatalogueFiliere(f.id)}
+                                  aria-label={`Supprimer la filière ${f.label}`}
+                                  className="w-5 h-5 rounded-full text-blue-200/70 hover:text-red-300 hover:bg-red-950/60 flex items-center justify-center transition"
+                                >
+                                  <Icon name="close" size={11} />
+                                </button>
+                              </span>
+                            ))}
+                            {list.length === 0 && (
+                              <span className="text-[11px] text-slate-500">
+                                Aucune filière rattachée à cette faculté.
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ════════════ DEMANDES DE FILIÈRE ════════════ */}
+          {activeSection === 'requests' && (
+            <div className="space-y-4">
+              <div className={`${card} p-4 flex items-center justify-between gap-3 flex-wrap`}>
+                <div className="flex items-center gap-2">
+                  <label className={`${label} mb-0`}>Statut</label>
+                  <select
+                    className={selectCls + ' w-auto min-w-40'}
+                    value={requestStatusFilter}
+                    onChange={e => {
+                      setLoadingRequests(true);
+                      setRequestStatusFilter(e.target.value);
+                    }}
+                  >
+                    <option value="pending">En attente</option>
+                    <option value="approved">Validées</option>
+                    <option value="rejected">Rejetées</option>
+                    <option value="">Toutes</option>
+                  </select>
+                </div>
+                <button
+                  onClick={() => {
+                    setLoadingRequests(true);
+                    fetchFiliereRequests(requestStatusFilter);
+                  }}
+                  className={btnSecondary}
+                >
+                  <Icon name="refresh" size={13} />
+                  Actualiser
+                </button>
+              </div>
+
+              {loadingRequests ? (
+                <p className="text-xs text-slate-500 text-center py-10 animate-pulse">
+                  Chargement des demandes…
+                </p>
+              ) : filiereRequests.length === 0 ? (
+                <div className={`${card} p-10 text-center`}>
+                  <Icon name="check-circle" size={24} className="text-emerald-400 mx-auto mb-2" />
+                  <p className="text-xs text-slate-400">
+                    Aucune demande pour ce statut.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {filiereRequests.map(request => {
+                    const isPending = request.status === 'pending';
+                    const statusCls = request.status === 'approved'
+                      ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                      : request.status === 'rejected'
+                        ? 'bg-red-500/15 text-red-300 border-red-500/30'
+                        : 'bg-amber-500/15 text-amber-300 border-amber-500/30';
+                    return (
+                      <div key={request.id} className={`${card} p-5`}>
+                        <div className="flex items-start justify-between gap-3 flex-wrap">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h3 className="text-sm font-black text-white">{request.filiere}</h3>
+                              <span className="text-[10px] font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                                {request.faculte}
+                              </span>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${statusCls}`}>
+                                {request.status === 'approved'
+                                  ? 'Validée'
+                                  : request.status === 'rejected'
+                                    ? 'Rejetée'
+                                    : 'En attente'}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-500 mt-1">
+                              {request.name || 'Étudiant'} • {request.email || '-'} •{' '}
+                              demande du {formatDate(request.createdAt)}
+                            </p>
+                            {request.note && (
+                              <p className="text-[11px] text-slate-400 mt-1">Note : {request.note}</p>
+                            )}
+                          </div>
+                        </div>
+
+                        {isPending && (
+                          <div className="mt-4 grid md:grid-cols-[1fr_auto] gap-2 items-center">
+                            <input
+                              type="text"
+                              placeholder="Note interne ou motif (optionnel)"
+                              className={input}
+                              value={requestNotes[request.id] || ''}
+                              onChange={e => setRequestNotes(prev => ({ ...prev, [request.id]: e.target.value }))}
+                            />
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => approveFiliereRequest(request)}
+                                className={btnPrimary}
+                              >
+                                <Icon name="check" size={14} strokeWidth={3} />
+                                Valider
+                              </button>
+                              <button
+                                onClick={() => rejectFiliereRequest(request)}
+                                className="inline-flex items-center gap-1.5 border border-red-900/60 hover:border-red-700 text-red-400 hover:text-red-300 hover:bg-red-950/40 font-bold text-xs px-3 py-2 rounded-xl transition"
+                              >
+                                <Icon name="close" size={13} />
+                                Rejeter
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ════════════ DEMANDES DE QCM ════════════ */}
+          {activeSection === 'quiz-requests' && (
+            <div className="space-y-4">
+              <div className={`${card} p-4 grid grid-cols-1 md:grid-cols-5 gap-2`}>
+                <select
+                  className={selectCls}
+                  value={quizRequestFilters.faculte}
+                  onChange={e => {
+                    setLoadingQuizRequests(true);
+                    setQuizRequestFilters(prev => ({ ...prev, faculte: e.target.value, filiere: '' }));
+                  }}
+                >
+                  <option value="">Toutes les facultés</option>
+                  {facultes.map(f => <option key={f.id} value={f.id}>{f.label || f.id}</option>)}
+                </select>
+                <select
+                  className={selectCls}
+                  value={quizRequestFilters.filiere}
+                  onChange={e => {
+                    setLoadingQuizRequests(true);
+                    setQuizRequestFilters(prev => ({ ...prev, filiere: e.target.value }));
+                  }}
+                >
+                  <option value="">Toutes les filières</option>
+                  {filieresForFaculte(quizRequestFilters.faculte).map(f => (
+                    <option key={f} value={f}>{f}</option>
+                  ))}
+                </select>
+                <select
+                  className={selectCls}
+                  value={quizRequestFilters.niveau}
+                  onChange={e => {
+                    setLoadingQuizRequests(true);
+                    setQuizRequestFilters(prev => ({ ...prev, niveau: e.target.value }));
+                  }}
+                >
+                  <option value="">Tous les niveaux</option>
+                  {niveaux.map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+                <select
+                  className={selectCls}
+                  value={quizRequestFilters.status}
+                  onChange={e => {
+                    setLoadingQuizRequests(true);
+                    setQuizRequestFilters(prev => ({ ...prev, status: e.target.value }));
+                  }}
+                >
+                  <option value="">Tous les statuts</option>
+                  <option value="pending">En attente</option>
+                  <option value="validated">Validées (seuil atteint)</option>
+                  <option value="approved">Acceptées</option>
+                  <option value="rejected">Rejetées</option>
+                </select>
+                <button
+                  onClick={() => {
+                    setLoadingQuizRequests(true);
+                    fetchQuizRequests(quizRequestFilters);
+                  }}
+                  className={btnSecondary}
+                >
+                  <Icon name="refresh" size={13} />
+                  Actualiser
+                </button>
+              </div>
+
+              {loadingQuizRequests ? (
+                <p className="text-xs text-slate-500 text-center py-10 animate-pulse">
+                  Chargement des demandes de QCM…
+                </p>
+              ) : quizRequestGroups.length === 0 ? (
+                <div className={`${card} p-10 text-center`}>
+                  <Icon name="check-circle" size={24} className="text-emerald-400 mx-auto mb-2" />
+                  <p className="text-xs text-slate-400">
+                    Aucune demande active pour ces filtres.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {quizRequestGroups.map(group => {
+                    const count = Number(group.total) || 0;
+                    const threshold = Number(group.threshold) || 10;
+                    const percent = Math.min(100, Math.round((count / threshold) * 100));
+                    return (
+                      <div key={`${group.faculte}:${group.filiere}:${group.niveau}:${group.ue}`} className={`${card} p-5`}>
+                        <div className="flex items-start justify-between gap-3 flex-wrap">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h3 className="text-sm font-black text-white">{group.ue}</h3>
+                              {group.ueLabel && group.ueLabel !== group.ue && (
+                                <span className="text-[11px] text-slate-400">{group.ueLabel}</span>
+                              )}
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                                group.reachable
+                                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                                  : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                              }`}>
+                                {group.reachable ? 'Seuil atteint' : 'En attente'}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-500 mt-1">
+                              {group.faculte} • {group.filiere} • {group.niveau} •{' '}
+                              {group.pending || 0} en attente · {group.validated || 0} validée(s) ·{' '}
+                              ouverte le {formatDate(group.createdAt)}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-lg font-black text-white leading-none">
+                              {count}<span className="text-slate-500 text-sm">/{threshold}</span>
+                            </p>
+                            <p className="text-[10px] text-slate-500">demande(s)</p>
+                          </div>
+                        </div>
+
+                        <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden mt-3">
+                          <div
+                            className={`h-full ${group.reachable ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                            style={{ width: `${Math.max(percent, 4)}%` }}
+                          />
+                        </div>
+
+                        <div className="mt-4 grid md:grid-cols-[1fr_auto] gap-2 items-center">
+                          <input
+                            type="text"
+                            placeholder="Note interne ou motif (optionnel)"
+                            className={input}
+                            value={quizRequestNotes[group.id] || ''}
+                            onChange={e => setQuizRequestNotes(prev => ({ ...prev, [group.id]: e.target.value }))}
+                          />
+                          <div className="flex gap-2 flex-wrap">
+                            <button onClick={() => prepareQuizFromRequest(group)} className={btnSecondary}>
+                              <Icon name="plus" size={14} />
+                              Programmer l'épreuve
+                            </button>
+                            <button onClick={() => approveQuizRequest(group)} className={btnPrimary}>
+                              <Icon name="check" size={14} strokeWidth={3} />
+                              Accepter
+                            </button>
+                            <button
+                              onClick={() => rejectQuizRequest(group)}
+                              className="inline-flex items-center gap-1.5 border border-red-900/60 hover:border-red-700 text-red-400 hover:text-red-300 hover:bg-red-950/40 font-bold text-xs px-3 py-2 rounded-xl transition"
+                            >
+                              <Icon name="close" size={13} />
+                              Rejeter
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {quizRequestRows.length > 0 && (
+                <div className={`${card} p-5`}>
+                  <h3 className="text-sm font-black text-white mb-3 flex items-center gap-2">
+                    <Icon name="list" size={15} className="text-blue-400" />
+                    Dernières demandes individuelles
+                  </h3>
+                  <div className="max-h-72 overflow-y-auto divide-y divide-slate-800">
+                    {quizRequestRows.slice(0, 80).map(row => (
+                      <div key={row.id} className="py-2 flex items-center justify-between gap-3 text-xs">
+                        <div className="min-w-0">
+                          <p className="font-bold text-slate-200 truncate">
+                            {row.ue} · {row.filiere} ({row.niveau})
+                          </p>
+                          <p className="text-[10px] text-slate-500 truncate">
+                            {row.name || 'Étudiant'} • {row.email || '-'} • {formatDate(row.createdAt)}
+                          </p>
+                        </div>
+                        <span className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                          row.status === 'approved'
+                            ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                            : row.status === 'rejected'
+                              ? 'bg-red-500/15 text-red-300 border-red-500/30'
+                              : row.status === 'validated'
+                                ? 'bg-blue-500/15 text-blue-300 border-blue-500/30'
+                                : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                        }`}>
+                          {row.status === 'approved'
+                            ? 'Acceptée'
+                            : row.status === 'rejected'
+                              ? 'Rejetée'
+                              : row.status === 'validated'
+                                ? 'Validée'
+                                : 'En attente'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ════════════ RESSOURCES DE COURS ════════════ */}
+          {activeSection === 'resources' && (
+            <div className="space-y-6">
+              <form onSubmit={uploadAdminResource} className={`${card} p-6 space-y-4`}>
+                <div className="border-b border-slate-800 pb-3">
+                  <h3 className="text-sm font-black text-white flex items-center gap-2">
+                    <Icon name="upload" size={15} className="text-blue-400" />
+                    Publier une ressource officielle
+                  </h3>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Le document sera visible uniquement par la filière et le niveau choisis
+                  </p>
+                </div>
+
+                {resourceError && (
+                  <div className="bg-red-950/50 border border-red-800 text-red-300 text-xs rounded-xl p-3">
+                    {resourceError}
+                  </div>
+                )}
+
+                <div className="grid md:grid-cols-3 gap-3">
+                  <div>
+                    <label className={label}>Faculté</label>
+                    <select
+                      className={selectCls}
+                      value={resourceForm.faculte}
+                      onChange={e => setResourceForm(prev => ({
+                        ...prev,
+                        faculte: e.target.value,
+                        filiere: filieresForFaculte(e.target.value)[0] || ''
+                      }))}
+                    >
+                      {facultes.length === 0 && <option value="">Chargement…</option>}
+                      {facultes.map(f => (
+                        <option key={f.id} value={f.id}>{f.label || f.id}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={label}>Filière</label>
+                    <select
+                      className={selectCls}
+                      value={resourceForm.filiere}
+                      onChange={e => setResourceForm(prev => ({ ...prev, filiere: e.target.value }))}
+                    >
+                      {filieresForFaculte(resourceForm.faculte).map(f => (
+                        <option key={f}>{f}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={label}>Niveau</label>
+                    <select
+                      className={selectCls}
+                      value={resourceForm.niveau}
+                      onChange={e => setResourceForm(prev => ({ ...prev, niveau: e.target.value }))}
+                    >
+                      {niveaux.map(n => (
+                        <option key={n}>{n}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={label}>Titre</label>
+                    <input
+                      type="text"
+                      className={input}
+                      placeholder="Ex: Cours complet"
+                      value={resourceForm.title}
+                      onChange={e => setResourceForm(prev => ({ ...prev, title: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label className={label}>UE (optionnel)</label>
+                    <input
+                      type="text"
+                      className={input}
+                      placeholder="Ex: INF232"
+                      value={resourceForm.ue}
+                      onChange={e => setResourceForm(prev => ({ ...prev, ue: e.target.value.toUpperCase() }))}
+                    />
+                  </div>
+                  <div>
+                    <label className={label}>Fichier</label>
+                    <input
+                      type="file"
+                      onChange={e => setResourceFile(e.target.files?.[0] || null)}
+                      className="w-full text-xs text-slate-400 file:mr-2 file:py-2 file:px-3 file:rounded-xl file:border-0 file:bg-slate-800 file:text-slate-200 file:text-xs file:font-bold hover:file:bg-slate-700 file:cursor-pointer"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className={label}>Description (optionnel)</label>
+                  <textarea
+                    rows={2}
+                    className={input + ' resize-none'}
+                    placeholder="Contenu, chapitre, auteur…"
+                    value={resourceForm.description}
+                    onChange={e => setResourceForm(prev => ({ ...prev, description: e.target.value }))}
+                  />
+                </div>
+
+                <button type="submit" disabled={resourceUploading} className={btnPrimary}>
+                  <Icon name="upload" size={13} />
+                  {resourceUploading ? 'Publication…' : 'Publier'}
+                </button>
+              </form>
+
+              <div className={`${card} overflow-hidden`}>
+                <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between gap-2 flex-wrap">
+                  <div>
+                    <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                      <Icon name="book" size={15} className="text-blue-400" />
+                      Ressources publiées ({adminResources.length})
+                    </h3>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Modérez les dépôts des étudiants et de l'administration
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setLoadingResources(true);
+                      fetchResources(resourceFilters);
+                    }}
+                    className={btnSecondary}
+                  >
+                    <Icon name="refresh" size={13} />
+                    Actualiser
+                  </button>
+                </div>
+
+                <div className="px-6 py-4 border-b border-slate-800 grid md:grid-cols-3 gap-3">
+                  <select
+                    className={selectCls}
+                    value={resourceFilters.faculte}
+                    onChange={e => setResourceFilters({ faculte: e.target.value, filiere: '', niveau: '' })}
+                  >
+                    <option value="">Toutes les facultés</option>
+                    {facultes.map(f => (
+                      <option key={f.id} value={f.id}>{f.label || f.id}</option>
+                    ))}
+                  </select>
+                  <select
+                    className={selectCls}
+                    value={resourceFilters.filiere}
+                    onChange={e => setResourceFilters(prev => ({ ...prev, filiere: e.target.value }))}
+                  >
+                    <option value="">Toutes les filières</option>
+                    {filieresForFaculte(resourceFilters.faculte).map(f => (
+                      <option key={f}>{f}</option>
+                    ))}
+                  </select>
+                  <select
+                    className={selectCls}
+                    value={resourceFilters.niveau}
+                    onChange={e => setResourceFilters(prev => ({ ...prev, niveau: e.target.value }))}
+                  >
+                    <option value="">Tous les niveaux</option>
+                    {niveaux.map(n => (
+                      <option key={n}>{n}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {loadingResources ? (
+                  <p className="text-xs text-slate-500 text-center py-10 animate-pulse">
+                    Chargement des ressources…
+                  </p>
+                ) : adminResources.length === 0 ? (
+                  <p className="text-xs text-slate-500 text-center py-10">
+                    Aucune ressource pour ces filtres.
+                  </p>
+                ) : (
+                  <div className="divide-y divide-slate-800">
+                    {adminResources.map(item => (
+                      <div key={item.id} className="px-6 py-4 flex flex-col md:flex-row md:items-center gap-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[9px] font-black px-2 py-1 rounded-lg bg-blue-600/15 text-blue-300 border border-blue-600/30">
+                              {String(item.originalName || '').split('.').pop()?.toUpperCase() || 'FICHIER'}
+                            </span>
+                            <h4 className="text-sm font-bold text-white truncate">{item.title}</h4>
+                            <span className="text-[10px] font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                              {item.faculte}
+                            </span>
+                            <span className="text-[10px] font-bold text-blue-300 bg-blue-600/15 px-2 py-0.5 rounded-full">
+                              {item.filiere}
+                            </span>
+                            <span className="text-[10px] font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded-full">
+                              {item.niveau}
+                            </span>
+                          </div>
+                          {item.description && (
+                            <p className="text-[11px] text-slate-400 mt-1 line-clamp-1">{item.description}</p>
+                          )}
+                          <p className="text-[10px] text-slate-500 mt-1">
+                            {item.ue ? `UE ${item.ue} · ` : ''}
+                            {formatSize(item.size)} · {item.downloads || 0} téléchargement(s) ·{' '}
+                            par {item.uploaderName || 'Anonyme'}
+                            {item.uploaderRole === 'admin' ? ' (administration)' : ''} ·{' '}
+                            {formatDate(item.createdAt)}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button onClick={() => downloadAdminResource(item)} className={btnSecondary}>
+                            <Icon name="download" size={13} />
+                            Télécharger
+                          </button>
+                          <button
+                            onClick={() => deleteAdminResource(item)}
+                            aria-label={`Supprimer ${item.title}`}
+                            className="w-8 h-8 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-950/50 flex items-center justify-center transition"
+                          >
+                            <Icon name="trash" size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ════════════ GÉNÉRATION QCM IA ════════════ */}
+          {activeSection === 'ai-generator' && (
+            <div className="space-y-6">
+              <div className="grid lg:grid-cols-2 gap-4 items-start">
+                {/* Documents de référence */}
+                <div className={`${card} p-6 space-y-4`}>
+                  <div className="border-b border-slate-800 pb-3">
+                    <h3 className="text-sm font-black text-white flex items-center gap-2">
+                      <Icon name="document" size={15} className="text-blue-400" />
+                      Documents de référence
+                    </h3>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      PDF, TXT, MD, CSV ou JSON · 20 Mo max. Le texte est extrait pour nourrir l'IA.
+                    </p>
+                  </div>
+
+                  {aiDocError && (
+                    <div className="bg-red-950/50 border border-red-800 text-red-300 text-xs rounded-xl p-3">
+                      {aiDocError}
+                    </div>
+                  )}
+
+                  <form onSubmit={uploadAiDoc} className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      type="file"
+                      accept=".pdf,.txt,.md,.markdown,.csv,.json"
+                      onChange={e => setAiDocFile(e.target.files?.[0] || null)}
+                      className="flex-1 text-xs text-slate-400 file:mr-2 file:py-2 file:px-3 file:rounded-xl file:border-0 file:bg-slate-800 file:text-slate-200 file:text-xs file:font-bold hover:file:bg-slate-700 file:cursor-pointer"
+                    />
+                    <button type="submit" disabled={aiDocUploading} className={btnPrimary}>
+                      <Icon name="upload" size={13} />
+                      {aiDocUploading ? 'Extraction…' : 'Déposer'}
+                    </button>
+                  </form>
+
+                  <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                    {loadingAiDocs ? (
+                      <p className="text-xs text-slate-500 text-center py-6 animate-pulse">Chargement…</p>
+                    ) : aiDocs.length === 0 ? (
+                      <p className="text-xs text-slate-500 text-center py-6">
+                        Aucun document de référence déposé.
+                      </p>
+                    ) : (
+                      aiDocs.map(doc => (
+                        <label
+                          key={doc.id}
+                          className={`flex items-center gap-3 p-3 rounded-xl border transition cursor-pointer ${
+                            genDocIds.includes(doc.id)
+                              ? 'bg-blue-950/40 border-blue-700'
+                              : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={genDocIds.includes(doc.id)}
+                            onChange={() => toggleGenDoc(doc.id)}
+                            className="accent-blue-600"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-bold text-slate-200 truncate">{doc.originalName}</p>
+                            <p className="text-[10px] text-slate-500">
+                              {formatSize(doc.size)} · {formatNumber(doc.charCount)} caractères ·{' '}
+                              {formatDate(doc.createdAt)}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              deleteAiDoc(doc);
+                            }}
+                            aria-label={`Supprimer ${doc.originalName}`}
+                            className="w-7 h-7 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-950/50 flex items-center justify-center transition shrink-0"
+                          >
+                            <Icon name="trash" size={13} />
+                          </button>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                  <p className="text-[10px] text-slate-500">
+                    Sans sélection explicite, les 3 documents les plus récents sont utilisés.
+                  </p>
+                </div>
+
+                {/* Paramètres de génération */}
+                <div className={`${card} p-6 space-y-4`}>
+                  <div className="border-b border-slate-800 pb-3">
+                    <h3 className="text-sm font-black text-white flex items-center gap-2">
+                      <Icon name="sparkles" size={15} className="text-purple-400" />
+                      Générer des questions
+                    </h3>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Décrivez le chapitre ou les notions à évaluer
+                    </p>
+                  </div>
+
+                  {genError && (
+                    <div className="bg-red-950/50 border border-red-800 text-red-300 text-xs rounded-xl p-3">
+                      {genError}
+                    </div>
+                  )}
+                  {genNotice && (
+                    <div className="bg-emerald-950/50 border border-emerald-800 text-emerald-300 text-xs rounded-xl p-3">
+                      {genNotice}
+                    </div>
+                  )}
+
+                  <div>
+                    <label className={label}>Prompt / consignes</label>
+                    <textarea
+                      rows={4}
+                      className={input + ' resize-none'}
+                      placeholder="Ex: Génère des questions sur les bases de données relationnelles, chapitre 3 (normalisation, clés, jointures)."
+                      value={genPrompt}
+                      onChange={e => setGenPrompt(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className={label}>Nombre de questions</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="40"
+                        className={input}
+                        value={genCount}
+                        onChange={e => setGenCount(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className={label}>Difficulté</label>
+                      <select
+                        className={selectCls}
+                        value={genDifficulte}
+                        onChange={e => setGenDifficulte(e.target.value)}
+                      >
+                        <option value="facile">Facile</option>
+                        <option value="moyenne">Moyenne</option>
+                        <option value="difficile">Difficile</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className={label}>Faculté</label>
+                      <select
+                        className={selectCls}
+                        value={genFaculte}
+                        onChange={e => {
+                          const value = e.target.value;
+                          setGenFaculte(value);
+                          setGenFiliere(filieresForFaculte(value)[0] || '');
+                        }}
+                      >
+                        {facultes.length === 0 && <option value="">Chargement…</option>}
+                        {facultes.map(f => (
+                          <option key={f.id} value={f.id}>{f.label || f.id}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className={label}>Filière</label>
+                      <select
+                        className={selectCls}
+                        value={genFiliere}
+                        onChange={e => setGenFiliere(e.target.value)}
+                      >
+                        {filieresForFaculte(genFaculte).map(f => (
+                          <option key={f}>{f}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className={label}>Niveau</label>
+                      <select
+                        className={selectCls}
+                        value={genNiveau}
+                        onChange={e => setGenNiveau(e.target.value)}
+                      >
+                        {niveaux.map(n => (
+                          <option key={n}>{n}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className={label}>UE</label>
+                      <input
+                        type="text"
+                        className={input}
+                        placeholder="Ex: INF232"
+                        value={genUe}
+                        onChange={e => setGenUe(e.target.value.toUpperCase())}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-3">
+                    <label className="flex items-start gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5 accent-blue-600"
+                        checked={genSave}
+                        onChange={e => setGenSave(e.target.checked)}
+                      />
+                      <span className="text-[11px] text-slate-300">
+                        Enregistrer directement les questions dans une épreuve
+                        <span className="block text-[10px] text-slate-500">
+                          Les questions existantes de cette épreuve seront remplacées.
+                        </span>
+                      </span>
+                    </label>
+
+                    {genSave && (
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className={label}>Code de l'épreuve</label>
+                          <input
+                            type="text"
+                            className={input}
+                            placeholder="INF232"
+                            value={genQuizId}
+                            onChange={e => setGenQuizId(e.target.value.toUpperCase())}
+                          />
+                        </div>
+                        <div>
+                          <label className={label}>Temps / question (s)</label>
+                          <input
+                            type="number"
+                            min="10"
+                            className={input}
+                            value={genTimePerQuestion}
+                            onChange={e => setGenTimePerQuestion(e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <label className={label}>Semestre</label>
+                          <select
+                            className={selectCls}
+                            value={genSemestre}
+                            onChange={e => setGenSemestre(e.target.value)}
+                          >
+                            <option value="1">Semestre 1</option>
+                            <option value="2">Semestre 2</option>
+                          </select>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={handleGenerateQuestions}
+                    disabled={generating}
+                    className={btnPrimary + ' w-full justify-center'}
+                  >
+                    <Icon name="sparkles" size={14} />
+                    {generating ? 'Génération en cours…' : 'Générer les questions'}
+                  </button>
+                  <p className="text-[10px] text-slate-500">
+                    La génération consomme le budget mensuel de tokens IA. Vérifiez toujours
+                    les questions proposées avant publication.
+                  </p>
+                </div>
+              </div>
+
+              {/* Aperçu des questions générées */}
+              {genQuestions.length > 0 && (
+                <div className={`${card} overflow-hidden`}>
+                  <div className="px-6 py-4 border-b border-slate-800">
+                    <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                      <Icon name="eye" size={15} className="text-blue-400" />
+                      Questions générées ({genQuestions.length})
+                    </h3>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Relisez chaque énoncé et la bonne réponse avant de les utiliser.
+                    </p>
+                  </div>
+                  <div className="divide-y divide-slate-800">
+                    {genQuestions.map((q, i) => (
+                      <div key={i} className="px-6 py-4">
+                        <p className="text-xs font-bold text-slate-200 leading-relaxed">
+                          <span className="text-slate-500 mr-1.5">Q{i + 1}.</span>
+                          {q.Question}
+                        </p>
+                        <div className="flex items-center gap-1.5 flex-wrap mt-2">
+                          {q.tags && String(q.tags).split(/[;,]/).filter(Boolean).map(tag => (
+                            <span key={tag} className="text-[10px] font-bold text-blue-300 bg-blue-600/15 border border-blue-600/30 px-2 py-0.5 rounded-full">
+                              {tag.trim()}
+                            </span>
+                          ))}
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                            q.difficulte === 'facile'
+                              ? 'text-emerald-300 bg-emerald-600/15 border-emerald-600/30'
+                              : q.difficulte === 'difficile'
+                                ? 'text-red-300 bg-red-600/15 border-red-600/30'
+                                : 'text-amber-300 bg-amber-600/15 border-amber-600/30'
+                          }`}>
+                            {q.difficulte}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] mt-3">
+                          {['A', 'B', 'C', 'D'].map(l => {
+                            const val = q['Opt' + l];
+                            if (!val) return null;
+                            const isCorrect = val === q.ReponseCorrecte;
+                            return (
+                              <div
+                                key={l}
+                                className={`p-2 rounded-lg border ${
+                                  isCorrect
+                                    ? 'bg-emerald-950/50 border-emerald-700 text-emerald-300 font-bold'
+                                    : 'bg-slate-950 border-slate-800 text-slate-400'
+                                }`}
+                              >
+                                <strong>{l}.</strong> {val}
+                                {isCorrect && (
+                                  <span className="ml-1.5 inline-flex items-center gap-1 text-[10px] font-black uppercase">
+                                    <Icon name="check" size={10} strokeWidth={3} />
+                                    Correcte
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* ════════════ MESSAGES ════════════ */}
           {activeSection === 'messages' && (
             <div className={`${card} overflow-hidden`}>
@@ -2772,7 +4507,7 @@ export default function AdminPanel() {
                   onChange={e => setFbFiliere(e.target.value)}
                 >
                   <option value="">Toutes filières</option>
-                  {filieres.map(f => (
+                  {allFiliereLabels.map(f => (
                     <option key={f}>{f}</option>
                   ))}
                 </select>

@@ -56,6 +56,9 @@ export default function QuizSession() {
 
   const user = JSON.parse(localStorage.getItem('userSession')) || { name: 'Anonyme' };
   const safeName = (user.name || 'Anonyme').trim();
+  // Jeton à joindre aux appels de l'épreuve : le serveur vérifie que la
+  // filière et le niveau de l'étudiant correspondent bien à cette épreuve.
+  const viewAuth = user?.token ? 'student' : (sessionStorage.getItem('adminToken') ? 'admin' : undefined);
   const urlParams = new URLSearchParams(window.location.search);
   const isMakeupMode = urlParams.get('mode') === 'rattrapage' || !!user.isMakeup;
   const [makeupEndTime, setMakeupEndTime] = useState(null);
@@ -85,10 +88,14 @@ export default function QuizSession() {
     const init = async () => {
       let meta;
       try {
-        const data = await api(`/quizzes/${quizId}`);
+        const data = await api(`/quizzes/${quizId}`, { auth: viewAuth });
         meta = data.quiz;
-      } catch {
-        setAccessError("Cette épreuve est introuvable ou a été retirée de la plateforme.");
+      } catch (err) {
+        setAccessError(
+          err.status === 403
+            ? err.message
+            : "Cette épreuve est introuvable ou a été retirée de la plateforme."
+        );
         return;
       }
 
@@ -135,12 +142,20 @@ export default function QuizSession() {
         } catch { /* ignore */ }
       }
 
-      const qs = await loadFresh();
-      setQuestions(qs);
-      setPhase(meta.launchTime && meta.launchTime > Date.now() ? 'waiting' : 'quiz');
+      try {
+        const qs = await loadFresh();
+        setQuestions(qs);
+        setPhase(meta.launchTime && meta.launchTime > Date.now() ? 'waiting' : 'quiz');
+      } catch (err) {
+        setAccessError(
+          err.status === 403
+            ? err.message
+            : "Les questions de cette épreuve n'ont pas pu être chargées."
+        );
+      }
     };
     init();
-  }, [quizId, loadFresh, storageKey, isMakeupMode]);
+  }, [quizId, loadFresh, storageKey, isMakeupMode, viewAuth]);
 
   // ── Sauvegarde de progression ────────────────────────────────────────
   useEffect(() => {
@@ -180,6 +195,7 @@ export default function QuizSession() {
       try {
         const r = await api(`/quizzes/${quizId}/sessions`, {
           method: 'POST',
+          auth: viewAuth,
           body: { sid, name: safeName }
         });
         if (active) setParticipants(r.participants);
@@ -191,9 +207,9 @@ export default function QuizSession() {
     return () => {
       active = false;
       clearInterval(iv);
-      api(`/quizzes/${quizId}/sessions/${sid}`, { method: 'DELETE' }).catch(() => {});
+      api(`/quizzes/${quizId}/sessions/${sid}`, { method: 'DELETE', auth: viewAuth }).catch(() => {});
     };
-  }, [phase, quizId, safeName]);
+  }, [phase, quizId, safeName, viewAuth]);
 
   // ── Soumission finale (correction côté serveur) ──────────────────────
   const finalSubmit = useCallback(async () => {
@@ -350,7 +366,10 @@ export default function QuizSession() {
 
     const load = async () => {
       try {
-        const data = await api(`/results?ue=${encodeURIComponent(quizId)}&sessionTimestamp=${sessionTimestamp}`);
+        const data = await api(
+          `/results?ue=${encodeURIComponent(quizId)}&sessionTimestamp=${sessionTimestamp}`,
+          { auth: 'student' }
+        );
         if (!active) return;
         setLeaderboard(data.results.slice().sort((a, b) => b.score - a.score));
       } catch { /* classement non critique */ }

@@ -34,7 +34,7 @@ function intEnv(name, fallback, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
-function getConfig() {
+export function getConfig() {
   return {
     groqKeys: splitKeys(process.env.GROQ_API_KEYS, process.env.GROQ_API_KEY),
     geminiKeys: splitKeys(process.env.GEMINI_API_KEYS, process.env.GEMINI_API_KEY),
@@ -142,7 +142,7 @@ function releaseQuota(userId, contextKey) {
  * Les tokens sont ceux annoncés par le fournisseur ; en cas d'absence,
  * on enregistre 0 pour ne jamais inventer de consommation.
  */
-function logAiRequest({
+export function logAiRequest({
   userId,
   contextKey,
   status = 'ok',
@@ -293,19 +293,29 @@ async function fetchJson(url, options, timeoutMs = 20000) {
   }
 }
 
-async function callGroq({ key, model, messages }) {
+async function callGroq({
+  key,
+  model,
+  messages,
+  maxTokens = 700,
+  temperature = 0.35,
+  json = false
+}) {
+  const payload = {
+    model,
+    messages,
+    temperature,
+    max_tokens: maxTokens
+  };
+  if (json) payload.response_format = { type: 'json_object' };
+
   const data = await fetchJson('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${key}`
     },
-    body: JSON.stringify({
-      model,
-      messages,
-      temperature: 0.35,
-      max_tokens: 700
-    })
+    body: JSON.stringify(payload)
   });
   const text = data?.choices?.[0]?.message?.content;
   if (typeof text !== 'string' || !text.trim()) throw new Error('Réponse vide');
@@ -325,7 +335,15 @@ async function callGroq({ key, model, messages }) {
   };
 }
 
-async function callGemini({ key, model, system, messages }) {
+async function callGemini({
+  key,
+  model,
+  system,
+  messages,
+  maxTokens = 700,
+  temperature = 0.35,
+  json = false
+}) {
   const contents = messages
     .filter((m) => m.role !== 'system')
     .map((m) => ({
@@ -344,7 +362,11 @@ async function callGemini({ key, model, system, messages }) {
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: system }] },
         contents,
-        generationConfig: { temperature: 0.35, maxOutputTokens: 700 }
+        generationConfig: {
+          temperature,
+          maxOutputTokens: maxTokens,
+          ...(json ? { responseMimeType: 'application/json' } : {})
+        }
       })
     }
   );
@@ -384,9 +406,16 @@ function orderedCandidates(cfg) {
   return [...all.slice(start), ...all.slice(0, start)];
 }
 
-async function generateReply({ system, messages, cfg }) {
+export async function generateReply({
+  system,
+  messages,
+  cfg,
+  maxTokens = 700,
+  temperature = 0.35,
+  json = false
+}) {
   const candidates = orderedCandidates(cfg);
-  const deadline = Date.now() + 45000;
+  const deadline = Date.now() + 60000;
   let lastError = null;
 
   for (let i = 0; i < candidates.length; i += 1) {
@@ -397,14 +426,20 @@ async function generateReply({ system, messages, cfg }) {
         return await callGroq({
           key: candidate.key,
           model: cfg.groqModel,
-          messages: [{ role: 'system', content: system }, ...messages]
+          messages: [{ role: 'system', content: system }, ...messages],
+          maxTokens,
+          temperature,
+          json
         });
       }
       return await callGemini({
         key: candidate.key,
         model: cfg.geminiModel,
         system,
-        messages: [{ role: 'system', content: system }, ...messages]
+        messages: [{ role: 'system', content: system }, ...messages],
+        maxTokens,
+        temperature,
+        json
       });
     } catch (err) {
       lastError = err;

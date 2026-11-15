@@ -99,6 +99,67 @@ export async function sendResetCodeEmail({ email, code, name }) {
 }
 
 /**
+ * Prévient un étudiant que sa filière demandée vient d'être ajoutée.
+ * Utilise la même configuration SMTP que les autres emails transactionnels.
+ */
+export async function sendFiliereAvailableEmail({ email, name, filiere, faculte }) {
+  const { email: user, appPassword: pass } = getSmtpConfig();
+  if (!user || !pass) return { success: false, skipped: true, error: 'SMTP non configuré' };
+
+  const transporter = createGmailTransporter(user, pass);
+  const safeName = String(name || 'Étudiant').trim();
+  const safeFiliere = String(filiere || '').trim();
+  const safeFaculte = String(faculte || '').trim();
+
+  const htmlContent = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h2 style="color: #2563eb; margin: 0; font-size: 24px;">QCM App</h2>
+        <p style="color: #64748b; font-size: 14px; margin-top: 4px;">Votre filière est maintenant disponible</p>
+      </div>
+      <div style="background-color: #f8fafc; border-radius: 12px; padding: 20px;">
+        <p style="color: #334155; font-size: 15px; margin-top: 0;">Bonjour <strong>${safeName}</strong>,</p>
+        <p style="color: #334155; font-size: 14px; line-height: 1.6;">
+          L'administration vient d'ajouter la filière <strong>${safeFiliere}</strong>
+          ${safeFaculte ? `de la faculté <strong>${safeFaculte}</strong>` : ''}.
+        </p>
+        <p style="color: #334155; font-size: 14px; line-height: 1.6;">
+          Votre compte a été mis à jour automatiquement. Vous pouvez dès maintenant
+          accéder à vos QCM, classements et ressources de cours depuis votre espace étudiant.
+        </p>
+        <div style="text-align: center; margin: 24px 0;">
+          <a href="${process.env.APP_URL || 'https://qcm-app.local'}/dashboard"
+             style="display: inline-block; background: #2563eb; color: #ffffff; text-decoration: none; font-weight: bold; padding: 12px 24px; border-radius: 10px;">
+            Ouvrir mon espace
+          </a>
+        </div>
+      </div>
+      <p style="color: #94a3b8; font-size: 12px; line-height: 1.4; text-align: center;">
+        Vous recevez cet email car vous avez signalé cette filière lors de votre inscription.
+      </p>
+      <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
+      <p style="color: #cbd5e1; font-size: 11px; text-align: center; margin: 0;">
+        QCM App · Plateforme d'évaluation 2026
+      </p>
+    </div>
+  `;
+
+  try {
+    await transporter.sendMail({
+      from: `"QCM App" <${user}>`,
+      to: email,
+      subject: `Votre filière ${safeFiliere} est disponible · QCM App`,
+      text: `Bonjour ${safeName}, la filière ${safeFiliere} a été ajoutée à QCM App. Votre compte est à jour.`,
+      html: htmlContent
+    });
+    return { success: true };
+  } catch (err) {
+    console.error('Erreur lors de l\'envoi de l\'email filière :', err);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
  * Teste la connexion SMTP et envoie un email de test (panneau admin).
  * Retourne { success, message?, error? } · identique à l'ancien handler.
  */

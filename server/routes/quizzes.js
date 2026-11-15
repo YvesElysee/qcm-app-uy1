@@ -8,6 +8,14 @@ import { Router } from 'express';
 import { db } from '../db.js';
 import { requireAdmin, bearerToken, isAdminToken, getStudentFromToken } from '../auth.js';
 import { drawForStudent } from '../questionDraw.js';
+import {
+  canStudentAccessQuiz,
+  normalizeFaculte,
+  facultyOfFiliere,
+  studentFaculte
+} from '../access.js';
+import { notifyQuizAvailable } from '../notifications.js';
+import { approveRequestsForQuiz } from './quizRequests.js';
 
 const router = Router();
 
@@ -34,31 +42,45 @@ function publicQuestion(q) {
  * Sans cette ligne, l'étudiant ne voit pas la matière sur son tableau de bord
  * et l'épreuve reste introuvable même lorsqu'elle est programmée.
  */
-function ensureUeFromQuiz({ code, label, filiere, niveau }) {
+function ensureUeFromQuiz({ code, label, filiere, niveau, faculte }) {
   const cleanCode = String(code || '').trim().toUpperCase();
   if (!cleanCode) return;
   const existing = db.prepare('SELECT * FROM ues WHERE id = ?').get(cleanCode);
   const cleanLabel = String(label || '').trim() || existing?.label || cleanCode;
   const cleanFiliere = filiere || existing?.filiere || null;
   const cleanNiveau = niveau || existing?.niveau || null;
+  const cleanFaculte = normalizeFaculte(faculte || existing?.faculte || facultyOfFiliere(cleanFiliere));
   // Filière et niveau sont indispensables au filtrage côté étudiant
   if (!cleanFiliere || !cleanNiveau) return;
 
   db.prepare(`
-    INSERT INTO ues (id, code, label, filiere, niveau)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO ues (id, code, label, filiere, niveau, faculte)
+    VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       code = excluded.code, label = excluded.label,
-      filiere = excluded.filiere, niveau = excluded.niveau
-  `).run(cleanCode, cleanCode, cleanLabel, cleanFiliere, cleanNiveau);
+      filiere = excluded.filiere, niveau = excluded.niveau,
+      faculte = excluded.faculte
+  `).run(cleanCode, cleanCode, cleanLabel, cleanFiliere, cleanNiveau, cleanFaculte);
 }
 
 /**
  * Liste des QCM (public). Filtres optionnels filière / niveau, tri launchTime asc|desc.
  */
 router.get('/', (req, res) => {
-  const { filiere, niveau, sort } = req.query;
+  let { filiere, niveau, faculte, sort } = req.query;
   const dir = sort === 'desc' ? 'DESC' : 'ASC';
+
+  // Un étudiant connecté est automatiquement limité à son parcours : le
+  // serveur ignore les filtres fournis par le client. La liste reste publique
+  // (sans jeton) pour l'accueil et l'emploi du temps public.
+  const token = bearerToken(req);
+  const admin = isAdminToken(token);
+  const user = admin ? null : getStudentFromToken(token);
+  if (user) {
+    filiere = user.filiere || '__aucune__';
+    niveau = user.niveau || '__aucune__';
+    faculte = studentFaculte(user);
+  }
 
   // On joint le catalogue des UE pour exposer l'intitulé de chaque matière
   let sql = `
@@ -68,8 +90,18 @@ router.get('/', (req, res) => {
   `;
   const where = [];
   const params = [];
-  if (filiere) { where.push('q.filiere = ?'); params.push(filiere); }
-  if (niveau) { where.push('q.niveau = ?'); params.push(niveau); }
+  if (filiere) {
+    where.push('LOWER(TRIM(q.filiere)) = LOWER(TRIM(?))');
+    params.push(filiere);
+  }
+  if (niveau) {
+    where.push('LOWER(TRIM(q.niveau)) = LOWER(TRIM(?))');
+    params.push(niveau);
+  }
+  if (faculte) {
+    where.push("UPPER(COALESCE(NULLIF(TRIM(q.faculte), ''), 'FACSCIENCES')) = ?");
+    params.push(normalizeFaculte(faculte));
+  }
   if (where.length) sql += ' WHERE ' + where.join(' AND ');
   // Les QCM sans date de programmation sont renvoyés en dernier
   sql += ` ORDER BY (q.launchTime IS NULL), q.launchTime ${dir}, q.id ${dir}`;
@@ -91,6 +123,16 @@ router.get('/:id', (req, res) => {
   if (!quiz) {
     return res.status(404).json({ error: 'Quiz introuvable.' });
   }
+
+  const token = bearerToken(req);
+  const admin = isAdminToken(token);
+  const user = getStudentFromToken(token);
+  if (!admin && user && !canStudentAccessQuiz(user, quiz)) {
+    return res.status(403).json({
+      error: "Cette épreuve n'appartient pas à votre filière et à votre niveau d'inscription."
+    });
+  }
+
   res.json({ quiz });
 });
 
@@ -107,8 +149,20 @@ router.get('/:id/questions', (req, res) => {
     return res.status(404).json({ error: 'Quiz introuvable.' });
   }
 
-  const user = getStudentFromToken(bearerToken(req));
-  const admin = isAdminToken(bearerToken(req));
+  const token = bearerToken(req);
+  const user = getStudentFromToken(token);
+  const admin = isAdminToken(token);
+
+  if (!admin) {
+    if (!user) {
+      return res.status(401).json({ error: 'Connexion requise pour accéder aux questions.' });
+    }
+    if (!canStudentAccessQuiz(user, quiz)) {
+      return res.status(403).json({
+        error: "Cette épreuve n'appartient pas à votre filière et à votre niveau d'inscription."
+      });
+    }
+  }
 
   const allQuestions = db.prepare(`
     SELECT id, Question, OptA, OptB, OptC, OptD, ReponseCorrecte, tags, difficulte
@@ -132,7 +186,10 @@ router.get('/:id/questions', (req, res) => {
  * Programmer / mettre à jour un QCM (fusion des champs, comme setDoc merge:true)
  */
 router.post('/:id', requireAdmin, (req, res) => {
-  const { filiere, niveau, semestre, ue, ueLabel, label, timePerQuestion, drawCount, launchTime, endTime } = req.body || {};
+  const {
+    filiere, niveau, faculte, semestre, ue, ueLabel, label,
+    timePerQuestion, drawCount, launchTime, endTime
+  } = req.body || {};
   const id = req.params.id;
 
   const existing = db.prepare('SELECT * FROM quizzes WHERE id = ?').get(id) || {};
@@ -141,6 +198,7 @@ router.post('/:id', requireAdmin, (req, res) => {
     ue: ue ?? existing.ue ?? id,
     filiere: filiere ?? existing.filiere ?? null,
     niveau: niveau ?? existing.niveau ?? null,
+    faculte: normalizeFaculte(faculte || existing.faculte || facultyOfFiliere(filiere ?? existing.filiere)),
     semestre: semestre ?? existing.semestre ?? null,
     timePerQuestion: timePerQuestion != null ? (Number(timePerQuestion) || 60) : (existing.timePerQuestion ?? 60),
     drawCount: drawCount != null ? Math.max(0, Number(drawCount) || 0) : (existing.drawCount ?? 0),
@@ -151,11 +209,11 @@ router.post('/:id', requireAdmin, (req, res) => {
   };
 
   db.prepare(`
-    INSERT INTO quizzes (id, ue, filiere, niveau, semestre, questionCount, timePerQuestion, drawCount, launchTime, endTime, updatedAt)
-    VALUES (@id, @ue, @filiere, @niveau, @semestre, @questionCount, @timePerQuestion, @drawCount, @launchTime, @endTime, @updatedAt)
+    INSERT INTO quizzes (id, ue, filiere, niveau, faculte, semestre, questionCount, timePerQuestion, drawCount, launchTime, endTime, updatedAt)
+    VALUES (@id, @ue, @filiere, @niveau, @faculte, @semestre, @questionCount, @timePerQuestion, @drawCount, @launchTime, @endTime, @updatedAt)
     ON CONFLICT(id) DO UPDATE SET
       ue = excluded.ue, filiere = excluded.filiere, niveau = excluded.niveau,
-      semestre = excluded.semestre, questionCount = excluded.questionCount,
+      faculte = excluded.faculte, semestre = excluded.semestre, questionCount = excluded.questionCount,
       timePerQuestion = excluded.timePerQuestion, drawCount = excluded.drawCount,
       launchTime = excluded.launchTime, endTime = excluded.endTime, updatedAt = excluded.updatedAt
   `).run({ id, ...merged });
@@ -165,10 +223,15 @@ router.post('/:id', requireAdmin, (req, res) => {
     code: merged.ue,
     label: ueLabel ?? label,
     filiere: merged.filiere,
-    niveau: merged.niveau
+    niveau: merged.niveau,
+    faculte: merged.faculte
   });
 
-  res.json({ success: true, quiz: db.prepare('SELECT * FROM quizzes WHERE id = ?').get(id) });
+  const quiz = db.prepare('SELECT * FROM quizzes WHERE id = ?').get(id);
+  if (quiz) notifyQuizAvailable(quiz);
+  if (quiz) approveRequestsForQuiz(quiz);
+
+  res.json({ success: true, quiz });
 });
 
 /**
@@ -194,7 +257,10 @@ router.delete('/:id', requireAdmin, (req, res) => {
  */
 router.post('/:id/questions', requireAdmin, (req, res) => {
   const id = req.params.id;
-  const { questions, filiere, niveau, semestre, timePerQuestion, drawCount, ueLabel, label } = req.body || {};
+  const {
+    questions, filiere, niveau, faculte, semestre,
+    timePerQuestion, drawCount, ueLabel, label
+  } = req.body || {};
 
   if (!Array.isArray(questions) || questions.length === 0) {
     return res.status(400).json({ error: 'Aucune question valide à importer.' });
@@ -207,6 +273,7 @@ router.post('/:id/questions', requireAdmin, (req, res) => {
     ue: existing.ue ?? id,
     filiere: filiere ?? existing.filiere ?? null,
     niveau: niveau ?? existing.niveau ?? null,
+    faculte: normalizeFaculte(faculte || existing.faculte || facultyOfFiliere(filiere ?? existing.filiere)),
     semestre: semestre ?? existing.semestre ?? null,
     questionCount: questions.length,
     timePerQuestion: timePerQuestion != null ? Number(timePerQuestion) || 60 : existing.timePerQuestion ?? 60,
@@ -217,11 +284,11 @@ router.post('/:id/questions', requireAdmin, (req, res) => {
   };
 
   db.prepare(`
-    INSERT INTO quizzes (id, ue, filiere, niveau, semestre, questionCount, timePerQuestion, drawCount, launchTime, endTime, updatedAt)
-    VALUES (@id, @ue, @filiere, @niveau, @semestre, @questionCount, @timePerQuestion, @drawCount, @launchTime, @endTime, @updatedAt)
+    INSERT INTO quizzes (id, ue, filiere, niveau, faculte, semestre, questionCount, timePerQuestion, drawCount, launchTime, endTime, updatedAt)
+    VALUES (@id, @ue, @filiere, @niveau, @faculte, @semestre, @questionCount, @timePerQuestion, @drawCount, @launchTime, @endTime, @updatedAt)
     ON CONFLICT(id) DO UPDATE SET
       ue = excluded.ue, filiere = excluded.filiere, niveau = excluded.niveau,
-      semestre = excluded.semestre, questionCount = excluded.questionCount,
+      faculte = excluded.faculte, semestre = excluded.semestre, questionCount = excluded.questionCount,
       timePerQuestion = excluded.timePerQuestion, drawCount = excluded.drawCount,
       updatedAt = excluded.updatedAt
   `).run({
@@ -259,8 +326,13 @@ router.post('/:id/questions', requireAdmin, (req, res) => {
     code: id,
     label: ueLabel ?? label,
     filiere: merged.filiere,
-    niveau: merged.niveau
+    niveau: merged.niveau,
+    faculte: merged.faculte
   });
+
+  const quiz = db.prepare('SELECT * FROM quizzes WHERE id = ?').get(id);
+  if (quiz) notifyQuizAvailable(quiz);
+  if (quiz) approveRequestsForQuiz(quiz);
 
   res.json({ success: true, count: questions.length });
 });
@@ -290,6 +362,20 @@ function participantsOf(quizId) {
 router.post('/:id/sessions', (req, res) => {
   const quizId = req.params.id;
   const { sid, name } = req.body || {};
+
+  const token = bearerToken(req);
+  const admin = isAdminToken(token);
+  const user = getStudentFromToken(token);
+  const quiz = db.prepare('SELECT * FROM quizzes WHERE id = ?').get(quizId);
+  if (!quiz) {
+    return res.status(404).json({ error: 'Quiz introuvable.' });
+  }
+  if (!admin && user && !canStudentAccessQuiz(user, quiz)) {
+    return res.status(403).json({
+      error: "Cette épreuve n'appartient pas à votre filière et à votre niveau d'inscription."
+    });
+  }
+
   const now = Date.now();
   const sessionId = sid || `${String(name || 'anonyme')}_${now}`;
 

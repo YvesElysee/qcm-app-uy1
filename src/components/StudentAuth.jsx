@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import {
   loginStudent,
   registerStudent,
@@ -7,12 +7,18 @@ import {
   verifyResetCode,
   completePasswordReset
 } from '../services/authService';
+import { api } from '../services/api';
 import usePageTitle from '../hooks/usePageTitle';
 import Icon from './ui/icons.jsx';
+
+const NIVEAUX = ['L1', 'L2', 'L3', 'M1', 'M2'];
+const OTHER_FILIERE = '__other__';
 
 export default function StudentAuth({ defaultTab = 'login' }) {
   const [tab, setTab] = useState(defaultTab); // 'login' | 'register' | 'forgot'
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const referralCode = (searchParams.get('ref') || '').trim();
 
   usePageTitle(
     tab === 'login' ? 'Connexion' : tab === 'register' ? 'Inscription' : 'Mot de passe oublié'
@@ -21,6 +27,7 @@ export default function StudentAuth({ defaultTab = 'login' }) {
   // ── États Login ──
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState('');
 
@@ -29,12 +36,52 @@ export default function StudentAuth({ defaultTab = 'login' }) {
   const [regEmail, setRegEmail] = useState('');
   const [regPassword, setRegPassword] = useState('');
   const [regPasswordConfirm, setRegPasswordConfirm] = useState('');
-  const [regFiliere, setRegFiliere] = useState('Informatique');
+  const [showRegPassword, setShowRegPassword] = useState(false);
+  const [regFaculte, setRegFaculte] = useState('');
+  const [regFiliere, setRegFiliere] = useState('');
+  const [regOtherFiliere, setRegOtherFiliere] = useState('');
   const [regNiveau, setRegNiveau] = useState('L1');
   const [regAnnee, setRegAnnee] = useState('2025-2026');
   const [regBirthDate, setRegBirthDate] = useState('');
   const [regLoading, setRegLoading] = useState(false);
   const [regError, setRegError] = useState('');
+  const [regNotice, setRegNotice] = useState('');
+
+  // ── Catalogue facultés / filières (chargé depuis le serveur) ──
+  const [facultes, setFacultes] = useState([]);
+  const [filieres, setFilieres] = useState([]);
+  const [catalogError, setCatalogError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    api('/catalog')
+      .then((data) => {
+        if (cancelled) return;
+        const facs = Array.isArray(data.facultes) ? data.facultes : [];
+        const fils = Array.isArray(data.filieres) ? data.filieres : [];
+        setFacultes(facs);
+        setFilieres(fils);
+        const firstFac = facs[0]?.id || '';
+        setRegFaculte((prev) => prev || firstFac);
+        const firstFil = fils.find((f) => f.faculte === firstFac);
+        setRegFiliere((prev) => prev || firstFil?.label || '');
+      })
+      .catch(() => {
+        if (!cancelled) setCatalogError('Catalogue indisponible. Réessayez dans un instant.');
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const filieresForFaculty = filieres.filter(
+    (f) => !regFaculte || f.faculte === regFaculte
+  );
+
+  const handleFaculteChange = (value) => {
+    setRegFaculte(value);
+    const next = filieres.find((f) => f.faculte === value);
+    setRegFiliere(next?.label || '');
+    setRegOtherFiliere('');
+  };
 
   // ── États Mot de passe oublié (Code Google 16 caractères / SMTP) ──
   const [forgotStep, setForgotStep] = useState(1); // 1: Email, 2: Code 6 chiffres, 3: Nouveau MDP
@@ -42,6 +89,7 @@ export default function StudentAuth({ defaultTab = 'login' }) {
   const [forgotCode, setForgotCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newPasswordConfirm, setNewPasswordConfirm] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
   const [forgotLoading, setForgotLoading] = useState(false);
   const [forgotMsg, setForgotMsg] = useState('');
   const [forgotError, setForgotError] = useState('');
@@ -66,6 +114,7 @@ export default function StudentAuth({ defaultTab = 'login' }) {
     e.preventDefault();
     setRegLoading(true);
     setRegError('');
+    setRegNotice('');
 
     if (regPassword !== regPasswordConfirm) {
       setRegError("Les deux mots de passe ne correspondent pas.");
@@ -73,17 +122,32 @@ export default function StudentAuth({ defaultTab = 'login' }) {
       return;
     }
 
+    const filiere = regFiliere === OTHER_FILIERE ? regOtherFiliere.trim() : regFiliere;
+    if (!regFaculte || !filiere) {
+      setRegError('Veuillez choisir votre faculté et votre filière.');
+      setRegLoading(false);
+      return;
+    }
+
     try {
-      await registerStudent({
+      const session = await registerStudent({
         name: regName,
         email: regEmail,
         password: regPassword,
-        filiere: regFiliere,
+        faculte: regFaculte,
+        filiere,
         niveau: regNiveau,
         anneeAcademique: regAnnee,
-        dateNaissance: regBirthDate
+        dateNaissance: regBirthDate,
+        referredBy: referralCode
       });
-      navigate('/dashboard');
+      navigate('/dashboard', {
+        state: session.filiereRequested
+          ? { filiereRequested: filiere }
+          : session.referred
+          ? { referredBy: session.referrerName }
+          : undefined
+      });
     } catch (err) {
       setRegError(err.message || "Erreur lors de l'inscription.");
     } finally {
@@ -240,14 +304,24 @@ export default function StudentAuth({ defaultTab = 'login' }) {
                   Mot de passe oublié ?
                 </button>
               </div>
-              <input
-                type="password"
-                required
-                placeholder="••••••••"
-                className={inputClass}
-                value={loginPassword}
-                onChange={e => setLoginPassword(e.target.value)}
-              />
+              <div className="relative">
+                <input
+                  type={showLoginPassword ? 'text' : 'password'}
+                  required
+                  placeholder="••••••••"
+                  className={`${inputClass} pr-11`}
+                  value={loginPassword}
+                  onChange={e => setLoginPassword(e.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowLoginPassword(v => !v)}
+                  aria-label={showLoginPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+                  className="absolute inset-y-0 right-0 px-3 flex items-center text-slate-500 hover:text-slate-300 transition"
+                >
+                  <Icon name={showLoginPassword ? 'eye-off' : 'eye'} size={16} />
+                </button>
+              </div>
             </div>
 
             <button
@@ -288,10 +362,35 @@ export default function StudentAuth({ defaultTab = 'login' }) {
               <p className="text-slate-400 text-xs mt-0.5">Complétez vos informations pour créer votre profil</p>
             </div>
 
+            {referralCode && (
+              <div className="bg-emerald-950/50 border border-emerald-800/70 text-emerald-200 text-xs rounded-xl p-3 flex items-start gap-2">
+                <Icon name="users" size={15} className="mt-0.5" />
+                <span>
+                  Vous vous inscrivez avec le code de parrainage{' '}
+                  <strong className="font-black">{referralCode}</strong>. Votre parrain sera crédité
+                  automatiquement après la création de votre compte.
+                </span>
+              </div>
+            )}
+
             {regError && (
               <div className="bg-red-950/60 border border-red-800 text-red-300 text-xs rounded-xl p-3 flex items-start gap-2">
                 <Icon name="alert" size={15} className="mt-0.5" />
                 <span>{regError}</span>
+              </div>
+            )}
+
+            {regNotice && (
+              <div className="bg-amber-950/60 border border-amber-800 text-amber-300 text-xs rounded-xl p-3 flex items-start gap-2">
+                <Icon name="info" size={15} className="mt-0.5" />
+                <span>{regNotice}</span>
+              </div>
+            )}
+
+            {catalogError && (
+              <div className="bg-amber-950/60 border border-amber-800 text-amber-300 text-xs rounded-xl p-3 flex items-start gap-2">
+                <Icon name="alert" size={15} className="mt-0.5" />
+                <span>{catalogError}</span>
               </div>
             )}
 
@@ -323,6 +422,23 @@ export default function StudentAuth({ defaultTab = 'login' }) {
               />
             </div>
 
+            <div>
+              <label className={labelClass}>
+                Faculté <span className="text-red-400">*</span>
+              </label>
+              <select
+                className={selectClass}
+                value={regFaculte}
+                onChange={e => handleFaculteChange(e.target.value)}
+                required
+              >
+                {facultes.length === 0 && <option value="">Chargement du catalogue…</option>}
+                {facultes.map(f => (
+                  <option key={f.id} value={f.id}>{f.label || f.id}</option>
+                ))}
+              </select>
+            </div>
+
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className={labelClass}>
@@ -332,12 +448,12 @@ export default function StudentAuth({ defaultTab = 'login' }) {
                   className={selectClass}
                   value={regFiliere}
                   onChange={e => setRegFiliere(e.target.value)}
+                  required
                 >
-                  <option>Informatique</option>
-                  <option>Mathématiques</option>
-                  <option>Physique</option>
-                  <option>Chimie</option>
-                  <option>Biologie</option>
+                  {filieresForFaculty.map(f => (
+                    <option key={f.id} value={f.label}>{f.label}</option>
+                  ))}
+                  <option value={OTHER_FILIERE}>Autre filière (demande)</option>
                 </select>
                 <p className="text-[10px] text-slate-500 mt-0.5">Liée définitivement à votre compte</p>
               </div>
@@ -350,14 +466,33 @@ export default function StudentAuth({ defaultTab = 'login' }) {
                   value={regNiveau}
                   onChange={e => setRegNiveau(e.target.value)}
                 >
-                  <option>L1</option>
-                  <option>L2</option>
-                  <option>L3</option>
-                  <option>M1</option>
-                  <option>M2</option>
+                  {NIVEAUX.map(niv => (
+                    <option key={niv} value={niv}>{niv}</option>
+                  ))}
                 </select>
               </div>
             </div>
+
+            {regFiliere === OTHER_FILIERE && (
+              <div className="bg-blue-950/40 border border-blue-900/60 rounded-xl p-3 space-y-2">
+                <label className={labelClass}>
+                  Votre filière <span className="text-red-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex: Cinéma, Journalisme, Agronomie…"
+                  className={inputClass}
+                  value={regOtherFiliere}
+                  onChange={e => setRegOtherFiliere(e.target.value)}
+                />
+                <p className="text-[10px] text-slate-400">
+                  Votre compte est créé immédiatement. L'administration est notifiée et
+                  vous recevrez une alerte (dans l'application et par email) dès que
+                  la filière sera ajoutée.
+                </p>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -392,21 +527,31 @@ export default function StudentAuth({ defaultTab = 'login' }) {
                 <label className={labelClass}>
                   Mot de passe <span className="text-red-400">*</span>
                 </label>
-                <input
-                  type="password"
-                  required
-                  placeholder="Min 6 car."
-                  className={inputClass}
-                  value={regPassword}
-                  onChange={e => setRegPassword(e.target.value)}
-                />
+                <div className="relative">
+                  <input
+                    type={showRegPassword ? 'text' : 'password'}
+                    required
+                    placeholder="Min 6 car."
+                    className={`${inputClass} pr-11`}
+                    value={regPassword}
+                    onChange={e => setRegPassword(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowRegPassword(v => !v)}
+                    aria-label={showRegPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+                    className="absolute inset-y-0 right-0 px-3 flex items-center text-slate-500 hover:text-slate-300 transition"
+                  >
+                    <Icon name={showRegPassword ? 'eye-off' : 'eye'} size={16} />
+                  </button>
+                </div>
               </div>
               <div>
                 <label className={labelClass}>
                   Confirmer <span className="text-red-400">*</span>
                 </label>
                 <input
-                  type="password"
+                  type={showRegPassword ? 'text' : 'password'}
                   required
                   placeholder="Répétez"
                   className={inputClass}
@@ -557,19 +702,29 @@ export default function StudentAuth({ defaultTab = 'login' }) {
                 </p>
                 <div>
                   <label className={labelClass}>Nouveau Mot de passe</label>
-                  <input
-                    type="password"
-                    required
-                    placeholder="Min 6 caractères"
-                    className={inputClass}
-                    value={newPassword}
-                    onChange={e => setNewPassword(e.target.value)}
-                  />
+                  <div className="relative">
+                    <input
+                      type={showNewPassword ? 'text' : 'password'}
+                      required
+                      placeholder="Min 6 caractères"
+                      className={`${inputClass} pr-11`}
+                      value={newPassword}
+                      onChange={e => setNewPassword(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPassword(v => !v)}
+                      aria-label={showNewPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+                      className="absolute inset-y-0 right-0 px-3 flex items-center text-slate-500 hover:text-slate-300 transition"
+                    >
+                      <Icon name={showNewPassword ? 'eye-off' : 'eye'} size={16} />
+                    </button>
+                  </div>
                 </div>
                 <div>
                   <label className={labelClass}>Confirmer le mot de passe</label>
                   <input
-                    type="password"
+                    type={showNewPassword ? 'text' : 'password'}
                     required
                     placeholder="Répétez le mot de passe"
                     className={inputClass}

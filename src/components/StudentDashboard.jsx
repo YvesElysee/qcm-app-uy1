@@ -6,8 +6,6 @@ import ContactAdmin from './ContactAdmin';
 import usePageTitle from '../hooks/usePageTitle';
 import Icon from './ui/icons.jsx';
 
-const NIVEAUX = ['L1', 'L2', 'L3', 'M1', 'M2'];
-
 export default function StudentDashboard() {
   const navigate = useNavigate();
   const [currentUser, setCurrentUser] = useState(getCurrentUser());
@@ -28,19 +26,26 @@ export default function StudentDashboard() {
     }
   }, [currentUser, navigate]);
 
-  // Filière fixe de l'étudiant
+  // Filière et niveau FIXES de l'étudiant : aucune permutation de niveau
+  // n'est possible depuis l'espace personnel (contrôle aussi côté serveur).
   const filiere = currentUser?.filiere || 'Informatique';
   const registeredNiveau = currentUser?.niveau || 'L1';
-
-  // Niveau actif sélectionné (par défaut celui de l'inscription)
-  const [selectedNiveau, setSelectedNiveau] = useState(registeredNiveau);
+  const faculte = currentUser?.faculte || '';
+  const selectedNiveau = registeredNiveau;
 
   // Données
   const [availableUes, setAvailableUes] = useState([]);
   const [allQuizzes, setAllQuizzes] = useState([]);
-  const [otherLevelQuizzes, setOtherLevelQuizzes] = useState([]);
   const [myResults, setMyResults] = useState([]);
   const [reviewStats, setReviewStats] = useState(null);
+  const [filiereRequest, setFiliereRequest] = useState(null);
+  const [quizRequests, setQuizRequests] = useState([]);
+  const [referral, setReferral] = useState(null);
+  const [requestThreshold, setRequestThreshold] = useState(10);
+  const [requestBusy, setRequestBusy] = useState('');
+  const [requestNotice, setRequestNotice] = useState('');
+  const [requestError, setRequestError] = useState('');
+  const [copiedReferral, setCopiedReferral] = useState(false);
   const [nowTs, setNowTs] = useState(0);
   const [loading, setLoading] = useState(true);
 
@@ -70,20 +75,24 @@ export default function StudentDashboard() {
       // 1. Charger les UEs de la filière et du niveau sélectionné
       // 2. Charger les Quizzes de la filière et du niveau sélectionné
       // 3. Charger STRICTEMENT les résultats de CET utilisateur (filtrés par le serveur)
-      const [uesData, quizzesData, resultsData, reviewData] = await Promise.all([
-        api(`/ues?filiere=${encodeURIComponent(filiere)}&niveau=${encodeURIComponent(selectedNiveau)}`),
-        api(`/quizzes?filiere=${encodeURIComponent(filiere)}&sort=asc`),
+      const scope = `filiere=${encodeURIComponent(filiere)}&niveau=${encodeURIComponent(selectedNiveau)}&faculte=${encodeURIComponent(faculte)}`;
+      const [uesData, quizzesData, resultsData, reviewData, requestData, quizRequestsData] = await Promise.all([
+        api(`/ues?${scope}`),
+        api(`/quizzes?${scope}&sort=asc`),
         api('/results/mine', { auth: 'student' }).catch(() => ({ results: [] })),
-        api('/review/stats', { auth: 'student' }).catch(() => null)
+        api('/review/stats', { auth: 'student' }).catch(() => null),
+        api('/auth/filiere-request', { auth: 'student' }).catch(() => ({ request: null })),
+        api('/quiz-requests/mine', { auth: 'student' }).catch(() => ({ requests: [], referral: null }))
       ]);
 
       setAvailableUes(uesData.ues);
       setReviewStats(reviewData);
-      // Épreuves du niveau actif + celles des autres niveaux (simplement signalées)
-      setAllQuizzes(quizzesData.quizzes.filter(q => q.niveau === selectedNiveau));
-      setOtherLevelQuizzes(
-        quizzesData.quizzes.filter(q => q.niveau && q.niveau !== selectedNiveau && q.launchTime)
-      );
+      setFiliereRequest(requestData?.request || null);
+      setQuizRequests(Array.isArray(quizRequestsData?.requests) ? quizRequestsData.requests : []);
+      setReferral(quizRequestsData?.referral || null);
+      if (Number(quizRequestsData?.threshold) > 0) setRequestThreshold(Number(quizRequestsData.threshold));
+      // Uniquement les épreuves de la filière, du niveau et de la faculté
+      setAllQuizzes(quizzesData.quizzes);
       setNowTs(Date.now());
 
       // Historique personnel exclusif : seuls les résultats par email OU nom
@@ -101,7 +110,7 @@ export default function StudentDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [currentUser, filiere, selectedNiveau]);
+  }, [currentUser, filiere, faculte, selectedNiveau]);
 
   useEffect(() => {
     const load = async () => { await loadData(); };
@@ -138,16 +147,61 @@ export default function StudentDashboard() {
     setLoadingRankings(true);
     setRankingsError('');
     try {
-      const data = await api(
-        `/results/ranking?niveau=${encodeURIComponent(selectedNiveau)}`,
-        { auth: 'student' }
-      );
+      // Le serveur verrouille le classement sur la salle de l'étudiant
+      // (faculté + filière + niveau d'inscription) : aucun niveau à envoyer.
+      const data = await api('/results/ranking', { auth: 'student' });
       setRankings(Array.isArray(data.groups) ? data.groups : []);
     } catch (err) {
       setRankingsError(err.message || 'Classement momentanément indisponible.');
       setRankings([]);
     } finally {
       setLoadingRankings(false);
+    }
+  };
+
+  // ── Demandes de QCM & parrainage ──
+  const requestByUe = new Map();
+  quizRequests.forEach((r) => {
+    const key = String(r.ue || '').toLowerCase();
+    if (key && !requestByUe.has(key)) requestByUe.set(key, r);
+  });
+
+  const referralLink = referral?.path && typeof window !== 'undefined'
+    ? `${window.location.origin}${referral.path}`
+    : '';
+
+  const submitQuizRequest = async (ueCode, ueLabel) => {
+    if (!ueCode || requestBusy) return;
+    setRequestBusy(ueCode);
+    setRequestError('');
+    setRequestNotice('');
+    try {
+      const data = await api('/quiz-requests', {
+        method: 'POST',
+        auth: 'student',
+        body: { ue: ueCode, ueLabel: ueLabel || '' }
+      });
+      setRequestNotice(data?.message || 'Votre demande a bien été enregistrée.');
+      const mine = await api('/quiz-requests/mine', { auth: 'student' });
+      setQuizRequests(Array.isArray(mine.requests) ? mine.requests : []);
+      setReferral(mine.referral || null);
+      if (Number(mine.threshold) > 0) setRequestThreshold(Number(mine.threshold));
+    } catch (err) {
+      setRequestError(err.message || "La demande n'a pas pu être enregistrée.");
+      if (/déjà programmée/i.test(err.message || '')) loadData();
+    } finally {
+      setRequestBusy('');
+    }
+  };
+
+  const copyReferralLink = async () => {
+    if (!referralLink) return;
+    try {
+      await navigator.clipboard.writeText(referralLink);
+      setCopiedReferral(true);
+      setTimeout(() => setCopiedReferral(false), 2500);
+    } catch {
+      setRequestError("Impossible de copier automatiquement. Sélectionnez le lien pour le copier.");
     }
   };
 
@@ -259,39 +313,65 @@ export default function StudentDashboard() {
               </div>
             </div>
 
-            {/* Sélecteur de niveau de la filière (Point 3) */}
-            <div className="bg-slate-950/60 p-3 rounded-2xl border border-slate-800 text-right">
-              <span className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2 text-left">
-                Niveau actif de la filière :
+            {/* Niveau verrouillé sur l'inscription (aucune permutation) */}
+            <div className="bg-slate-950/60 p-3 rounded-2xl border border-slate-800">
+              <span className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                <Icon name="lock" size={12} />
+                Parcours verrouillé
               </span>
-              <div className="flex gap-1.5">
-                {NIVEAUX.map(niv => {
-                  const isCurrent = selectedNiveau === niv;
-                  const isReg = registeredNiveau === niv;
-                  return (
-                    <button
-                      key={niv}
-                      onClick={() => {
-                        setSelectedNiveau(niv);
-                        setShowRankings(false);
-                      }}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-black transition relative ${
-                        isCurrent
-                          ? 'bg-blue-600 text-white shadow-md shadow-blue-500/30'
-                          : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
-                      }`}
-                    >
-                      {niv}
-                      {isReg && (
-                        <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-emerald-400 ring-2 ring-slate-900" title="Votre niveau d'inscription" />
-                      )}
-                    </button>
-                  );
-                })}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="px-3 py-1.5 rounded-xl text-xs font-black bg-blue-600 text-white shadow-md shadow-blue-500/30">
+                  {selectedNiveau}
+                </span>
+                <span className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-800 text-slate-300">
+                  {filiere}
+                </span>
+                {faculte && (
+                  <span className="px-3 py-1.5 rounded-xl text-[10px] font-bold bg-slate-800 text-slate-400 uppercase tracking-wider">
+                    {faculte}
+                  </span>
+                )}
               </div>
+              <p className="text-[10px] text-slate-500 mt-2 max-w-48">
+                Votre niveau et votre filière sont ceux de votre inscription.
+              </p>
             </div>
           </div>
         </div>
+
+        {/* ── Suivi de la demande de filière (si absente du catalogue) ── */}
+        {filiereRequest && filiereRequest.status !== 'approved' && (
+          <div className={`rounded-2xl p-4 border flex items-start gap-3 ${
+            filiereRequest.status === 'rejected'
+              ? 'bg-red-950/40 border-red-800/60'
+              : 'bg-amber-950/40 border-amber-700/50'
+          }`}>
+            <span className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+              filiereRequest.status === 'rejected'
+                ? 'bg-red-500/15 text-red-300'
+                : 'bg-amber-500/15 text-amber-300'
+            }`}>
+              <Icon name={filiereRequest.status === 'rejected' ? 'alert' : 'clock'} size={17} />
+            </span>
+            <div className="min-w-0">
+              <h3 className={`text-sm font-black ${
+                filiereRequest.status === 'rejected' ? 'text-red-200' : 'text-amber-200'
+              }`}>
+                {filiereRequest.status === 'rejected'
+                  ? `Demande de filière « ${filiereRequest.filiere} » non acceptée`
+                  : `Filière « ${filiereRequest.filiere} » en attente de validation`}
+              </h3>
+              <p className="text-xs text-slate-300/80 mt-0.5">
+                {filiereRequest.status === 'rejected'
+                  ? (filiereRequest.note || "Contactez l'administration pour plus d'informations.")
+                  : "Votre compte est actif. L'administration a bien reçu votre demande et vous serez notifié(e) ici et par email dès que la filière sera ajoutée au catalogue."}
+              </p>
+              <p className="text-[10px] text-slate-500 mt-1">
+                {filiereRequest.faculte}{filiereRequest.faculte ? ' • ' : ''}Demande du {formatDate(filiereRequest.createdAt)}
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* ── Révisions intelligentes (répétition espacée) ── */}
         <div className="bg-slate-800/50 border border-slate-700/60 rounded-3xl p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -487,46 +567,6 @@ export default function StudentDashboard() {
           </div>
         )}
 
-        {/* ── Épreuves des autres niveaux de la même filière (information) ── */}
-        {otherLevelQuizzes.length > 0 && (
-          <div className="bg-slate-800/40 border border-slate-700/60 rounded-3xl p-5">
-            <div className="flex items-start gap-3">
-              <span className="w-9 h-9 rounded-xl bg-blue-500/15 text-blue-300 flex items-center justify-center shrink-0">
-                <Icon name="info" size={17} />
-              </span>
-              <div className="min-w-0">
-                <h3 className="text-sm font-black text-white">
-                  Autres épreuves programmées en {filiere} ({otherLevelQuizzes.length})
-                </h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Vous consultez le niveau {selectedNiveau}. D'autres épreuves sont programmées dans les niveaux suivants :
-                </p>
-                <div className="flex flex-wrap gap-2 mt-2.5">
-                  {[...new Set(otherLevelQuizzes.map(q => q.niveau))]
-                    .sort((a, b) => a.localeCompare(b, 'fr'))
-                    .map(niv => {
-                      const count = otherLevelQuizzes.filter(q => q.niveau === niv).length;
-                      return (
-                        <button
-                          key={niv}
-                          onClick={() => {
-                        setSelectedNiveau(niv);
-                        setShowRankings(false);
-                      }}
-                          className="inline-flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-blue-500/50 text-slate-200 text-xs font-bold px-3 py-1.5 rounded-xl transition"
-                        >
-                          <Icon name="graduation" size={13} className="text-blue-400" />
-                          Niveau {niv}
-                          <span className="text-slate-500">({count})</span>
-                        </button>
-                      );
-                    })}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* ── Section UEs et Démarrage rapide ── */}
         <div className="bg-slate-800/50 border border-slate-700/60 rounded-3xl p-6">
           <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
@@ -622,16 +662,171 @@ export default function StudentDashboard() {
                       <div className="mt-4 w-full text-center bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[11px] font-bold py-2.5 rounded-xl">
                         Ouverture le {formatDate(quiz.launchTime)}
                       </div>
-                    ) : (
-                      <div className="mt-4 w-full text-center bg-slate-800 border border-slate-700 text-slate-400 text-[11px] font-bold py-2.5 rounded-xl">
-                        Épreuve non programmée
-                      </div>
-                    )}
+                    ) : (() => {
+                      const req = requestByUe.get(String(ue.id).toLowerCase());
+                      if (req && req.status !== 'rejected') {
+                        const validated = req.status === 'validated' || req.status === 'approved';
+                        const percent = req.progress?.percent || 0;
+                        return (
+                          <div className="mt-4 space-y-2">
+                            <div className="flex items-center justify-between text-[10px] font-bold">
+                              <span className={validated ? 'text-emerald-300' : 'text-amber-300'}>
+                                {req.status === 'approved'
+                                  ? 'Demande acceptée'
+                                  : validated
+                                  ? 'Demande validée'
+                                  : 'Demande en attente'}
+                              </span>
+                              <span className="text-slate-400">
+                                {req.progress?.count || 0}/{req.progress?.threshold || requestThreshold}
+                              </span>
+                            </div>
+                            <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full ${validated ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                                style={{ width: `${Math.max(percent, 6)}%` }}
+                              />
+                            </div>
+                            {!validated && (
+                              <button
+                                onClick={copyReferralLink}
+                                disabled={!referralLink}
+                                className="w-full bg-amber-500/15 hover:bg-amber-500/25 disabled:opacity-50 text-amber-200 border border-amber-500/30 text-[11px] font-bold py-2 rounded-xl transition"
+                              >
+                                {copiedReferral ? 'Lien copié !' : 'Inviter des camarades'}
+                              </button>
+                            )}
+                          </div>
+                        );
+                      }
+                      return (
+                        <button
+                          onClick={() => submitQuizRequest(ue.id, ue.label)}
+                          disabled={requestBusy === ue.id}
+                          className="mt-4 w-full bg-blue-950/60 hover:bg-blue-900 disabled:opacity-50 text-blue-200 border border-blue-800/80 text-[11px] font-bold py-2.5 rounded-xl transition"
+                        >
+                          {requestBusy === ue.id ? 'Envoi…' : 'Demander ce QCM'}
+                        </button>
+                      );
+                    })()}
                   </div>
                 );
               })}
             </div>
           )}
+        </div>
+
+        {/* ── Demandes de QCM & parrainage ── */}
+        <div className="bg-slate-800/50 border border-slate-700/60 rounded-3xl p-6 space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <h3 className="text-lg font-black text-white flex items-center gap-2">
+                <Icon name="users" size={18} className="text-blue-400" />
+                Demandes de QCM & parrainage
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Une épreuve manque pour votre parcours ? Demandez-la. À {requestThreshold} demandes
+                pour la même filière, le même niveau et la même UE, elle est validée auprès de l'administration.
+              </p>
+            </div>
+            {referral?.privileges?.badge && (
+              <span className="inline-flex items-center gap-1.5 bg-amber-500/15 text-amber-200 border border-amber-500/30 text-[11px] font-black px-3 py-1.5 rounded-full">
+                <Icon name="trophy" size={13} />
+                {referral.privileges.badge}
+              </span>
+            )}
+          </div>
+
+          {requestNotice && (
+            <div className="bg-emerald-950/50 border border-emerald-800/70 text-emerald-200 text-xs rounded-xl p-3 flex items-start gap-2">
+              <Icon name="check-circle" size={15} className="mt-0.5" />
+              <span>{requestNotice}</span>
+            </div>
+          )}
+          {requestError && (
+            <div className="bg-red-950/50 border border-red-800/70 text-red-200 text-xs rounded-xl p-3 flex items-start gap-2">
+              <Icon name="alert" size={15} className="mt-0.5" />
+              <span>{requestError}</span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="bg-slate-900/70 border border-slate-700/80 rounded-2xl p-4">
+              <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
+                Votre lien de parrainage
+              </p>
+              {referralLink ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    readOnly
+                    value={referralLink}
+                    onFocus={(e) => e.target.select()}
+                    className="flex-1 min-w-0 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-[11px] text-slate-300"
+                  />
+                  <button
+                    onClick={copyReferralLink}
+                    className="shrink-0 bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-black px-3 py-2 rounded-xl transition"
+                  >
+                    {copiedReferral ? 'Copié !' : 'Copier'}
+                  </button>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500">Lien indisponible pour le moment.</p>
+              )}
+              <div className="flex items-center gap-3 mt-2 text-[11px] text-slate-400">
+                <span>
+                  Code : <strong className="text-slate-200">{referral?.code || '—'}</strong>
+                </span>
+                <span>
+                  Filleuls : <strong className="text-slate-200">{referral?.privileges?.referralCount || 0}</strong>
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-500 mt-1">
+                1 filleul = badge Ambassadeur · 3 filleuls = priorité sur la plateforme.
+              </p>
+            </div>
+
+            <div className="bg-slate-900/70 border border-slate-700/80 rounded-2xl p-4">
+              <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
+                Vos demandes en cours
+              </p>
+              {quizRequests.filter((r) => r.status !== 'rejected').length === 0 ? (
+                <p className="text-xs text-slate-500">
+                  Aucune demande active. Utilisez « Demander ce QCM » sur une UE non programmée.
+                </p>
+              ) : (
+                <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
+                  {quizRequests.filter((r) => r.status !== 'rejected').map((r) => {
+                    const validated = r.status === 'validated' || r.status === 'approved';
+                    return (
+                      <div key={r.id}>
+                        <div className="flex items-center justify-between text-[11px] font-bold">
+                          <span className="text-slate-200 truncate">
+                            {r.ue}{r.ueLabel ? ` · ${r.ueLabel}` : ''}
+                          </span>
+                          <span className={validated ? 'text-emerald-300' : 'text-amber-300'}>
+                            {r.status === 'approved' ? 'Acceptée' : validated ? 'Validée' : 'En attente'}
+                          </span>
+                        </div>
+                        <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden mt-1">
+                          <div
+                            className={`h-full ${validated ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                            style={{ width: `${Math.max(r.progress?.percent || 0, 6)}%` }}
+                          />
+                        </div>
+                        <p className="text-[10px] text-slate-500 mt-0.5">
+                          {r.progress?.count || 0}/{r.progress?.threshold || requestThreshold} demandes
+                          {!validated && r.progress?.remaining
+                            ? ` · encore ${r.progress.remaining}`
+                            : ''}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* ── Mes QCM Passés STRICTEMENT CET UTILISATEUR (Point 2) ── */}

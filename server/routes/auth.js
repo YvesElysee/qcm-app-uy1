@@ -10,6 +10,12 @@ import {
   createStudentToken, deleteStudentToken, requireStudent
 } from '../auth.js';
 import { sendResetCodeEmail } from '../smtp.js';
+import {
+  normalizeFaculte,
+  facultyOfFiliere,
+  filiereExists
+} from '../access.js';
+import { ensureReferralCode, attachReferral, privilegesOf } from '../referrals.js';
 
 const router = Router();
 
@@ -24,23 +30,32 @@ function sanitizeEmailDocId(email) {
  * Construit l'objet session retourné au client (même forme que l'ancien localStorage)
  */
 function sessionOf(user) {
+  const code = ensureReferralCode(user);
+  const privileges = privilegesOf(user.id);
   return {
     uid: user.id,
     name: user.name,
     email: user.email,
+    faculte: normalizeFaculte(user.faculte || facultyOfFiliere(user.filiere)),
     filiere: user.filiere,
     niveau: user.niveau,
     anneeAcademique: user.anneeAcademique,
-    dateNaissance: user.dateNaissance || ''
+    dateNaissance: user.dateNaissance || '',
+    referralCode: code,
+    referredBy: user.referredBy || '',
+    referralCount: privileges.referralCount,
+    privileges
   };
 }
 
 // ── Inscription ────────────────────────────────────────────────────────
 router.post('/register', (req, res) => {
-  const { name, email, password, filiere, niveau, anneeAcademique, dateNaissance } = req.body || {};
+  const { name, email, password, faculte, filiere, niveau, anneeAcademique, dateNaissance, referredBy } = req.body || {};
 
   const cleanEmail = String(email || '').trim().toLowerCase();
   const cleanName = String(name || '').trim();
+  const cleanFiliere = String(filiere || '').trim() || 'Informatique';
+  const cleanNiveau = String(niveau || '').trim() || 'L1';
 
   if (!cleanEmail || !password || !cleanName) {
     return res.status(400).json({ error: 'Veuillez renseigner les champs obligatoires (Nom, Email, Mot de passe).' });
@@ -54,19 +69,98 @@ router.post('/register', (req, res) => {
     return res.status(409).json({ error: 'Un compte existe déjà avec cette adresse email.' });
   }
 
+  // Faculté effective : celle choisie, sinon celle du catalogue pour la filière.
+  let cleanFaculte = normalizeFaculte(faculte || facultyOfFiliere(cleanFiliere));
+  let known = filiereExists(cleanFaculte, cleanFiliere);
+  if (!known) {
+    const actual = facultyOfFiliere(cleanFiliere);
+    if (actual) {
+      cleanFaculte = normalizeFaculte(actual);
+      known = filiereExists(cleanFaculte, cleanFiliere);
+    }
+  }
+
   const now = new Date().toISOString();
   db.prepare(`
-    INSERT INTO users (id, name, email, passwordHash, filiere, niveau, anneeAcademique, dateNaissance, createdAt, lastLogin)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO users
+      (id, name, email, passwordHash, faculte, filiere, niveau, anneeAcademique, dateNaissance, createdAt, lastLogin)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     docId, cleanName, cleanEmail, hashPassword(password),
-    filiere || 'Informatique', niveau || 'L1', anneeAcademique || '2025-2026',
+    cleanFaculte, cleanFiliere, cleanNiveau, anneeAcademique || '2025-2026',
     dateNaissance || '', now, now
   );
 
+  // Filière absente du catalogue : on enregistre une demande à traiter par
+  // l'administration. L'étudiant reçoit une notification (et un email) dès
+  // que la filière est ajoutée.
+  let filiereRequested = false;
+  if (!known) {
+    const existingRequest = db.prepare(`
+      SELECT id FROM filiere_requests
+      WHERE LOWER(TRIM(email)) = LOWER(TRIM(?))
+        AND UPPER(TRIM(faculte)) = UPPER(TRIM(?))
+        AND LOWER(TRIM(filiere)) = LOWER(TRIM(?))
+        AND status = 'pending'
+      LIMIT 1
+    `).get(cleanEmail, cleanFaculte, cleanFiliere);
+
+    if (!existingRequest) {
+      db.prepare(`
+        INSERT INTO filiere_requests
+          (userId, name, email, faculte, filiere, niveau, status, note, createdAt)
+        VALUES (?, ?, ?, ?, ?, ?, 'pending', '', ?)
+      `).run(docId, cleanName, cleanEmail, cleanFaculte, cleanFiliere, cleanNiveau, now);
+    }
+    filiereRequested = true;
+  }
+
+  // Parrainage facultatif : le code est fourni via le lien d'inscription.
+  const referral = attachReferral(docId, referredBy);
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(docId);
   const token = createStudentToken(docId);
-  res.status(201).json({ user: sessionOf(user), token });
+  res.status(201).json({
+    user: sessionOf(user),
+    token,
+    filiereRequested,
+    referred: !!referral,
+    referrerName: referral?.referrerName || ''
+  });
+});
+
+// ── Suivi de la demande de filière de l'étudiant connecté ─────────────
+router.get('/filiere-request', requireStudent, (req, res) => {
+  const request = db.prepare(`
+    SELECT id, faculte, filiere, niveau, status, note, createdAt, handledAt
+    FROM filiere_requests
+    WHERE LOWER(TRIM(email)) = LOWER(TRIM(?))
+    ORDER BY createdAt DESC, id DESC
+    LIMIT 1
+  `).get(req.user.email);
+
+  res.json({ request: request || null });
+});
+
+// ── Parrainage de l'étudiant connecté ─────────────────────────────────
+router.get('/referral', requireStudent, (req, res) => {
+  const code = ensureReferralCode(req.user);
+  const privileges = privilegesOf(req.user.id);
+  const referred = db.prepare(`
+    SELECT u.name, r.createdAt
+    FROM referrals r
+    JOIN users u ON u.id = r.referredUserId
+    WHERE r.referrerId = ?
+    ORDER BY r.createdAt DESC
+    LIMIT 50
+  `).all(req.user.id);
+
+  res.json({
+    code,
+    path: code ? `/register?ref=${encodeURIComponent(code)}` : '',
+    referredBy: req.user.referredBy || '',
+    privileges,
+    referrals: referred
+  });
 });
 
 // ── Connexion ─────────────────────────────────────────────────────────

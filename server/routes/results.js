@@ -10,6 +10,12 @@ import { requireStudent } from '../auth.js';
 import { normalizeCorrect, upsertWrongCard } from '../spacedRepetition.js';
 import { drawForStudent } from '../questionDraw.js';
 import { buildRankingGroups } from '../ranking.js';
+import {
+  canStudentAccessQuiz,
+  normalizeFaculte,
+  studentFaculte,
+  quizFaculte
+} from '../access.js';
 
 const router = Router();
 
@@ -30,6 +36,7 @@ function toResult(row, { includeAnswers = false } = {}) {
     ue: row.ue,
     filiere: row.filiere,
     niveau: row.niveau,
+    faculte: row.faculte || '',
     score: row.score,
     total: row.total,
     answers: includeAnswers ? parseAnswers(row.answers) : [],
@@ -62,6 +69,12 @@ router.post('/', requireStudent, (req, res) => {
   const quiz = db.prepare('SELECT * FROM quizzes WHERE id = ?').get(String(ue));
   if (!quiz) {
     return res.status(404).json({ error: 'Épreuve introuvable.' });
+  }
+
+  if (!canStudentAccessQuiz(req.user, quiz)) {
+    return res.status(403).json({
+      error: "Vous ne pouvez pas déposer une copie pour une épreuve d'une autre filière ou d'un autre niveau."
+    });
   }
 
   const quizQuestions = db.prepare(
@@ -110,14 +123,15 @@ router.post('/', requireStudent, (req, res) => {
   const total = corrected.length;
 
   const info = db.prepare(`
-    INSERT INTO results (name, email, ue, filiere, niveau, score, total, answers, sessionTimestamp, isMakeup, date)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO results (name, email, ue, filiere, niveau, faculte, score, total, answers, sessionTimestamp, isMakeup, date)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     req.user.name,
     req.user.email,
     quiz.id,
     quiz.filiere || req.user.filiere || '',
     quiz.niveau || req.user.niveau || '',
+    normalizeFaculte(quizFaculte(quiz) || studentFaculte(req.user)),
     score,
     total,
     JSON.stringify(corrected),
@@ -144,22 +158,30 @@ router.post('/', requireStudent, (req, res) => {
 });
 
 /**
- * Classement d'une session de QCM (public).
- * Les réponses détaillées ne sont jamais exposées ici.
+ * Classement d'une session de QCM, limité à la salle de l'étudiant connecté
+ * (faculté + filière + niveau). Les réponses détaillées ne sont jamais
+ * exposées ici.
  */
-router.get('/', (req, res) => {
+router.get('/', requireStudent, (req, res) => {
   const { ue, sessionTimestamp } = req.query;
   if (!ue) {
     return res.status(400).json({ error: 'Paramètre "ue" requis.' });
   }
 
-  let rows;
+  let sql = 'SELECT * FROM results WHERE ue = ?';
+  const params = [ue];
+  sql += ' AND LOWER(TRIM(filiere)) = LOWER(TRIM(?))';
+  params.push(req.user.filiere || '');
+  sql += ' AND LOWER(TRIM(niveau)) = LOWER(TRIM(?))';
+  params.push(req.user.niveau || '');
+  sql += ` AND UPPER(COALESCE(NULLIF(TRIM(faculte), ''), 'FACSCIENCES')) = ?`;
+  params.push(studentFaculte(req.user));
   if (sessionTimestamp !== undefined) {
-    rows = db.prepare('SELECT * FROM results WHERE ue = ? AND sessionTimestamp = ?').all(ue, Number(sessionTimestamp));
-  } else {
-    rows = db.prepare('SELECT * FROM results WHERE ue = ?').all(ue);
+    sql += ' AND sessionTimestamp = ?';
+    params.push(Number(sessionTimestamp));
   }
 
+  const rows = db.prepare(sql).all(...params);
   res.json({ results: rows.map(r => toResult(r)) });
 });
 
@@ -170,7 +192,10 @@ router.get('/', (req, res) => {
  */
 router.get('/ranking', requireStudent, (req, res) => {
   const filiere = String(req.user.filiere || '').trim();
-  const niveau = String(req.query.niveau || req.user.niveau || '').trim();
+  // Le niveau est verrouillé sur celui de l'inscription : un étudiant de L1
+  // ne peut jamais consulter le classement des niveaux supérieurs.
+  const niveau = String(req.user.niveau || '').trim();
+  const faculte = studentFaculte(req.user);
   const ue = String(req.query.ue || '').trim();
   const sessionTimestamp = req.query.sessionTimestamp !== undefined
     ? Number(req.query.sessionTimestamp)
@@ -186,6 +211,8 @@ router.get('/ranking', requireStudent, (req, res) => {
     sql += ' AND LOWER(TRIM(niveau)) = LOWER(TRIM(?))';
     params.push(niveau);
   }
+  sql += ` AND UPPER(COALESCE(NULLIF(TRIM(faculte), ''), 'FACSCIENCES')) = ?`;
+  params.push(faculte);
   if (ue) {
     sql += ' AND ue = ?';
     params.push(ue);

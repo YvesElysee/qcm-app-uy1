@@ -22,7 +22,12 @@ import uesRoutes from './routes/ues.js';
 import adminRoutes from './routes/admin.js';
 import settingsRoutes from './routes/settings.js';
 import aiRoutes from './routes/ai.js';
+import aiGenerationRoutes from './routes/aiGeneration.js';
 import reviewRoutes from './routes/review.js';
+import catalogRoutes from './routes/catalog.js';
+import notificationsRoutes from './routes/notifications.js';
+import resourcesRoutes from './routes/resources.js';
+import quizRequestsRoutes, { adminRouter as quizRequestsAdminRoutes } from './routes/quizRequests.js';
 import { scheduleBackups } from './backup.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -38,10 +43,17 @@ app.use('/api/quizzes', quizzesRoutes);
 app.use('/api/results', resultsRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/ues', uesRoutes);
+app.use('/api/admin/quiz-requests', quizRequestsAdminRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/ai-generation', aiGenerationRoutes);
 app.use('/api/review', reviewRoutes);
+app.use('/api/catalog', catalogRoutes);
+app.use('/api/notifications', notificationsRoutes);
+app.use('/api/resources', resourcesRoutes);
+app.use('/api/quiz-requests', quizRequestsRoutes);
+app.use('/api/admin/quiz-requests', quizRequestsAdminRoutes);
 
 /**
  * Statistiques publiques de la plateforme (page d'accueil).
@@ -58,8 +70,9 @@ app.get('/api/stats', (_req, res) => {
     const filieres = db.prepare(
       "SELECT COUNT(DISTINCT filiere) AS c FROM ues WHERE filiere IS NOT NULL AND filiere <> ''"
     ).get().c;
+    const facultes = db.prepare('SELECT COUNT(*) AS c FROM facultes').get().c;
 
-    res.json({ students, quizzes, ues, upcoming, filieres });
+    res.json({ students, quizzes, ues, upcoming, filieres, facultes });
   } catch (err) {
     console.error('[api] Erreur statistiques :', err);
     res.status(500).json({ error: 'Impossible de charger les statistiques.' });

@@ -203,6 +203,132 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_review_due ON review_cards(userId, dueAt);
 `);
 
+// ── Catalogue des facultés / filières & fonctionnalités transverses ────
+db.exec(`
+  -- Facultés de l'université (ex: FACSCIENCES, FALSH)
+  CREATE TABLE IF NOT EXISTS facultes (
+    id        TEXT PRIMARY KEY,
+    label     TEXT NOT NULL,
+    createdAt TEXT
+  );
+
+  -- Filières rattachées à une faculté (catalogue proposé à l'inscription)
+  CREATE TABLE IF NOT EXISTS filieres (
+    id        TEXT PRIMARY KEY,
+    label     TEXT NOT NULL,
+    faculte   TEXT NOT NULL,
+    createdAt TEXT,
+    UNIQUE(faculte, label)
+  );
+  CREATE INDEX IF NOT EXISTS idx_filieres_faculte ON filieres(faculte);
+
+  -- Demandes de filières absentes du catalogue (formulaire d'inscription)
+  CREATE TABLE IF NOT EXISTS filiere_requests (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    userId    TEXT DEFAULT '',
+    name      TEXT,
+    email     TEXT,
+    faculte   TEXT,
+    filiere   TEXT,
+    niveau    TEXT,
+    status    TEXT DEFAULT 'pending',          -- pending | approved | rejected
+    note      TEXT DEFAULT '',
+    createdAt TEXT,
+    handledAt TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_filiere_requests_status ON filiere_requests(status);
+
+  -- Notifications par utilisateur (QCM disponible, filière ajoutée, etc.)
+  CREATE TABLE IF NOT EXISTS notifications (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    userId    TEXT NOT NULL,
+    type      TEXT NOT NULL,
+    title     TEXT NOT NULL,
+    message   TEXT DEFAULT '',
+    link      TEXT DEFAULT '',
+    entityKey TEXT DEFAULT '',
+    isRead    INTEGER DEFAULT 0,
+    createdAt TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(userId, isRead, createdAt);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_dedupe
+    ON notifications(userId, entityKey) WHERE entityKey <> '';
+
+  -- Documents de référence utilisés par le générateur de QCM IA
+  CREATE TABLE IF NOT EXISTS ai_documents (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    originalName TEXT NOT NULL,
+    storedName   TEXT NOT NULL,
+    mimeType     TEXT DEFAULT '',
+    size         INTEGER DEFAULT 0,
+    charCount    INTEGER DEFAULT 0,
+    textContent  TEXT DEFAULT '',
+    uploadedBy   TEXT DEFAULT 'admin',
+    createdAt    TEXT
+  );
+
+  -- Ressources de cours partagées par les étudiants et l'administration
+  CREATE TABLE IF NOT EXISTS resources (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    title        TEXT NOT NULL,
+    description  TEXT DEFAULT '',
+    ue           TEXT DEFAULT '',
+    faculte      TEXT,
+    filiere      TEXT,
+    niveau       TEXT,
+    originalName TEXT NOT NULL,
+    storedName   TEXT NOT NULL,
+    mimeType     TEXT DEFAULT '',
+    size         INTEGER DEFAULT 0,
+    uploaderId   TEXT DEFAULT '',
+    uploaderName TEXT DEFAULT '',
+    uploaderRole TEXT DEFAULT 'student',       -- student | admin
+    downloads    INTEGER DEFAULT 0,
+    createdAt    TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_resources_scope ON resources(faculte, filiere, niveau);
+  CREATE INDEX IF NOT EXISTS idx_resources_created ON resources(createdAt);
+
+  -- Demandes de QCM : un étudiant peut réclamer une épreuve absente pour son
+  -- parcours (faculté + filière + niveau + UE). Le regroupement sert de
+  -- pétition : au seuil atteint, la demande passe en « validée ».
+  CREATE TABLE IF NOT EXISTS quiz_requests (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    userId    TEXT NOT NULL,
+    name      TEXT,
+    email     TEXT,
+    faculte   TEXT NOT NULL,
+    filiere   TEXT NOT NULL,
+    niveau    TEXT NOT NULL,
+    ue        TEXT NOT NULL,
+    ueLabel   TEXT DEFAULT '',
+    message   TEXT DEFAULT '',
+    status    TEXT DEFAULT 'pending',          -- pending | validated | approved | rejected
+    note      TEXT DEFAULT '',
+    createdAt TEXT NOT NULL,
+    updatedAt TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_quiz_requests_group
+    ON quiz_requests(faculte, filiere, niveau, ue, status);
+  CREATE INDEX IF NOT EXISTS idx_quiz_requests_user ON quiz_requests(userId, createdAt);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_quiz_requests_active
+    ON quiz_requests(userId, faculte, filiere, niveau, ue)
+    WHERE status IN ('pending', 'validated');
+
+  -- Parrainage : chaque étudiant possède un code unique. Un filleul est
+  -- rattaché à son parrain à l'inscription (référence users.referredBy).
+  CREATE TABLE IF NOT EXISTS referrals (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    referrerId     TEXT NOT NULL,
+    referredUserId TEXT NOT NULL,
+    code           TEXT NOT NULL,
+    createdAt      TEXT NOT NULL
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_referrals_referred
+    ON referrals(referredUserId);
+  CREATE INDEX IF NOT EXISTS idx_referrals_referrer ON referrals(referrerId);
+`);
+
 /**
  * Ajoute une colonne si elle n'existe pas encore (migration douce des bases
  * créées avant l'ajout des fonctionnalités de banque de questions).
@@ -218,6 +344,93 @@ function ensureColumn(table, column, definition) {
 ensureColumn('quizzes', 'drawCount', 'INTEGER DEFAULT 0');
 ensureColumn('questions', 'tags', "TEXT DEFAULT ''");
 ensureColumn('questions', 'difficulte', "TEXT DEFAULT 'moyenne'");
+// Dimension faculté (migration douce des bases existantes)
+ensureColumn('users', 'faculte', "TEXT DEFAULT 'FACSCIENCES'");
+ensureColumn('quizzes', 'faculte', "TEXT DEFAULT 'FACSCIENCES'");
+ensureColumn('ues', 'faculte', "TEXT DEFAULT 'FACSCIENCES'");
+ensureColumn('results', 'faculte', "TEXT DEFAULT ''");
+// Parrainage (migration douce)
+ensureColumn('users', 'referralCode', "TEXT DEFAULT ''");
+ensureColumn('users', 'referredBy', "TEXT DEFAULT ''");
+
+// Un code de parrainage est unique (les lignes vides sont ignorées).
+db.exec(`
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_users_referral_code
+    ON users(referralCode) WHERE referralCode <> '';
+`);
+
+// ── Catalogue initial : facultés et filières ───────────────────────────
+// Seules les valeurs par défaut sont créées ici. L'administration peut
+// ensuite ajouter d'autres facultés/filières depuis son panneau.
+function slugify(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function filiereId(faculte, label) {
+  return `${slugify(faculte)}:${slugify(label)}`;
+}
+
+const DEFAULT_FACULTES = [
+  ['FACSCIENCES', 'Faculté des Sciences'],
+  ['FALSH', 'Faculté des Lettres et Sciences Humaines']
+];
+
+const DEFAULT_FILIERES = {
+  FACSCIENCES: ['Informatique', 'Mathématiques', 'Physique', 'Chimie', 'Biologie'],
+  FALSH: ['Lettres Modernes', 'Histoire', 'Géographie', 'Anglais', 'Philosophie', 'Sociologie', 'Psychologie']
+};
+
+const nowIso = new Date().toISOString();
+const insertFaculte = db.prepare(
+  'INSERT INTO facultes (id, label, createdAt) VALUES (?, ?, ?) ON CONFLICT(id) DO NOTHING'
+);
+DEFAULT_FACULTES.forEach(([id, label]) => insertFaculte.run(id, label, nowIso));
+
+const insertFiliere = db.prepare(`
+  INSERT INTO filieres (id, label, faculte, createdAt)
+  VALUES (?, ?, ?, ?)
+  ON CONFLICT(id) DO NOTHING
+`);
+Object.entries(DEFAULT_FILIERES).forEach(([faculte, labels]) => {
+  labels.forEach((label) => insertFiliere.run(filiereId(faculte, label), label, faculte, nowIso));
+});
+
+// Récupère les filières déjà présentes dans les anciennes données (users,
+// quizzes, ues) et les rattache au catalogue pour ne rien perdre.
+const existingFilieres = new Set();
+['users', 'quizzes', 'ues'].forEach((table) => {
+  db.prepare(`SELECT DISTINCT TRIM(filiere) AS f FROM ${table} WHERE filiere IS NOT NULL AND TRIM(filiere) <> ''`)
+    .all()
+    .forEach((row) => existingFilieres.add(row.f));
+});
+existingFilieres.forEach((label) => {
+  const known = db.prepare(
+    'SELECT id FROM filieres WHERE LOWER(TRIM(label)) = LOWER(TRIM(?)) LIMIT 1'
+  ).get(label);
+  if (!known) insertFiliere.run(filiereId('FACSCIENCES', label), label, 'FACSCIENCES', nowIso);
+});
+
+// Aligne la faculté des anciennes lignes sur le catalogue (filière → faculté)
+['users', 'quizzes', 'ues', 'results'].forEach((table) => {
+  db.prepare(`
+    UPDATE ${table}
+    SET faculte = (
+      SELECT f.faculte FROM filieres f
+      WHERE LOWER(TRIM(f.label)) = LOWER(TRIM(${table}.filiere))
+      LIMIT 1
+    )
+    WHERE filiere IS NOT NULL AND TRIM(filiere) <> ''
+      AND EXISTS (
+        SELECT 1 FROM filieres f
+        WHERE LOWER(TRIM(f.label)) = LOWER(TRIM(${table}.filiere))
+      )
+  `).run();
+});
 
 /**
  * Lit un paramètre JSON de la table settings

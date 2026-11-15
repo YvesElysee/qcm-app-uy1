@@ -16,10 +16,12 @@ export async function registerStudent({
   name,
   email,
   password,
+  faculte,
   filiere,
   niveau,
   anneeAcademique,
-  dateNaissance
+  dateNaissance,
+  referredBy
 }) {
   const cleanEmail = String(email || '').trim().toLowerCase();
   const cleanName = String(name || '').trim();
@@ -39,17 +41,26 @@ export async function registerStudent({
       name: cleanName,
       email: cleanEmail,
       password,
+      faculte,
       filiere,
       niveau,
       anneeAcademique,
-      dateNaissance
+      dateNaissance,
+      referredBy
     }
   });
 
   // Sauvegarde de la session locale (avec le jeton)
   const session = { ...data.user, token: data.token };
   saveSession(session);
-  return session;
+  // `filiereRequested` indique que la filière n'existe pas encore au
+  // catalogue : une demande a été transmise à l'administration.
+  return {
+    ...session,
+    filiereRequested: !!data.filiereRequested,
+    referred: !!data.referred,
+    referrerName: data.referrerName || ''
+  };
 }
 
 /**

@@ -26,7 +26,10 @@ Conçue avec **React 19 + Vite 8 + Tailwind CSS** et un **backend Node.js / Expr
 ## Nouvelles Fonctionnalités & Mises à Jour
 
 ### 1. Inscription & Authentification Étudiant (API sécurisée)
-- **Inscription complète** : Nom complet ou pseudo, adresse email, mot de passe, filière, niveau, année académique et date de naissance (optionnelle).
+- **Inscription complète** : Nom complet ou pseudo, adresse email, mot de passe, **faculté**, **filière du catalogue**, niveau, année académique et date de naissance (optionnelle).
+- **Catalogue facultés / filières** : le formulaire charge `GET /api/catalog` (facultés, filières et niveaux). La liste des filières se met à jour selon la faculté choisie.
+- **Filière absente du catalogue** : l'étudiant peut choisir « Autre filière (demande) » et saisir son intitulé. Son compte est créé normalement et une **demande** est enregistrée pour l'administration. Dès que l'admin ajoute la filière, l'étudiant reçoit une **notification dans l'application** et un **email**.
+- **Mot de passe affiché / masqué** : les champs de connexion, d'inscription et de réinitialisation disposent d'un bouton œil pour vérifier la saisie.
 - **Authentification par jeton serveur** : les mots de passe sont hachés côté serveur (scrypt + sel aléatoire) et le backend délivre un jeton de session. Le navigateur ne manipule plus aucun hash.
 - **Récupération de mot de passe par Email via Google SMTP** :
   - Génération d'un code de vérification à 6 chiffres valable 15 minutes.
@@ -36,19 +39,26 @@ Conçue avec **React 19 + Vite 8 + Tailwind CSS** et un **backend Node.js / Expr
 
 ### 2. Espace Étudiant & Gestion des QCM Passés / Manqués
 - **Historique personnel exclusif** : L'espace d'un étudiant n'affiche **strictement que les QCM qu'il a lui-même passés**, avec sa note (/20), son score et un accès à la correction détaillée ("Relire ma copie").
+- **Espace verrouillé sur le parcours inscrit** : l'étudiant ne voit que les épreuves, résultats, classements et ressources de **sa faculté, sa filière et son niveau d'inscription**. Aucun sélecteur de niveau ne permet de sortir de sa promotion.
 - **Rattrapage des évaluations manquées** :
   - Si un étudiant a manqué une épreuve programmée, celle-ci apparaît dans une section dédiée : *Évaluations Manquées · Rattrapage Disponible*.
   - L'étudiant peut rattraper l'évaluation à son rythme, mais avec **exactement le même temps par question, la même durée totale et les mêmes questions/configurations** que la session officielle.
   - Le résultat est enregistré avec la mention *Rattrapage*.
 
-### 3. Gestion de la Filière & Niveaux d'Étude
-- Un étudiant est lié à **une seule filière** choisie à l'inscription (cadenassée sur son tableau de bord).
-- Il peut naviguer entre tous les niveaux de sa filière (L1, L2, L3, M1, M2), avec son **niveau d'inscription sélectionné et mis en avant par défaut**.
+### 3. Multi-faculté, filières & niveaux
+- **Deux facultés seedées** : `FACSCIENCES` (Faculté des Sciences) et `FALSH` (Faculté des Lettres et Sciences Humaines), avec leurs filières par défaut. L'administration peut en ajouter ou en supprimer.
+- **Une seule filière par étudiant**, choisie à l'inscription et **cadenassée** sur son tableau de bord.
+- **Niveau verrouillé** : le niveau d'inscription (L1, L2, L3, M1, M2) est conservé sur le compte et verrouille l'espace personnel. Un étudiant de L1 ne peut ni consulter, ni télécharger, ni déposer une copie pour une épreuve de L3.
+- **Catalogue des UE par faculté, filière et niveau** : l'administration crée les UE dans une portée précise ; les épreuves héritent de cette portée.
+- **Notifications automatiques** : une cloche dans la navbar affiche le nombre de notifications non lues (rafraîchissement toutes les 60 s) et liste :
+  - les nouvelles épreuves disponibles pour la salle de l'étudiant (filière + niveau) ;
+  - la validation de sa demande de filière ;
+  - le rejet motivé d'une demande de filière.
 
 ### 4. Alertes & Emploi du Temps
 - **Avertissements proactifs** : Bannière d'alerte et compte à rebours dynamique pour les QCM prévus aujourd'hui ou dans les prochaines 24h/48h.
 - **Notifications navigateur** : Possibilité d'activer les rappels Web Notifications.
-- **Emploi du temps synchronisé** : Consultation du calendrier des épreuves avec statuts clairs (À venir, En cours, Rattrapage possible, Terminé).
+- **Emploi du temps synchronisé** : Consultation du calendrier des épreuves avec statuts clairs (À venir, En cours, Rattrapage possible, Terminé). Pour un étudiant connecté, l'emploi du temps est automatiquement limité à sa faculté, sa filière et son niveau.
 
 ### 5. Espace de Contact & Suggestions pour l'Admin
 - Formulaire dédié accessible en un clic depuis l'espace étudiant :
@@ -58,15 +68,19 @@ Conçue avec **React 19 + Vite 8 + Tailwind CSS** et un **backend Node.js / Expr
 - Côté Administrateur : section *Messages* permettant de filtrer par catégorie/filière, mettre à jour le statut, répondre directement par email (`mailto:`) ou supprimer.
 
 ### 6. Panneau Administrateur Réorganisé & Complet
-- **Interface repensée** : barre latérale sur desktop et onglets défilants sur mobile, neuf sections claires · *Vue d'ensemble, Évaluations, Analytique, Unités d'enseignement, Étudiants, Résultats, Messages, Sauvegardes, Paramètres SMTP* · dans le même thème sombre que l'espace étudiant.
+- **Interface repensée** : barre latérale sur desktop et onglets défilants sur mobile, **seize sections** claires · *Vue d'ensemble, Évaluations, Analytique, Tuteur IA, Génération QCM IA, Unités d'enseignement, Facultés & filières, Demandes de filière, Demandes de QCM, Étudiants, Résultats, Classements, Ressources, Messages, Sauvegardes, Paramètres SMTP*.
+- **Portée faculté / filière / niveau** : chaque écran de données (étudiants, résultats, analytique, classements, ressources, évaluations) peut être filtré par faculté, filière et niveau. Les listes de filières sont toujours dérivées de la faculté sélectionnée.
 - **Vue d'ensemble** : statistiques clés (évaluations, à venir, étudiants inscrits, messages en attente) et listes des prochaines et dernières évaluations.
 - **Évaluations** :
-  - Programmation (filière, niveau, semestre, minuterie, **nombre de questions tirées par étudiant**, ouverture/clôture) et import CSV regroupés côte à côte.
+  - Programmation (faculté héritée de l'UE, filière, niveau, semestre, minuterie, **nombre de questions tirées par étudiant**, ouverture/clôture) et import CSV regroupés côte à côte.
   - Liste complète avec actions : inspecter les questions, consulter les résultats, exporter CSV / procès-verbal PDF, supprimer l'évaluation (**les résultats déjà enregistrés sont conservés**).
-- **Analytique** : tableau de bord pédagogique avec les questions les plus ratées, la réussite moyenne par UE, l'évolution des notes dans le temps et les taux d'erreur globaux.
+- **Analytique** : tableau de bord pédagogique avec les questions les plus ratées, la réussite moyenne par UE, l'évolution des notes dans le temps et les taux d'erreur globaux, filtrable par parcours.
 - **Résultats** : consultation des notes par évaluation (participants, moyenne, meilleure note) avec exports CSV / PDF, plus un **export complet** de toutes les copies avec le détail de chaque réponse.
 - **Sauvegardes** : création, téléchargement et suppression des copies de sécurité SQLite (sauvegarde automatique planifiée côté serveur).
-- **Étudiants** : recherche, filtres, suppression et **export CSV** de la liste complète.
+- **Étudiants** : recherche, filtres faculté / filière / niveau, suppression et **export CSV** de la liste.
+- **Facultés & filières** : création et suppression sécurisée (refus si des étudiants ou UE y sont encore rattachés), compteurs d'étudiants et de filières.
+- **Demandes de filière** : file d'attente *en attente / validées / rejetées*. Valider une demande ajoute la filière au catalogue, aligne les comptes concernés et envoie notification + email aux étudiants.
+- **Ressources** : publication de documents officiels par faculté/filière/niveau, modération des dépôts étudiants, téléchargement et suppression.
 - **Parser CSV Ultra-Flexible** :
   - Accepte tous les délimiteurs : point-virgule (`;` standard Excel français), virgule (`,`), tabulation (`\t`), pipe (`|`).
   - Suppression automatique du BOM UTF-8 (`\ufeff`) qui corrompt souvent la première colonne dans Excel.
@@ -89,16 +103,42 @@ Conçue avec **React 19 + Vite 8 + Tailwind CSS** et un **backend Node.js / Expr
 - **Quota anti-épuisement des tokens** : `2` questions maximum par erreur et par étudiant sur une **fenêtre glissante de 24 h** (persisté dans la table `ai_usage`), plus un plafond quotidien (`30` par défaut). Quitter puis revenir avant l'échéance ne réinitialise pas le compteur. Les boutons IA restent masqués tant que les clés ne sont pas configurées (`GET /api/ai/status`).
 - **Tableau de bord admin « Tuteur IA »** : nombre de requêtes (aujourd'hui, semaine, mois), requêtes réussies / en erreur / refusées par quota, **tokens consommés** (annoncés par les fournisseurs), **budget mensuel restant** (`AI_TOKEN_BUDGET` − consommation du mois), graphique des 30 derniers jours, étudiants les plus consommateurs et questions les plus travaillées.
 
-### 8. Évaluations sécurisées & apprentissage adaptatif
+### 8. Génération de QCM par IA (administration)
+- **Documents de référence** : l'admin dépose des fichiers PDF, TXT, MD, CSV ou JSON (20 Mo max). Le texte est extrait côté serveur (y compris les PDF via `pdf-parse`) et stocké avec sa métadonnée en SQLite.
+- **Génération guidée** : prompt libre, nombre de questions (1 à 40), difficulté, faculté, filière, niveau et UE. Les 3 documents les plus récents sont utilisés par défaut, ou une sélection explicite.
+- **Questions contrôlées** : chaque proposition contient 4 options, une seule bonne réponse, des tags et un niveau de difficulté. Un aperçu complet est affiché avant utilisation.
+- **Enregistrement direct optionnel** : les questions peuvent être enregistrées dans une épreuve existante (code de l'épreuve, temps par question, semestre). Les anciennes questions de cette épreuve sont alors remplacées.
+- **Sécurité & budget** : accès strictement administrateur, documents stockés hors du dossier public, consommation décomptée du **budget mensuel de tokens IA**. Sans clé configurée, l'API répond `503` avec un message explicite.
+
+### 9. Ressources de cours partagées
+- **Espace étudiant `/resources`** : chaque étudiant voit et télécharge les documents de **sa faculté, sa filière et son niveau** uniquement. Il peut déposer un fichier (25 Mo max) et supprimer **uniquement ses propres dépôts**.
+- **Formats acceptés** : PDF, DOC/DOCX, PPT/PPTX, XLS/XLSX, TXT, MD, CSV, JSON, images (PNG, JPG, JPEG, WEBP) et ZIP.
+- **Téléchargement contrôlé** : les fichiers sont stockés hors du dossier public et servis par `GET /api/resources/:id/download`, qui vérifie la portée avant d'envoyer le fichier.
+- **Modération admin** : publication de ressources officielles pour n'importe quel parcours, filtrage par faculté / filière / niveau, téléchargement et suppression.
+
+### 10. Évaluations sécurisées & apprentissage adaptatif
 - **Correction 100 % côté serveur** : l'API publique ne renvoie jamais `ReponseCorrecte`. L'étudiant n'envoie que ses choix ; le serveur calcule le score, la note et la correction détaillée, puis les restitue après soumission. L'inspecteur admin conserve l'accès complet via son jeton.
+- **Contrôle d'accès centralisé** : `server/access.js` vérifie la **faculté + filière + niveau** pour consulter une épreuve, charger ses questions, déposer une copie, télécharger une ressource ou consulter un classement. L'administration dispose d'un bypass explicite.
 - **Anti-triche pendant l'épreuve** : détection des changements d'onglet, blocage du copier/coller et du menu contextuel, avertissement visuel, plein écran proposé et **soumission automatique au 3ᵉ incident**.
 - **Banque de questions enrichie** : tags libres, niveau de difficulté (`facile`, `moyenne`, `difficile`) et nombre de questions tirées par étudiant. Le tirage est **déterministe par étudiant** (même tirage en cas de reprise, ordre différent d'un étudiant à l'autre).
 - **Révisions intelligentes** : chaque erreur crée une carte de révision planifiée par **répétition espacée** (algorithme SM-2 simplifié). L'espace `/revision` permet de réviser les cartes dues, de consulter toutes ses cartes et de suivre ses échéances par UE.
 - **Correction visible après l'épreuve** : à la fin du QCM, l'étudiant voit immédiatement les cases qu'il a cochées et la bonne réponse pour chaque question. La correction reste **inaccessible pendant l'épreuve** ; elle est également disponible dans « Relire ma copie » (y compris pour les anciennes copies).
-- **Classements par salle** : une salle correspond à la classe de l'étudiant (**filière + niveau**). L'administration dispose d'un onglet *Classements* filtrable par UE, filière et niveau, avec **export CSV et PDF**. Chaque étudiant peut afficher le classement de sa propre salle depuis son espace, **uniquement après avoir cliqué sur « Classement »** : chaque personne est classée sur sa meilleure tentative, par épreuve et par session.
+- **Classements par salle** : une salle correspond à la classe de l'étudiant (**faculté + filière + niveau**). L'administration dispose d'un onglet *Classements* filtrable par UE, faculté, filière et niveau, avec **export CSV et PDF**. Chaque étudiant peut afficher le classement de sa propre salle depuis son espace ; le serveur ignore tout niveau demandé et utilise **son niveau d'inscription**.
 - **Sauvegarde automatique SQLite** : copies cohérentes via `db.backup()`, rotation configurable, téléchargement et suppression depuis l'administration, et **export complet** des résultats (une ligne par réponse) au format CSV.
 
-### 9. Design Professionnel Unifié
+### 11. Demandes de QCM & parrainage
+- **Demande d'épreuve** : depuis son tableau de bord, un étudiant peut demander un QCM absent pour **sa faculté, sa filière, son niveau et une UE**. Le serveur impose la portée du jeton : impossible de demander une épreuve pour un autre parcours.
+- **Pétition à seuil** : les demandes du même groupe (faculté + filière + niveau + UE) sont comptées. En dessous de `QUIZ_REQUEST_THRESHOLD` (10 par défaut), le demandeur voit sa progression et est invité à partager son **lien de parrainage**. Au seuil atteint, toutes les demandes passent en *validée* et une notification est envoyée aux demandeurs.
+- **Traitement administrateur** : la section *Demandes de QCM* regroupe les pétitions, affiche la progression, permet de programmer directement l'épreuve, d'accepter ou de rejeter avec un motif. Dès qu'une épreuve dotée de questions et d'une date d'ouverture est programmée (manuellement, par import CSV ou par l'IA), les demandes du groupe passent automatiquement en *acceptée*.
+- **Parrainage** : chaque étudiant possède un code unique et un lien `/register?ref=CODE`. Un filleul est rattaché automatiquement à l'inscription. **1 filleul = badge Ambassadeur**, **3 filleuls = priorité** sur la plateforme. Le parrain reçoit une notification à chaque inscription parrainée.
+- **Statuts** : `pending` (sous le seuil), `validated` (seuil atteint), `approved` (épreuve créée ou acceptée par l'admin), `rejected` (motif affiché à l'étudiant).
+- **Configuration** :
+  ```env
+  # Nombre de demandes identiques nécessaires pour valider une épreuve
+  QUIZ_REQUEST_THRESHOLD=10
+  ```
+
+### 12. Design Professionnel Unifié
 - **Thème sombre** cohérent sur tout le site (étudiant et administration) : fonds `slate-950/900`, bordures `slate-800`, couleur primaire `blue-600`, accents émeraude / rouge / indigo.
 - **Aucun emoji** : l'interface utilise exclusivement des icônes SVG au trait fin (`src/components/ui/icons.jsx`), alignées et lisibles à toutes les tailles.
 - Identité resserrée sur le nom **QCM App** partout (titre, emails, pied de page, procès-verbaux PDF).
@@ -174,26 +214,38 @@ npm start
 
 | Méthode & route | Accès | Description |
 |---|---|---|
-| `POST /api/auth/register` | public | Inscription étudiant |
+| `POST /api/auth/register` | public | Inscription étudiant (faculté + filière + niveau, demande de filière si absente, `referredBy` optionnel) |
 | `POST /api/auth/login` | public | Connexion étudiant → jeton |
+| `GET /api/auth/filiere-request` | étudiant | Suivi de la demande de filière |
+| `GET /api/auth/referral` | étudiant | Code, lien de parrainage, filleuls et privilèges |
 | `POST /api/auth/forgot-password` | public | Étape 1 : code 6 chiffres par email |
 | `POST /api/auth/verify-reset-code` | public | Étape 2 : vérification du code |
 | `POST /api/auth/reset-password` | public | Étape 3 : nouveau mot de passe |
 | `PUT /api/auth/profile` | étudiant | Mise à jour du profil |
 | `POST /api/auth/change-password` | étudiant | Changement de mot de passe |
-| `GET /api/quizzes` | public | Liste des QCM (filtres filière/niveau, tri) |
-| `GET /api/quizzes/:id` | public | Métadonnées d'un QCM |
-| `GET /api/quizzes/:id/questions` | public / admin | Questions (sans correction pour les étudiants, tirage par étudiant ; correction complète avec jeton admin) |
-| `POST /api/quizzes/:id` | admin | Programmer / fusionner un QCM |
+| `GET /api/catalog` | public | Catalogue facultés, filières et niveaux |
+| `GET /api/quizzes` | public / étudiant | Liste des QCM (filtres faculté/filière/niveau, tri) ; portée verrouillée avec un jeton étudiant |
+| `GET /api/quizzes/:id` | public / étudiant | Métadonnées d'un QCM (contrôle d'accès si jeton étudiant) |
+| `GET /api/quizzes/:id/questions` | admin / étudiant autorisé | Questions (sans correction pour les étudiants, tirage par étudiant ; correction complète avec jeton admin) |
+| `POST /api/quizzes/:id` | admin | Programmer / fusionner un QCM (faculté, filière, niveau) |
 | `POST /api/quizzes/:id/questions` | admin | Importer (remplacer) les questions |
 | `DELETE /api/quizzes/:id/questions/:qid` | admin | Supprimer une question |
 | `DELETE /api/quizzes/:id` | admin | Supprimer un QCM (questions + sessions ; **résultats conservés**) |
-| `POST /api/quizzes/:id/sessions` | public | Heartbeat présence participants |
-| `GET /api/quizzes/:id/sessions` | public | Compteur de participants |
-| `POST /api/results` | étudiant | Enregistrer une copie (score et correction calculés serveur) |
-| `GET /api/results?ue=&sessionTimestamp=` | public | Classement d'une session |
-| `GET /api/results/ranking?niveau=&ue=&sessionTimestamp=` | étudiant | Classement de sa salle (filière forcée côté serveur) |
+| `POST /api/quizzes/:id/sessions` | étudiant autorisé | Heartbeat présence participants |
+| `GET /api/quizzes/:id/sessions` | étudiant autorisé | Compteur de participants |
+| `POST /api/results` | étudiant | Enregistrer une copie (score et correction calculés serveur, portée vérifiée) |
+| `GET /api/results?ue=&sessionTimestamp=` | étudiant | Classement d'une session limité à sa salle |
+| `GET /api/results/ranking?ue=&sessionTimestamp=` | étudiant | Classement de sa salle (faculté + filière + niveau d'inscription forcés côté serveur) |
 | `GET /api/results/mine` | étudiant | Historique personnel (avec correction) |
+| `GET /api/notifications` | étudiant | Notifications personnelles + compteur de non-lues |
+| `POST /api/notifications/:id/read` · `read-all` · `DELETE /:id` | étudiant | Marquer comme lue / tout lire / supprimer |
+| `GET /api/quiz-requests/mine` | étudiant | Mes demandes de QCM, progression et lien de parrainage |
+| `GET /api/quiz-requests/progress?ue=` | étudiant | Progression d'une pétition pour son parcours |
+| `POST /api/quiz-requests` | étudiant | Demander un QCM (portée imposée par le jeton) |
+| `GET /api/resources` | étudiant / admin | Ressources du parcours (étudiant) ou toutes les ressources filtrables (admin) |
+| `POST /api/resources` | étudiant / admin | Déposer une ressource (multipart, portée imposée pour l'étudiant) |
+| `GET /api/resources/:id/download` | étudiant autorisé / admin | Téléchargement contrôlé hors dossier public |
+| `DELETE /api/resources/:id` | auteur / admin | Supprimer une ressource |
 | `GET /api/review/stats` | étudiant | Statistiques de révision espacée par UE |
 | `GET /api/review` | étudiant | Cartes dues (`?all=1` pour toutes, `?ue=` pour filtrer) |
 | `POST /api/review/:id/answer` | étudiant | Réévaluer une carte (`remembered`) |
@@ -201,17 +253,27 @@ npm start
 | `POST /api/feedback` | étudiant | Envoyer un message/suggestion |
 | `GET /api/feedback/mine` | étudiant | Suivi de mes messages |
 | `GET /api/feedback` · `PATCH` · `DELETE` | admin | Gestion des messages |
-| `GET /api/ues` | public | Liste des UEs |
-| `POST /api/ues` · `DELETE /api/ues/:id` | admin | Gestion des UEs |
+| `GET /api/ues?faculte=&filiere=&niveau=` | public | Liste des UEs |
+| `POST /api/ues` · `DELETE /api/ues/:id` | admin | Gestion des UEs (faculté, filière, niveau) |
 | `GET /api/ai/status` | étudiant | Disponibilité de l'assistant + quotas restants (dont fenêtre 24 h par question) |
 | `POST /api/ai/tutor` | étudiant | Question au tuteur (rotation de clés, quota 2/erreur sur 24 h) |
+| `GET /api/ai-generation/documents` | admin | Documents de référence déposés |
+| `POST /api/ai-generation/documents` | admin | Déposer un PDF/TXT/MD/CSV/JSON (20 Mo max) |
+| `DELETE /api/ai-generation/documents/:id` | admin | Supprimer un document de référence |
+| `POST /api/ai-generation/generate` | admin | Générer des questions (prompt + documents, enregistrement direct optionnel) |
 | `GET /api/admin/ai-usage` | admin | Requêtes, tokens consommés et budget mensuel restant |
 | `POST /api/admin/login` | public | Connexion admin → jeton |
 | `POST /api/admin/logout` | admin | Révoquer le jeton admin côté serveur |
-| `GET /api/admin/students` · `DELETE` | admin | Gestion des étudiants |
-| `GET /api/admin/results?ue=` | admin | Résultats (sans `ue` : export complet) |
-| `GET /api/admin/analytics` | admin | Agrégats : questions ratées, réussite par UE, évolution |
-| `GET /api/admin/rankings?ue=&filiere=&niveau=` | admin | Classements par salle (filière + niveau), par épreuve et session |
+| `GET /api/admin/students` · `DELETE` | admin | Gestion des étudiants (filtres faculté/filière/niveau) |
+| `GET /api/admin/results?ue=&faculte=&filiere=&niveau=` | admin | Résultats (sans `ue` : export complet) |
+| `GET /api/admin/analytics?faculte=&filiere=&niveau=` | admin | Agrégats : questions ratées, réussite par UE, évolution |
+| `GET /api/admin/rankings?ue=&faculte=&filiere=&niveau=` | admin | Classements par salle (faculté + filière + niveau), par épreuve et session |
+| `GET/POST /api/admin/facultes` · `DELETE /:id` | admin | Catalogue des facultés |
+| `GET/POST /api/admin/filieres` · `DELETE /:id` | admin | Catalogue des filières (notification + email des demandeurs à l'ajout) |
+| `GET /api/admin/filiere-requests?status=` | admin | Demandes de filière (en attente / validées / rejetées) |
+| `POST /api/admin/filiere-requests/:id/approve` · `reject` | admin | Traiter une demande (notification + email) |
+| `GET /api/admin/quiz-requests?faculte=&filiere=&niveau=&status=` | admin | Demandes de QCM individuelles + groupes/pétitions |
+| `POST /api/admin/quiz-requests/:id/approve` · `reject` | admin | Accepter / rejeter un groupe de demandes (notification aux demandeurs) |
 | `GET/POST /api/admin/backups` | admin | Lister / créer une sauvegarde SQLite |
 | `GET/DELETE /api/admin/backups/:name` | admin | Télécharger / supprimer une sauvegarde |
 | `GET/PUT /api/settings/smtp` · `POST /api/settings/test-smtp` | admin | Configuration & test SMTP |
@@ -225,25 +287,33 @@ npm start
 │   ├── index.js                # Point d'entrée : API + frontend statique en prod
 │   ├── db.js                   # SQLite (better-sqlite3) & schéma
 │   ├── auth.js                 # scrypt, jetons, middlewares requireStudent/requireAdmin
+│   ├── access.js               # Règles faculté + filière + niveau (accès épreuves, ressources, salles)
+│   ├── notifications.js        # Notifications internes (quiz disponible, filière validée/rejetée, demandes)
+│   ├── referrals.js            # Codes de parrainage, rattachement des filleuls et privilèges
 │   ├── smtp.js                 # Envoi SMTP Google (Nodemailer)
 │   ├── backup.js               # Sauvegardes SQLite planifiées (db.backup + rotation)
 │   ├── questionDraw.js         # Tirage déterministe des questions par étudiant
-│   ├── ranking.js              # Classements par salle (filière + niveau), meilleure tentative
+│   ├── ranking.js              # Classements par salle (faculté + filière + niveau), meilleure tentative
 │   ├── spacedRepetition.js     # Algorithme de répétition espacée (cartes d'erreurs)
 │   └── routes/
-│       ├── auth.js             # Inscription, connexion, MDP oublié (3 étapes), profil
-│       ├── quizzes.js          # QCM, questions (sans correction publique), tirage, présence
+│       ├── auth.js             # Inscription, connexion, MDP oublié (3 étapes), profil, demande de filière
+│       ├── catalog.js          # Catalogue public facultés / filières / niveaux
+│       ├── quizzes.js          # QCM, questions (sans correction publique), tirage, présence, notifications
 │       ├── results.js          # Copies corrigées serveur, classement, historique personnel
+│       ├── notifications.js    # Liste, lecture et suppression des notifications étudiantes
+│       ├── quizRequests.js     # Demandes de QCM (pétitions, seuil, modération admin, auto-approbation)
+│       ├── resources.js        # Ressources de cours (dépôt, téléchargement contrôlé, modération)
 │       ├── review.js           # Révisions intelligentes : cartes dues, réponses, stats
 │       ├── feedback.js         # Messages & suggestions étudiants
-│       ├── ues.js              # Unités d'enseignement
-│       ├── admin.js            # Login admin, étudiants, résultats, analytique, IA, classements
+│       ├── ues.js              # Unités d'enseignement (faculté, filière, niveau)
+│       ├── admin.js            # Login admin, catalogue, demandes, étudiants, résultats, analytique, classements
 │       ├── ai.js               # Tuteur IA : proxy Groq/Gemini, quotas 24 h, tokens, identité QCM App
+│       ├── aiGeneration.js     # Génération de QCM : documents de référence, extraction PDF, prompt
 │       └── settings.js         # Configuration & test SMTP
 ├── src/                        # Frontend React 19
 │   ├── components/
 │   │   ├── layout/
-│   │   │   ├── Navbar.jsx      # Barre de navigation partagée (responsive, menu utilisateur)
+│   │   │   ├── Navbar.jsx      # Barre de navigation partagée (responsive, notifications, menu utilisateur)
 │   │   │   └── Footer.jsx     # Pied de page partagé (navigation, infos institution)
 │   │   ├── pages/
 │   │   │   ├── Home.jsx       # Accueil public : présentation, stats en direct, prochaines évaluations
@@ -256,12 +326,14 @@ npm start
 │   │   │   └── icons.jsx       # Bibliothèque d'icônes SVG au trait (aucun emoji)
 │   │   ├── ContactAdmin.jsx    # Formulaire de suggestions & signalements étudiants
 │   │   ├── Login.jsx           # Accès sécurisé Administrateur
+│   │   ├── NotificationBell.jsx # Cloche de notifications (compteur non-lues, liste, lecture)
 │   │   ├── ReviewSession.jsx   # Relecture détaillée d'une copie d'examen (+ Tuteur IA)
 │   │   ├── RevisionSession.jsx # Révisions espacées des erreurs (cartes dues / toutes)
-│   │   ├── Schedule.jsx        # Emploi du temps public & étudiant
-│   │   ├── StudentAuth.jsx     # Connexion, Inscription complète & Récupération MDP
-│   │   ├── StudentDashboard.jsx # Tableau de bord étudiant (Alertes, Rattrapages, QCM)
-│   │   └── StudentProfile.jsx  # Profil personnel & changement de mot de passe
+│   │   ├── Schedule.jsx        # Emploi du temps public & étudiant (portée verrouillée si connecté)
+│   │   ├── StudentAuth.jsx     # Connexion, Inscription catalogue & Récupération MDP
+│   │   ├── StudentDashboard.jsx # Tableau de bord étudiant (parcours verrouillé, alertes, rattrapages)
+│   │   ├── StudentProfile.jsx  # Profil personnel & changement de mot de passe
+│   │   └── StudentResources.jsx # Espace de partage de ressources du parcours
 │   ├── hooks/
 │   │   └── usePageTitle.js     # Titre d'onglet par page
 │   ├── services/
@@ -271,14 +343,19 @@ npm start
 │   │   └── emailService.js      # Configuration SMTP & test (admin)
 │   ├── utils/
 │   │   └── csvParser.js        # Parser CSV universel tolérant tous formats & délimiteurs
-│   ├── AdminPanel.jsx          # Panneau d'administration complet
+│   ├── AdminPanel.jsx          # Panneau d'administration complet (16 sections)
 │   ├── App.jsx                 # Routage protégé + layout (navbar/footer) de l'application
 │   ├── config.js               # URL discrète du portail administrateur
 │   ├── QuizSession.jsx         # Moteur de passage de QCM (Live & Rattrapage, correction à la fin)
 │   └── main.jsx
-├── data/                       # Base SQLite (créée automatiquement, gitignorée)
-└── .env                        # ADMIN_PASSWORD, SMTP, PORT (voir .env.example)
+├── data/                       # Base SQLite + ressources + documents IA + sauvegardes (gitignoré)
+└── .env                        # ADMIN_PASSWORD, SMTP, IA, PORT (voir .env.example)
 ```
+
+Les fichiers déposés (ressources de cours et documents de référence IA) sont stockés
+hors du dossier public, sous `DATA_DIR` :
+`resources/`, `ai-documents/` et `backups/`. Seules les routes authentifiées et
+autorisées permettent de les télécharger.
 
 ### Navigation (routes)
 
@@ -286,8 +363,9 @@ npm start
 | --- | --- | --- |
 | `/` | Public | Accueil : présentation, statistiques en direct, prochaines évaluations |
 | `/login`, `/register`, `/forgot-password` | Public (redirige vers `/dashboard` si connecté) | Authentification étudiant |
-| `/dashboard` | Étudiant connecté | Espace personnel : UE, évaluations, rattrapages, résultats |
-| `/schedule` | Public | Emploi du temps des évaluations (filtrable) |
+| `/dashboard` | Étudiant connecté | Espace personnel verrouillé sur faculté + filière + niveau : UE, évaluations, rattrapages, résultats |
+| `/resources` | Étudiant connecté | Ressources de cours du parcours : téléchargement et dépôt |
+| `/schedule` | Public / étudiant | Emploi du temps des évaluations (limité au parcours si connecté) |
 | `/contact` | Étudiant connecté | Suggestions / contact administration |
 | `/quiz/:quizId` | Étudiant connecté | Session d'évaluation (immersif, sans navbar) |
 | `/review/:quizId` | Étudiant connecté | Relecture de copie |
@@ -310,7 +388,12 @@ La **navbar** et le **footer** sont partagés sur toutes les pages standard ; le
 - **Expiration gérée côté client** : à la première réponse `401`, la session admin locale est effacée et l'utilisateur est redirigé vers le portail discret (`src/config.js`) avec un message explicite.
 - **Portail administrateur non exposé** : aucun lien visible dans la navbar, le footer ou les pages d'authentification. L'URL secrète et le raccourci clavier ne remplacent pas l'authentification serveur.
 - **Tuteur IA sans clé exposée** : les appels passent par `/api/ai/*`, avec rotation de clés, repli automatique et quotas persistés en base.
-- Toutes les **écritures** (QCM, questions, UEs, messages, résultats, étudiants, SMTP) exigent un **jeton administrateur**.
+- **Cloisonnement faculté / filière / niveau** : `server/access.js` vérifie la portée exacte pour les métadonnées d'épreuve, les questions, la soumission d'une copie, les classements et les ressources. Un étudiant ne peut jamais lire ni modifier les données d'un autre parcours ; seul un jeton admin valide bypasse ces règles.
+- **Ressources et documents IA hors dossier public** : les fichiers sont stockés sous `DATA_DIR` et servis uniquement par des routes contrôlées. Les documents de référence IA sont réservés à l'administration.
+- **Uploads limités** : 25 Mo pour les ressources de cours, 20 Mo pour les documents IA, extensions autorisées explicitement, noms de fichiers normalisés côté serveur.
+- **Notifications personnelles** : chaque étudiant ne lit que ses propres notifications (`userId` issu du jeton), avec déduplication par événement.
+- **Demandes et parrainage** : la portée d'une demande de QCM est toujours déduite du jeton (jamais du corps de la requête). Les codes de parrainage sont uniques et un compte ne peut être rattaché qu'à un seul parrain.
+- Toutes les **écritures** (QCM, questions, UEs, messages, résultats, étudiants, catalogue, demandes de filière, ressources, SMTP) exigent un **jeton administrateur**.
 - L'**historique personnel** (`/api/results/mine`) et le **suivi des messages** sont filtrés par le serveur selon l'identité du jeton · plus de lecture globale des résultats côté client.
 - Les réinitialisations de mot de passe et les présences obsolètes sont **nettoyées automatiquement** côté serveur.
 

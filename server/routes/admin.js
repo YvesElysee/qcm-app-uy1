@@ -15,6 +15,14 @@ import {
 } from '../auth.js';
 import { createBackup, listBackups, backupPath, deleteBackup } from '../backup.js';
 import { buildRankingGroups } from '../ranking.js';
+import {
+  normalizeFaculte,
+  filiereId,
+  facultyOfFiliere,
+  slugify
+} from '../access.js';
+import { sendFiliereAvailableEmail } from '../smtp.js';
+import { notifyFiliereAvailable, createNotification } from '../notifications.js';
 
 const router = Router();
 
@@ -93,14 +101,41 @@ router.post('/logout', requireAdmin, (req, res) => {
 /**
  * Liste des comptes étudiants (triés par date d'inscription décroissante)
  */
-router.get('/students', requireAdmin, (_req, res) => {
-  const students = db.prepare('SELECT * FROM users ORDER BY createdAt DESC').all();
+router.get('/students', requireAdmin, (req, res) => {
+  const faculte = String(req.query.faculte || '').trim();
+  const filiere = String(req.query.filiere || '').trim();
+  const niveau = String(req.query.niveau || '').trim();
+  const search = String(req.query.search || '').trim();
+
+  let sql = 'SELECT * FROM users WHERE 1 = 1';
+  const params = [];
+  if (faculte) {
+    sql += " AND UPPER(COALESCE(NULLIF(TRIM(faculte), ''), 'FACSCIENCES')) = ?";
+    params.push(normalizeFaculte(faculte));
+  }
+  if (filiere) {
+    sql += ' AND LOWER(TRIM(filiere)) = LOWER(TRIM(?))';
+    params.push(filiere);
+  }
+  if (niveau) {
+    sql += ' AND LOWER(TRIM(niveau)) = LOWER(TRIM(?))';
+    params.push(niveau);
+  }
+  if (search) {
+    sql += ' AND (LOWER(name) LIKE ? OR LOWER(email) LIKE ?)';
+    const term = `%${search.toLowerCase()}%`;
+    params.push(term, term);
+  }
+  sql += ' ORDER BY createdAt DESC';
+
+  const students = db.prepare(sql).all(...params);
   // passwordHash volontairement omis
   res.json({
     students: students.map(u => ({
       id: u.id,
       name: u.name,
       email: u.email,
+      faculte: u.faculte || facultyOfFiliere(u.filiere) || 'FACSCIENCES',
       filiere: u.filiere,
       niveau: u.niveau,
       anneeAcademique: u.anneeAcademique,
@@ -130,10 +165,32 @@ router.delete('/students/:id', requireAdmin, (req, res) => {
  * Sans paramètre `ue`, l'export complet est renvoyé.
  */
 router.get('/results', requireAdmin, (req, res) => {
-  const ue = req.query.ue;
-  const rows = ue
-    ? db.prepare('SELECT * FROM results WHERE ue = ? ORDER BY date DESC').all(ue)
-    : db.prepare('SELECT * FROM results ORDER BY date DESC').all();
+  const ue = String(req.query.ue || '').trim();
+  const faculte = String(req.query.faculte || '').trim();
+  const filiere = String(req.query.filiere || '').trim();
+  const niveau = String(req.query.niveau || '').trim();
+
+  let sql = 'SELECT * FROM results WHERE 1 = 1';
+  const params = [];
+  if (ue) {
+    sql += ' AND ue = ?';
+    params.push(ue);
+  }
+  if (faculte) {
+    sql += " AND UPPER(COALESCE(NULLIF(TRIM(faculte), ''), 'FACSCIENCES')) = ?";
+    params.push(normalizeFaculte(faculte));
+  }
+  if (filiere) {
+    sql += ' AND LOWER(TRIM(filiere)) = LOWER(TRIM(?))';
+    params.push(filiere);
+  }
+  if (niveau) {
+    sql += ' AND LOWER(TRIM(niveau)) = LOWER(TRIM(?))';
+    params.push(niveau);
+  }
+  sql += ' ORDER BY date DESC';
+
+  const rows = db.prepare(sql).all(...params);
   const parse = (json) => {
     try { return json ? JSON.parse(json) : []; } catch { return []; }
   };
@@ -158,8 +215,28 @@ function parseAnswers(json) {
  * - réussite moyenne par UE
  * - évolution des notes dans le temps
  */
-router.get('/analytics', requireAdmin, (_req, res) => {
-  const rows = db.prepare('SELECT * FROM results ORDER BY date ASC').all();
+router.get('/analytics', requireAdmin, (req, res) => {
+  const faculte = String(req.query.faculte || '').trim();
+  const filiere = String(req.query.filiere || '').trim();
+  const niveau = String(req.query.niveau || '').trim();
+
+  let sql = 'SELECT * FROM results WHERE 1 = 1';
+  const params = [];
+  if (faculte) {
+    sql += " AND UPPER(COALESCE(NULLIF(TRIM(faculte), ''), 'FACSCIENCES')) = ?";
+    params.push(normalizeFaculte(faculte));
+  }
+  if (filiere) {
+    sql += ' AND LOWER(TRIM(filiere)) = LOWER(TRIM(?))';
+    params.push(filiere);
+  }
+  if (niveau) {
+    sql += ' AND LOWER(TRIM(niveau)) = LOWER(TRIM(?))';
+    params.push(niveau);
+  }
+  sql += ' ORDER BY date ASC';
+
+  const rows = db.prepare(sql).all(...params);
   const students = new Set(rows.map(r => (r.email || r.name || '').toLowerCase()).filter(Boolean));
 
   const questionStats = new Map();
@@ -267,6 +344,7 @@ router.get('/analytics', requireAdmin, (_req, res) => {
  */
 router.get('/rankings', requireAdmin, (req, res) => {
   const ue = String(req.query.ue || '').trim();
+  const faculte = String(req.query.faculte || '').trim();
   const filiere = String(req.query.filiere || '').trim();
   const niveau = String(req.query.niveau || '').trim();
   const sessionTimestamp = req.query.sessionTimestamp !== undefined
@@ -278,6 +356,10 @@ router.get('/rankings', requireAdmin, (req, res) => {
   if (ue) {
     sql += ' AND ue = ?';
     params.push(ue);
+  }
+  if (faculte) {
+    sql += " AND UPPER(COALESCE(NULLIF(TRIM(faculte), ''), 'FACSCIENCES')) = ?";
+    params.push(normalizeFaculte(faculte));
   }
   if (filiere) {
     sql += ' AND LOWER(TRIM(filiere)) = LOWER(TRIM(?))';
@@ -295,6 +377,252 @@ router.get('/rankings', requireAdmin, (req, res) => {
   const rows = db.prepare(sql).all(...params);
   const { groups } = buildRankingGroups(rows);
   res.json({ groups });
+});
+
+// ── Catalogue des facultés et filières ────────────────────────────────
+
+function ensureFaculte(id, label) {
+  const cleanId = normalizeFaculte(id || slugify(label).toUpperCase());
+  const cleanLabel = String(label || '').trim() || cleanId;
+  db.prepare(`
+    INSERT INTO facultes (id, label, createdAt)
+    VALUES (?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET label = excluded.label
+  `).run(cleanId, cleanLabel, new Date().toISOString());
+  return { id: cleanId, label: cleanLabel };
+}
+
+function addFiliere(faculte, label) {
+  const cleanFaculte = normalizeFaculte(faculte);
+  const cleanLabel = String(label || '').trim();
+  if (!cleanLabel) return null;
+  const id = filiereId(cleanFaculte, cleanLabel);
+  db.prepare(`
+    INSERT INTO filieres (id, label, faculte, createdAt)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(id) DO NOTHING
+  `).run(id, cleanLabel, cleanFaculte, new Date().toISOString());
+  return { id, label: cleanLabel, faculte: cleanFaculte };
+}
+
+/**
+ * Marque les demandes en attente comme approuvées, puis prévient les
+ * étudiants concernés dans l'application et par email.
+ */
+async function resolveFiliereRequests({ faculte, filiere, status = 'approved', note = '' }) {
+  const cleanFaculte = normalizeFaculte(faculte);
+  const cleanFiliere = String(filiere || '').trim();
+  const now = new Date().toISOString();
+
+  const pending = db.prepare(`
+    SELECT * FROM filiere_requests
+    WHERE status = 'pending'
+      AND UPPER(TRIM(faculte)) = UPPER(TRIM(?))
+      AND LOWER(TRIM(filiere)) = LOWER(TRIM(?))
+  `).all(cleanFaculte, cleanFiliere);
+
+  db.prepare(`
+    UPDATE filiere_requests
+    SET status = ?, note = ?, handledAt = ?
+    WHERE status = 'pending'
+      AND UPPER(TRIM(faculte)) = UPPER(TRIM(?))
+      AND LOWER(TRIM(filiere)) = LOWER(TRIM(?))
+  `).run(status, note, now, cleanFaculte, cleanFiliere);
+
+  const users = db.prepare(`
+    SELECT id, name, email FROM users
+    WHERE LOWER(TRIM(filiere)) = LOWER(TRIM(?))
+      AND UPPER(COALESCE(NULLIF(TRIM(faculte), ''), 'FACSCIENCES')) = ?
+  `).all(cleanFiliere, cleanFaculte);
+
+  if (status === 'approved') {
+    users.forEach((user) => {
+      notifyFiliereAvailable({ userId: user.id, filiere: cleanFiliere, faculte: cleanFaculte });
+    });
+
+    // Un email par adresse demandeuse (dédoublonné)
+    const emails = [...new Set(
+      pending.map((r) => String(r.email || '').trim().toLowerCase()).filter(Boolean)
+    )];
+    await Promise.allSettled(emails.map((email) => {
+      const owner = pending.find((r) => String(r.email || '').toLowerCase() === email);
+      return sendFiliereAvailableEmail({
+        email,
+        name: owner?.name || 'Étudiant',
+        filiere: cleanFiliere,
+        faculte: cleanFaculte
+      });
+    }));
+  } else {
+    pending.forEach((request) => {
+      if (!request.userId) return;
+      createNotification({
+        userId: request.userId,
+        type: 'filiere_rejected',
+        title: `Demande de filière « ${cleanFiliere} » examinée`,
+        message: note || `Votre demande pour la filière ${cleanFiliere} n'a pas pu être acceptée. Contactez l'administration pour plus d'informations.`,
+        link: '/dashboard',
+        entityKey: `filiere-rejected:${request.id}`
+      });
+    });
+  }
+
+  return { notifiedUsers: users.length, requests: pending.length };
+}
+
+router.get('/facultes', requireAdmin, (_req, res) => {
+  const facultes = db.prepare(`
+    SELECT f.id, f.label, f.createdAt,
+      (SELECT COUNT(*) FROM filieres fi WHERE fi.faculte = f.id) AS filiereCount,
+      (SELECT COUNT(*) FROM users u
+        WHERE UPPER(COALESCE(NULLIF(TRIM(u.faculte), ''), 'FACSCIENCES')) = f.id) AS studentCount
+    FROM facultes f
+    ORDER BY f.label ASC
+  `).all();
+  res.json({ facultes });
+});
+
+router.post('/facultes', requireAdmin, (req, res) => {
+  const label = String(req.body?.label || '').trim();
+  if (!label) {
+    return res.status(400).json({ error: 'Le nom de la faculté est requis.' });
+  }
+  const faculte = ensureFaculte(req.body?.id, label);
+  res.status(201).json({ success: true, faculte });
+});
+
+router.delete('/facultes/:id', requireAdmin, (req, res) => {
+  const id = normalizeFaculte(req.params.id);
+  const linked = db.prepare('SELECT COUNT(*) AS c FROM filieres WHERE faculte = ?').get(id).c;
+  if (linked > 0) {
+    return res.status(409).json({
+      error: 'Supprimez d\'abord les filières rattachées à cette faculté.'
+    });
+  }
+  const users = db.prepare(
+    "SELECT COUNT(*) AS c FROM users WHERE UPPER(COALESCE(NULLIF(TRIM(faculte), ''), 'FACSCIENCES')) = ?"
+  ).get(id).c;
+  if (users > 0) {
+    return res.status(409).json({ error: 'Des étudiants sont encore rattachés à cette faculté.' });
+  }
+  db.prepare('DELETE FROM facultes WHERE id = ?').run(id);
+  res.json({ success: true });
+});
+
+router.get('/filieres', requireAdmin, (req, res) => {
+  const faculte = String(req.query.faculte || '').trim();
+  let sql = `
+    SELECT f.id, f.label, f.faculte, f.createdAt,
+      (SELECT COUNT(*) FROM users u
+        WHERE LOWER(TRIM(u.filiere)) = LOWER(TRIM(f.label))
+          AND UPPER(COALESCE(NULLIF(TRIM(u.faculte), ''), 'FACSCIENCES')) = f.faculte) AS studentCount,
+      (SELECT COUNT(*) FROM quizzes q
+        WHERE LOWER(TRIM(q.filiere)) = LOWER(TRIM(f.label))
+          AND UPPER(COALESCE(NULLIF(TRIM(q.faculte), ''), 'FACSCIENCES')) = f.faculte) AS quizCount
+    FROM filieres f
+  `;
+  const params = [];
+  if (faculte) {
+    sql += ' WHERE f.faculte = ?';
+    params.push(normalizeFaculte(faculte));
+  }
+  sql += ' ORDER BY f.faculte ASC, f.label ASC';
+
+  res.json({ filieres: db.prepare(sql).all(...params) });
+});
+
+router.post('/filieres', requireAdmin, async (req, res) => {
+  const label = String(req.body?.label || '').trim();
+  const faculte = normalizeFaculte(req.body?.faculte);
+  if (!label) {
+    return res.status(400).json({ error: 'Le nom de la filière est requis.' });
+  }
+  ensureFaculte(faculte, faculte);
+  const filiere = addFiliere(faculte, label);
+  const resolved = await resolveFiliereRequests({ faculte, filiere: label });
+  res.status(201).json({ success: true, filiere, ...resolved });
+});
+
+router.delete('/filieres/:id', requireAdmin, (req, res) => {
+  const row = db.prepare('SELECT * FROM filieres WHERE id = ?').get(req.params.id);
+  if (!row) {
+    return res.status(404).json({ error: 'Filière introuvable.' });
+  }
+  const users = db.prepare(
+    'SELECT COUNT(*) AS c FROM users WHERE LOWER(TRIM(filiere)) = LOWER(TRIM(?))'
+  ).get(row.label).c;
+  if (users > 0) {
+    return res.status(409).json({ error: 'Des étudiants sont encore inscrits dans cette filière.' });
+  }
+  db.prepare('DELETE FROM filieres WHERE id = ?').run(row.id);
+  res.json({ success: true });
+});
+
+router.get('/filiere-requests', requireAdmin, (req, res) => {
+  const status = String(req.query.status || '').trim();
+  let sql = 'SELECT * FROM filiere_requests';
+  const params = [];
+  if (status) {
+    sql += ' WHERE status = ?';
+    params.push(status);
+  }
+  sql += " ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, createdAt DESC, id DESC";
+  res.json({ requests: db.prepare(sql).all(...params) });
+});
+
+router.post('/filiere-requests/:id/approve', requireAdmin, async (req, res) => {
+  const request = db.prepare('SELECT * FROM filiere_requests WHERE id = ?').get(req.params.id);
+  if (!request) {
+    return res.status(404).json({ error: 'Demande introuvable.' });
+  }
+
+  const faculte = normalizeFaculte(req.body?.faculte || request.faculte);
+  const filiereLabel = String(req.body?.filiere || request.filiere || '').trim();
+  if (!filiereLabel) {
+    return res.status(400).json({ error: 'Filière manquante.' });
+  }
+
+  ensureFaculte(faculte, faculte);
+  const filiere = addFiliere(faculte, filiereLabel);
+
+  // Aligne les comptes concernés sur la faculté validée
+  db.prepare(`
+    UPDATE users SET faculte = ?
+    WHERE LOWER(TRIM(filiere)) = LOWER(TRIM(?))
+  `).run(faculte, filiereLabel);
+
+  const result = await resolveFiliereRequests({
+    faculte,
+    filiere: filiereLabel,
+    status: 'approved',
+    note: String(req.body?.note || '').trim()
+  });
+
+  res.json({ success: true, filiere, ...result });
+});
+
+router.post('/filiere-requests/:id/reject', requireAdmin, async (req, res) => {
+  const request = db.prepare('SELECT * FROM filiere_requests WHERE id = ?').get(req.params.id);
+  if (!request) {
+    return res.status(404).json({ error: 'Demande introuvable.' });
+  }
+  const note = String(req.body?.note || '').trim().slice(0, 500);
+  const now = new Date().toISOString();
+  db.prepare('UPDATE filiere_requests SET status = ?, note = ?, handledAt = ? WHERE id = ?')
+    .run('rejected', note, now, request.id);
+
+  if (request.userId) {
+    createNotification({
+      userId: request.userId,
+      type: 'filiere_rejected',
+      title: `Demande de filière « ${request.filiere} » examinée`,
+      message: note || `Votre demande pour la filière ${request.filiere} n'a pas pu être acceptée.`,
+      link: '/dashboard',
+      entityKey: `filiere-rejected:${request.id}`
+    });
+  }
+
+  res.json({ success: true });
 });
 
 // ── Tableau de bord du tuteur IA (requêtes et tokens) ─────────────────

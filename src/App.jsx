@@ -8,6 +8,7 @@ import ReviewSession from './components/ReviewSession';
 import RevisionSession from './components/RevisionSession';
 import StudentAuth from './components/StudentAuth';
 import StudentDashboard from './components/StudentDashboard';
+import StudentResources from './components/StudentResources';
 import Navbar from './components/layout/Navbar';
 import Footer from './components/layout/Footer';
 import ScrollToTop from './components/ScrollToTop';
@@ -87,6 +88,12 @@ export default function App() {
         <Route
           path="/dashboard"
           element={<RequireStudent><Layout><StudentDashboard /></Layout></RequireStudent>}
+        />
+
+        {/* Ressources de cours partagées (étudiant connecté) */}
+        <Route
+          path="/resources"
+          element={<RequireStudent><Layout><StudentResources /></Layout></RequireStudent>}
         />
 
         {/* Emploi du temps public */}
