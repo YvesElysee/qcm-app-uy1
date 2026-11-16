@@ -267,7 +267,8 @@ export default function QuizSession() {
         method: 'POST',
         auth: 'student',
         body: {
-          ue: quizId,
+          quizId,
+          ue: quizMeta?.ue || quizId,
           filiere: quizMeta?.filiere || '',
           niveau: quizMeta?.niveau || '',
           questionIds: questions.map(q => q.id),
@@ -400,7 +401,7 @@ export default function QuizSession() {
     const load = async () => {
       try {
         const data = await api(
-          `/results?ue=${encodeURIComponent(quizId)}&sessionTimestamp=${sessionTimestamp}`,
+          `/results?quizId=${encodeURIComponent(quizId)}&sessionTimestamp=${sessionTimestamp}`,
           { auth: 'student' }
         );
         if (!active) return;
@@ -985,7 +986,12 @@ export default function QuizSession() {
       <div className="sticky top-0 z-30 bg-slate-900 border-b border-slate-800 shadow-lg shadow-black/20">
         <div className="px-3 sm:px-4 py-2.5 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
-            <span className="bg-blue-600/20 text-blue-300 text-[11px] sm:text-xs font-bold px-2 sm:px-2.5 py-1 rounded-full shrink-0">{quizId}</span>
+            <span
+              className="bg-blue-600/20 text-blue-300 text-[11px] sm:text-xs font-bold px-2 sm:px-2.5 py-1 rounded-full shrink-0 max-w-32 sm:max-w-56 truncate"
+              title={quizMeta?.ue ? `UE ${quizMeta.ue}` : quizId}
+            >
+              {quizMeta?.title || quizId}
+            </span>
             <span className="text-slate-300 text-xs sm:text-sm font-semibold truncate max-w-24 sm:max-w-none">{safeName}</span>
           </div>
           <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">

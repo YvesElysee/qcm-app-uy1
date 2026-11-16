@@ -183,45 +183,76 @@ router.get('/:id/questions', (req, res) => {
 // ══════════════ Routes administrateur ══════════════
 
 /**
- * Programmer / mettre à jour un QCM (fusion des champs, comme setDoc merge:true)
+ * Transforme un intitulé en fragment d'identifiant stable.
+ * « Test 1 » → « TEST-1 ».
  */
-router.post('/:id', requireAdmin, (req, res) => {
-  const {
-    filiere, niveau, faculte, semestre, ue, ueLabel, label,
-    timePerQuestion, drawCount, launchTime, endTime
-  } = req.body || {};
-  const id = req.params.id;
+function slugifyQuizPart(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
 
+/**
+ * Identifiant d'un test. Sans intitulé (ou si l'intitulé reprend le code UE),
+ * on conserve l'ancien comportement : l'id est le code de l'UE. Avec un
+ * intitulé, on obtient un id distinct, ce qui permet de programmer plusieurs
+ * tests sur la même UE (ex. INF232-TEST-1, INF232-TEST-2).
+ */
+function quizIdFor(ue, title) {
+  const code = String(ue || '').trim().toUpperCase();
+  if (!code) return '';
+  const cleanTitle = String(title || '').trim();
+  if (!cleanTitle || cleanTitle.toUpperCase() === code) return code;
+  const slug = slugifyQuizPart(cleanTitle);
+  return slug ? `${code}-${slug}` : code;
+}
+
+/**
+ * Enregistre (crée ou met à jour) un test et ses métadonnées.
+ */
+function upsertQuiz(id, body = {}) {
   const existing = db.prepare('SELECT * FROM quizzes WHERE id = ?').get(id) || {};
+  const ue = String(body.ue ?? existing.ue ?? id).trim().toUpperCase();
+  const title = String(body.title ?? existing.title ?? ue).trim() || ue;
 
   const merged = {
-    ue: ue ?? existing.ue ?? id,
-    filiere: filiere ?? existing.filiere ?? null,
-    niveau: niveau ?? existing.niveau ?? null,
-    faculte: normalizeFaculte(faculte || existing.faculte || facultyOfFiliere(filiere ?? existing.filiere)),
-    semestre: semestre ?? existing.semestre ?? null,
-    timePerQuestion: timePerQuestion != null ? (Number(timePerQuestion) || 60) : (existing.timePerQuestion ?? 60),
-    drawCount: drawCount != null ? Math.max(0, Number(drawCount) || 0) : (existing.drawCount ?? 0),
-    launchTime: launchTime != null ? Number(launchTime) : (existing.launchTime ?? null),
-    endTime: endTime != null ? Number(endTime) : (existing.endTime ?? null),
+    ue,
+    title,
+    filiere: body.filiere ?? existing.filiere ?? null,
+    niveau: body.niveau ?? existing.niveau ?? null,
+    faculte: normalizeFaculte(
+      body.faculte || existing.faculte || facultyOfFiliere(body.filiere ?? existing.filiere)
+    ),
+    semestre: body.semestre ?? existing.semestre ?? null,
+    timePerQuestion: body.timePerQuestion != null
+      ? (Number(body.timePerQuestion) || 60)
+      : (existing.timePerQuestion ?? 60),
+    drawCount: body.drawCount != null
+      ? Math.max(0, Number(body.drawCount) || 0)
+      : (existing.drawCount ?? 0),
+    launchTime: body.launchTime != null ? Number(body.launchTime) : (existing.launchTime ?? null),
+    endTime: body.endTime != null ? Number(body.endTime) : (existing.endTime ?? null),
     questionCount: existing.questionCount ?? 0,
     updatedAt: new Date().toISOString()
   };
 
   db.prepare(`
-    INSERT INTO quizzes (id, ue, filiere, niveau, faculte, semestre, questionCount, timePerQuestion, drawCount, launchTime, endTime, updatedAt)
-    VALUES (@id, @ue, @filiere, @niveau, @faculte, @semestre, @questionCount, @timePerQuestion, @drawCount, @launchTime, @endTime, @updatedAt)
+    INSERT INTO quizzes (id, ue, title, filiere, niveau, faculte, semestre, questionCount, timePerQuestion, drawCount, launchTime, endTime, updatedAt)
+    VALUES (@id, @ue, @title, @filiere, @niveau, @faculte, @semestre, @questionCount, @timePerQuestion, @drawCount, @launchTime, @endTime, @updatedAt)
     ON CONFLICT(id) DO UPDATE SET
-      ue = excluded.ue, filiere = excluded.filiere, niveau = excluded.niveau,
-      faculte = excluded.faculte, semestre = excluded.semestre, questionCount = excluded.questionCount,
-      timePerQuestion = excluded.timePerQuestion, drawCount = excluded.drawCount,
-      launchTime = excluded.launchTime, endTime = excluded.endTime, updatedAt = excluded.updatedAt
+      ue = excluded.ue, title = excluded.title, filiere = excluded.filiere,
+      niveau = excluded.niveau, faculte = excluded.faculte, semestre = excluded.semestre,
+      questionCount = excluded.questionCount, timePerQuestion = excluded.timePerQuestion,
+      drawCount = excluded.drawCount, launchTime = excluded.launchTime,
+      endTime = excluded.endTime, updatedAt = excluded.updatedAt
   `).run({ id, ...merged });
 
-  // L'épreuve doit toujours être rattachée à une UE visible par la filière/niveau
   ensureUeFromQuiz({
     code: merged.ue,
-    label: ueLabel ?? label,
+    label: body.ueLabel ?? body.label,
     filiere: merged.filiere,
     niveau: merged.niveau,
     faculte: merged.faculte
@@ -230,7 +261,40 @@ router.post('/:id', requireAdmin, (req, res) => {
   const quiz = db.prepare('SELECT * FROM quizzes WHERE id = ?').get(id);
   if (quiz) notifyQuizAvailable(quiz);
   if (quiz) approveRequestsForQuiz(quiz);
+  return quiz;
+}
 
+/**
+ * Créer un nouveau test (ou mettre à jour un test existant portant le même
+ * couple UE + intitulé). C'est le point d'entrée utilisé par le panneau
+ * d'administration pour programmer plusieurs tests sur une même UE.
+ */
+router.post('/', requireAdmin, (req, res) => {
+  const body = req.body || {};
+  const ue = String(body.ue || '').trim().toUpperCase();
+  if (!ue) {
+    return res.status(400).json({ error: "L'unité d'enseignement est obligatoire." });
+  }
+  const title = String(body.title || '').trim() || ue;
+  const id = quizIdFor(ue, title);
+  const quiz = upsertQuiz(id, { ...body, ue, title });
+  res.json({ success: true, quiz });
+});
+
+/**
+ * Programmer / mettre à jour un QCM par son identifiant.
+ * Conservé pour les clients existants (l'id peut être un code UE).
+ */
+router.post('/:id', requireAdmin, (req, res) => {
+  const body = req.body || {};
+  const id = req.params.id;
+  // Sans intitulé explicite, on garde celui déjà enregistré ou le code UE.
+  const existing = db.prepare('SELECT * FROM quizzes WHERE id = ?').get(id) || {};
+  const quiz = upsertQuiz(id, {
+    ...body,
+    ue: body.ue ?? existing.ue ?? id,
+    title: body.title ?? existing.title
+  });
   res.json({ success: true, quiz });
 });
 
@@ -259,7 +323,8 @@ router.post('/:id/questions', requireAdmin, (req, res) => {
   const id = req.params.id;
   const {
     questions, filiere, niveau, faculte, semestre,
-    timePerQuestion, drawCount, ueLabel, label
+    timePerQuestion, drawCount, ueLabel, label,
+    ue, title, launchTime, endTime
   } = req.body || {};
 
   if (!Array.isArray(questions) || questions.length === 0) {
@@ -269,8 +334,10 @@ router.post('/:id/questions', requireAdmin, (req, res) => {
   // S'assurer que le quiz existe avant d'insérer les questions (clé étrangère)
   const existing = db.prepare('SELECT * FROM quizzes WHERE id = ?').get(id) || {};
 
+  const cleanUe = String(ue ?? existing.ue ?? id).trim().toUpperCase();
   const merged = {
-    ue: existing.ue ?? id,
+    ue: cleanUe,
+    title: String(title ?? existing.title ?? '').trim() || cleanUe,
     filiere: filiere ?? existing.filiere ?? null,
     niveau: niveau ?? existing.niveau ?? null,
     faculte: normalizeFaculte(faculte || existing.faculte || facultyOfFiliere(filiere ?? existing.filiere)),
@@ -278,22 +345,22 @@ router.post('/:id/questions', requireAdmin, (req, res) => {
     questionCount: questions.length,
     timePerQuestion: timePerQuestion != null ? Number(timePerQuestion) || 60 : existing.timePerQuestion ?? 60,
     drawCount: drawCount != null ? Math.max(0, Number(drawCount) || 0) : (existing.drawCount ?? 0),
-    launchTime: existing.launchTime ?? null,
-    endTime: existing.endTime ?? null,
+    launchTime: launchTime != null ? Number(launchTime) : (existing.launchTime ?? null),
+    endTime: endTime != null ? Number(endTime) : (existing.endTime ?? null),
     updatedAt: new Date().toISOString()
   };
 
   db.prepare(`
-    INSERT INTO quizzes (id, ue, filiere, niveau, faculte, semestre, questionCount, timePerQuestion, drawCount, launchTime, endTime, updatedAt)
-    VALUES (@id, @ue, @filiere, @niveau, @faculte, @semestre, @questionCount, @timePerQuestion, @drawCount, @launchTime, @endTime, @updatedAt)
+    INSERT INTO quizzes (id, ue, title, filiere, niveau, faculte, semestre, questionCount, timePerQuestion, drawCount, launchTime, endTime, updatedAt)
+    VALUES (@id, @ue, @title, @filiere, @niveau, @faculte, @semestre, @questionCount, @timePerQuestion, @drawCount, @launchTime, @endTime, @updatedAt)
     ON CONFLICT(id) DO UPDATE SET
-      ue = excluded.ue, filiere = excluded.filiere, niveau = excluded.niveau,
+      ue = excluded.ue, title = excluded.title, filiere = excluded.filiere, niveau = excluded.niveau,
       faculte = excluded.faculte, semestre = excluded.semestre, questionCount = excluded.questionCount,
       timePerQuestion = excluded.timePerQuestion, drawCount = excluded.drawCount,
+      launchTime = excluded.launchTime, endTime = excluded.endTime,
       updatedAt = excluded.updatedAt
   `).run({
     id,
-    ue: existing.ue ?? id,
     ...merged
   });
 
@@ -327,7 +394,7 @@ router.post('/:id/questions', requireAdmin, (req, res) => {
 
   // Le catalogue UE est aligné sur l'épreuve importée (même filière/niveau)
   ensureUeFromQuiz({
-    code: id,
+    code: merged.ue,
     label: ueLabel ?? label,
     filiere: merged.filiere,
     niveau: merged.niveau,

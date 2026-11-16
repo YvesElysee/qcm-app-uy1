@@ -385,6 +385,20 @@ ensureColumn('users', 'faculte', "TEXT DEFAULT 'FACSCIENCES'");
 ensureColumn('quizzes', 'faculte', "TEXT DEFAULT 'FACSCIENCES'");
 ensureColumn('ues', 'faculte', "TEXT DEFAULT 'FACSCIENCES'");
 ensureColumn('results', 'faculte', "TEXT DEFAULT ''");
+// Plusieurs tests peuvent désormais porter sur la même UE : les lignes sont
+// identifiées par un `id` propre et un `title` lisible (ex. « Test 1 »).
+ensureColumn('quizzes', 'title', "TEXT DEFAULT ''");
+// Les copies mémorisent le test exact (et son intitulé) en plus de l'UE.
+ensureColumn('results', 'quizId', "TEXT DEFAULT ''");
+ensureColumn('results', 'quizTitle', "TEXT DEFAULT ''");
+
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_results_quiz ON results(quizId);
+  UPDATE quizzes SET title = COALESCE(NULLIF(TRIM(ue), ''), id)
+    WHERE title IS NULL OR TRIM(title) = '';
+  UPDATE results SET quizId = ue WHERE quizId IS NULL OR TRIM(quizId) = '';
+  UPDATE results SET quizTitle = ue WHERE quizTitle IS NULL OR TRIM(quizTitle) = '';
+`);
 // Parrainage (migration douce)
 ensureColumn('users', 'referralCode', "TEXT DEFAULT ''");
 ensureColumn('users', 'referredBy', "TEXT DEFAULT ''");

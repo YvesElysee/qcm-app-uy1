@@ -75,6 +75,7 @@ export function notifyQuizAvailable(quiz) {
 
   const launch = formatLaunch(quiz.launchTime);
   const ue = quiz.ue || quiz.id;
+  const title = quiz.title && quiz.title !== ue ? `${quiz.title} (${ue})` : ue;
   const entityKey = `quiz:${quiz.id}:${quiz.launchTime}`;
 
   let created = 0;
@@ -82,10 +83,10 @@ export function notifyQuizAvailable(quiz) {
     const ok = createNotification({
       userId: user.id,
       type: 'quiz_available',
-      title: `Nouvelle évaluation : ${ue}`,
+      title: `Nouvelle évaluation : ${title}`,
       message: launch
-        ? `Le QCM ${ue} de ${filiere} (${niveau}) est programmé pour le ${launch}.`
-        : `Le QCM ${ue} de ${filiere} (${niveau}) est disponible dans votre espace.`,
+        ? `Le QCM ${title} de ${filiere} (${niveau}) est programmé pour le ${launch}.`
+        : `Le QCM ${title} de ${filiere} (${niveau}) est disponible dans votre espace.`,
       link: '/dashboard',
       entityKey
     });

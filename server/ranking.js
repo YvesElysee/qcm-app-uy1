@@ -40,12 +40,16 @@ export function buildRankingGroups(rows, viewer = null) {
     const niveau = String(row.niveau || 'Non renseigné').trim();
     const sessionTimestamp = Number(row.sessionTimestamp) || 0;
     const ue = String(row.ue || '-');
-    const key = `${ue}|${sessionTimestamp}|${filiere}|${niveau}`;
+    const quizId = String(row.quizId || ue);
+    const quizTitle = String(row.quizTitle || ue);
+    const key = `${quizId}|${sessionTimestamp}|${filiere}|${niveau}`;
 
     if (!groups.has(key)) {
       groups.set(key, {
         key,
         ue,
+        quizId,
+        quizTitle,
         sessionTimestamp,
         filiere,
         niveau,
@@ -111,6 +115,8 @@ export function buildRankingGroups(rows, viewer = null) {
       return {
         key: group.key,
         ue: group.ue,
+        quizId: group.quizId,
+        quizTitle: group.quizTitle,
         sessionTimestamp: group.sessionTimestamp,
         filiere: group.filiere,
         niveau: group.niveau,

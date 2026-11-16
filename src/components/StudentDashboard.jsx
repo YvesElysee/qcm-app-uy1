@@ -209,13 +209,29 @@ export default function StudentDashboard() {
 
   // ── Calcul des sous-groupes de QCM ──
   const now = nowTs;
-  const passedQuizIds = new Set(myResults.map(r => r.ue));
+  const passedQuizIds = new Set(myResults.map(r => r.quizId || r.ue));
 
-  // Une seule épreuve par UE : on relie chaque matière à son QCM programmé
+  // Plusieurs tests peuvent partager la même UE : on choisit pour la carte
+  // rapide celui qui est en cours, sinon le prochain, sinon le plus récent.
   const quizByUe = new Map();
   allQuizzes.forEach(q => {
-    const key = q.ue || q.id;
-    if (!quizByUe.has(key)) quizByUe.set(key, q);
+    const key = String(q.ue || q.id).toUpperCase();
+    const priority = (item) => {
+      if (!item.questionCount || !item.launchTime) return 0;
+      if (item.launchTime > now) return 2;
+      if (!item.endTime || item.endTime >= now) return 3;
+      return 1;
+    };
+    const current = quizByUe.get(key);
+    if (!current) {
+      quizByUe.set(key, q);
+      return;
+    }
+    const p = priority(q);
+    const cp = priority(current);
+    if (p > cp || (p === cp && (q.launchTime || 0) > (current.launchTime || 0))) {
+      quizByUe.set(key, q);
+    }
   });
 
   // Toutes les épreuves programmées (date renseignée), triées chronologiquement
@@ -228,7 +244,7 @@ export default function StudentDashboard() {
 
   // État d'une épreuve pour l'affichage de la carte UE
   const getQuizState = (ueCode) => {
-    const quiz = quizByUe.get(ueCode);
+    const quiz = quizByUe.get(String(ueCode || '').toUpperCase());
     if (!quiz) return { quiz: null, state: 'none' };
     if (!quiz.questionCount) return { quiz, state: 'draft' };
     if (!quiz.launchTime) return { quiz, state: 'draft' };
@@ -452,8 +468,13 @@ export default function StudentDashboard() {
                   </span>
                 </div>
                 <h3 className="text-base font-bold text-white mt-0.5">
-                  QCM {nextQuiz.ue || nextQuiz.id} · {nextQuiz.filiere} ({nextQuiz.niveau})
+                  {nextQuiz.title || nextQuiz.ue || nextQuiz.id} · {nextQuiz.filiere} ({nextQuiz.niveau})
                 </h3>
+                {(nextQuiz.ue || nextQuiz.ueLabel) && (
+                  <p className="text-[11px] text-amber-200/80">
+                    UE {nextQuiz.ue || nextQuiz.id}{nextQuiz.ueLabel ? ` · ${nextQuiz.ueLabel}` : ''}
+                  </p>
+                )}
                 <p className="text-xs text-amber-200/70">
                   Début : {formatDate(nextQuiz.launchTime)} {nextQuiz.timePerQuestion ? `• ${nextQuiz.timePerQuestion}s par question` : ''}
                 </p>
@@ -504,7 +525,7 @@ export default function StudentDashboard() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {scheduledQuizzes.map(q => {
                 const ueCode = q.ue || q.id;
-                const isPassed = passedQuizIds.has(q.id) || passedQuizIds.has(ueCode);
+                const isPassed = passedQuizIds.has(q.id);
                 const notReady = !q.questionCount;
                 const isUpcoming = q.launchTime > now;
                 const isOpen = !isUpcoming && (!q.endTime || q.endTime >= now);
@@ -534,9 +555,11 @@ export default function StudentDashboard() {
                         </span>
                         <span className="text-xs text-slate-400">{q.filiere} · {q.niveau}</span>
                       </div>
-                      <h4 className="font-black text-white text-base">{ueCode}</h4>
-                      {q.ueLabel && q.ueLabel !== ueCode && (
-                        <p className="text-xs text-slate-300 mt-0.5">{q.ueLabel}</p>
+                      <h4 className="font-black text-white text-base">{q.title || ueCode}</h4>
+                      {(q.ue || q.ueLabel) && (
+                        <p className="text-xs text-slate-300 mt-0.5">
+                          UE {ueCode}{q.ueLabel && q.ueLabel !== ueCode ? ` · ${q.ueLabel}` : ''}
+                        </p>
                       )}
                       <p className="text-[11px] text-slate-400 mt-1">
                         Début : {formatDate(q.launchTime)}
@@ -565,7 +588,7 @@ export default function StudentDashboard() {
                       </button>
                     ) : isPassed ? (
                       <Link
-                        to={`/review/${ueCode}`}
+                        to={`/review/${q.id}`}
                         className="w-full text-center bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-extrabold py-2.5 rounded-xl transition shadow-md shadow-indigo-600/20"
                       >
                         Relire ma copie
@@ -613,7 +636,7 @@ export default function StudentDashboard() {
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
               {availableUes.map(ue => {
                 const { quiz, state } = getQuizState(ue.id);
-                const passedResult = myResults.find(r => r.ue === ue.id);
+                const passedResult = myResults.find(r => (r.quizId || r.ue) === (quiz?.id || ue.id));
 
                 const statusMeta = {
                   none: { label: 'Non programmée', cls: 'bg-slate-600/40 text-slate-300' },
@@ -657,21 +680,21 @@ export default function StudentDashboard() {
 
                     {state === 'ongoing' ? (
                       <button
-                        onClick={() => handleStartQuiz(ue.id, false)}
+                        onClick={() => handleStartQuiz(quiz.id, false)}
                         className="mt-4 w-full bg-blue-600 hover:bg-blue-500 text-white text-xs font-extrabold py-2.5 rounded-xl transition shadow-md shadow-blue-600/20"
                       >
                         Démarrer l'épreuve
                       </button>
                     ) : state === 'done' ? (
                       <Link
-                        to={`/review/${ue.id}`}
+                        to={`/review/${quiz.id}`}
                         className="mt-4 w-full text-center bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-extrabold py-2.5 rounded-xl transition shadow-md shadow-indigo-600/20"
                       >
                         Relire ma copie
                       </Link>
                     ) : state === 'missed' ? (
                       <button
-                        onClick={() => handleStartQuiz(ue.id, true)}
+                        onClick={() => handleStartQuiz(quiz.id, true)}
                         className="mt-4 w-full bg-red-600 hover:bg-red-500 text-white text-xs font-extrabold py-2.5 rounded-xl transition shadow-md shadow-red-600/20"
                       >
                         Rattraper l'épreuve
@@ -869,21 +892,23 @@ export default function StudentDashboard() {
               {myResults.map(res => {
                 const note20 = res.total ? ((res.score / res.total) * 20).toFixed(1) : '-';
                 const isGood = parseFloat(note20) >= 10;
+                const linkedQuiz = allQuizzes.find(q => q.id === (res.quizId || res.ue));
+                const resultLabel = res.quizTitle || linkedQuiz?.title || res.ue;
                 return (
                   <div
                     key={res.id}
                     className="bg-slate-900/70 border border-slate-700/80 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:border-slate-600 transition"
                   >
                     <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="font-black text-white text-base">{res.ue}</span>
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <span className="font-black text-white text-base">{resultLabel}</span>
                         {res.isMakeup && (
                           <span className="bg-purple-500/20 text-purple-300 text-[10px] font-black px-2 py-0.5 rounded-full">
                             Rattrapage
                           </span>
                         )}
                         <span className="text-xs text-slate-400">
-                          {res.filiere} · {res.niveau}
+                          UE {res.ue}{linkedQuiz?.ueLabel ? ` · ${linkedQuiz.ueLabel}` : ''} · {res.filiere} {res.niveau}
                         </span>
                       </div>
                       <p className="text-xs text-slate-400">
@@ -902,7 +927,7 @@ export default function StudentDashboard() {
                       </div>
 
                       <Link
-                        to={`/review/${res.ue}`}
+                        to={`/review/${res.quizId || res.ue}`}
                         className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-extrabold px-4 py-2.5 rounded-xl transition shadow-md shadow-indigo-600/20 shrink-0"
                       >
                         Relire ma copie
@@ -962,9 +987,9 @@ export default function StudentDashboard() {
                     >
                       <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between gap-2 flex-wrap">
                         <div>
-                          <p className="text-sm font-black text-white">{group.ue}</p>
+                          <p className="text-sm font-black text-white">{group.quizTitle || group.ue}</p>
                           <p className="text-[11px] text-slate-500">
-                            {group.salle} · {formatDate(group.sessionTimestamp)}
+                            UE {group.ue} · {group.salle} · {formatDate(group.sessionTimestamp)}
                           </p>
                         </div>
                         <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-blue-600/15 text-blue-300 border border-blue-600/30">

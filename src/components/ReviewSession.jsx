@@ -91,7 +91,7 @@ export default function ReviewSession() {
             // dans `answers`), métadonnées et historique personnel.
             const [qData, rData, metaData] = await Promise.all([
                 api(`/quizzes/${quizId}/questions`, { auth: 'student' }).catch(() => ({ questions: [] })),
-                api(`/results/mine?ue=${encodeURIComponent(quizId)}`, { auth: 'student' })
+                api(`/results/mine?quizId=${encodeURIComponent(quizId)}`, { auth: 'student' })
                     .catch(() => ({ results: [] })),
                 api(`/quizzes/${encodeURIComponent(quizId)}`).catch(() => null)
             ]);
@@ -265,9 +265,16 @@ export default function ReviewSession() {
 
                 {/* En-tête résumé */}
                 <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl p-8 my-6 text-center shadow-lg shadow-blue-600/20">
-                    <h1 className="text-2xl font-black mb-1">Correction · {quizId}</h1>
-                    {quizMeta?.ueLabel && quizMeta.ueLabel !== quizId && (
-                        <p className="text-sm font-semibold opacity-90">{quizMeta.ueLabel}</p>
+                    <h1 className="text-2xl font-black mb-1">
+                        Correction · {quizMeta?.title || quizId}
+                    </h1>
+                    {(quizMeta?.ue || quizMeta?.ueLabel) && (
+                        <p className="text-sm font-semibold opacity-90">
+                            UE {quizMeta?.ue || quizId}
+                            {quizMeta?.ueLabel && quizMeta.ueLabel !== (quizMeta.ue || quizId)
+                                ? ` · ${quizMeta.ueLabel}`
+                                : ''}
+                        </p>
                     )}
                     <p className="opacity-80 mb-6 text-sm">{safeName}</p>
                     <div className="flex justify-center gap-8">

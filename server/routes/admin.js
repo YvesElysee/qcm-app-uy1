@@ -166,12 +166,17 @@ router.delete('/students/:id', requireAdmin, (req, res) => {
  */
 router.get('/results', requireAdmin, (req, res) => {
   const ue = String(req.query.ue || '').trim();
+  const quizId = String(req.query.quizId || '').trim();
   const faculte = String(req.query.faculte || '').trim();
   const filiere = String(req.query.filiere || '').trim();
   const niveau = String(req.query.niveau || '').trim();
 
   let sql = 'SELECT * FROM results WHERE 1 = 1';
   const params = [];
+  if (quizId) {
+    sql += ' AND quizId = ?';
+    params.push(quizId);
+  }
   if (ue) {
     sql += ' AND ue = ?';
     params.push(ue);

@@ -61,7 +61,7 @@ export default function Schedule() {
     load();
   }, [user, userFaculte, userFiliere, userNiveau]);
 
-  const passedUes = new Set(myResults.map(r => r.ue));
+  const passedQuizIds = new Set(myResults.map(r => r.quizId || r.ue));
 
   const filtered = (list) => list.filter(q =>
     (!filter.filiere || q.filiere === filter.filiere) &&
@@ -87,7 +87,7 @@ export default function Schedule() {
 
   const QuizCard = ({ quiz }) => {
     const ueCode = quiz.ue || quiz.id;
-    const hasTaken = passedUes.has(quiz.id) || passedUes.has(ueCode);
+    const hasTaken = passedQuizIds.has(quiz.id);
     const isOpen = quiz.launchTime <= now && (!quiz.endTime || quiz.endTime >= now);
     const isFinished = !isOpen && quiz.launchTime <= now;
 
@@ -132,9 +132,11 @@ export default function Schedule() {
               </span>
             )}
           </div>
-          <h3 className="font-black text-white text-lg">{ueCode}</h3>
-          {quiz.ueLabel && quiz.ueLabel !== ueCode && (
-            <p className="text-slate-300 text-xs mt-0.5">{quiz.ueLabel}</p>
+          <h3 className="font-black text-white text-lg">{quiz.title || ueCode}</h3>
+          {(quiz.ue || quiz.ueLabel) && (
+            <p className="text-slate-300 text-xs mt-0.5">
+              UE {ueCode}{quiz.ueLabel && quiz.ueLabel !== ueCode ? ` · ${quiz.ueLabel}` : ''}
+            </p>
           )}
           <p className="text-slate-400 text-xs mt-1">
             {isFinished ? 'Session officielle : ' : 'Prévu le : '}
@@ -148,7 +150,7 @@ export default function Schedule() {
           {isOpen ? (
             user ? (
               <Link
-                to={`/quiz/${ueCode}`}
+                to={`/quiz/${quiz.id}`}
                 className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl text-xs font-black transition"
               >
                 <Icon name="play" size={14} />
@@ -166,7 +168,7 @@ export default function Schedule() {
           ) : isFinished ? (
             hasTaken ? (
               <Link
-                to={`/review/${ueCode}`}
+                to={`/review/${quiz.id}`}
                 className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-bold transition"
               >
                 <Icon name="eye" size={14} />
@@ -174,7 +176,7 @@ export default function Schedule() {
               </Link>
             ) : user ? (
               <Link
-                to={`/quiz/${ueCode}?mode=rattrapage`}
+                to={`/quiz/${quiz.id}?mode=rattrapage`}
                 className="inline-flex items-center gap-1.5 bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-xl text-xs font-black transition"
               >
                 <Icon name="refresh" size={14} />

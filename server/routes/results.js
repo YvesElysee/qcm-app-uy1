@@ -34,6 +34,8 @@ function toResult(row, { includeAnswers = false } = {}) {
     name: row.name,
     email: row.email,
     ue: row.ue,
+    quizId: row.quizId || '',
+    quizTitle: row.quizTitle || '',
     filiere: row.filiere,
     niveau: row.niveau,
     faculte: row.faculte || '',
@@ -81,13 +83,22 @@ function answerMatches(selected, question, correct) {
  * calculés ici : un client modifié ne peut pas s'attribuer une note.
  */
 router.post('/', requireStudent, (req, res) => {
-  const { ue, answers, isMakeup } = req.body || {};
+  const { ue, quizId, answers, isMakeup } = req.body || {};
 
-  if (!ue || !Array.isArray(answers)) {
+  if ((!ue && !quizId) || !Array.isArray(answers)) {
     return res.status(400).json({ error: 'Données de résultat incomplètes.' });
   }
 
-  const quiz = db.prepare('SELECT * FROM quizzes WHERE id = ?').get(String(ue));
+  // `quizId` identifie le test précis ; `ue` reste accepté pour les anciens
+  // clients et les copies enregistrées avant les tests multiples.
+  const reference = String(quizId || ue);
+  let quiz = db.prepare('SELECT * FROM quizzes WHERE id = ?').get(reference);
+  if (!quiz && ue) {
+    quiz = db.prepare(`
+      SELECT * FROM quizzes WHERE ue = ?
+      ORDER BY COALESCE(endTime, launchTime, 0) DESC, id DESC LIMIT 1
+    `).get(String(ue).trim().toUpperCase());
+  }
   if (!quiz) {
     return res.status(404).json({ error: 'Épreuve introuvable.' });
   }
@@ -145,12 +156,14 @@ router.post('/', requireStudent, (req, res) => {
   const total = corrected.length;
 
   const info = db.prepare(`
-    INSERT INTO results (name, email, ue, filiere, niveau, faculte, score, total, answers, sessionTimestamp, isMakeup, date)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO results (name, email, ue, quizId, quizTitle, filiere, niveau, faculte, score, total, answers, sessionTimestamp, isMakeup, date)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     req.user.name,
     req.user.email,
+    quiz.ue || quiz.id,
     quiz.id,
+    quiz.title || quiz.ue || quiz.id,
     quiz.filiere || req.user.filiere || '',
     quiz.niveau || req.user.niveau || '',
     normalizeFaculte(quizFaculte(quiz) || studentFaculte(req.user)),
@@ -163,10 +176,12 @@ router.post('/', requireStudent, (req, res) => {
   );
 
   // Chaque erreur alimente la banque de révision espacée de l'étudiant.
+  // Les cartes restent rattachées à l'UE (et non au test) pour réviser la
+  // matière dans son ensemble, même si plusieurs tests la composent.
   corrected.forEach((a) => {
     if (a.isOk) return;
     const question = byId.get(Number(a.questionId));
-    if (question) upsertWrongCard(req.user, quiz.id, question, a.selected || '');
+    if (question) upsertWrongCard(req.user, quiz.ue || quiz.id, question, a.selected || '');
   });
 
   res.status(201).json({
@@ -185,13 +200,20 @@ router.post('/', requireStudent, (req, res) => {
  * exposées ici.
  */
 router.get('/', requireStudent, (req, res) => {
-  const { ue, sessionTimestamp } = req.query;
-  if (!ue) {
-    return res.status(400).json({ error: 'Paramètre "ue" requis.' });
+  const { ue, quizId, sessionTimestamp } = req.query;
+  if (!ue && !quizId) {
+    return res.status(400).json({ error: 'Paramètre "quizId" ou "ue" requis.' });
   }
 
-  let sql = 'SELECT * FROM results WHERE ue = ?';
-  const params = [ue];
+  let sql = 'SELECT * FROM results WHERE 1 = 1';
+  const params = [];
+  if (quizId) {
+    sql += ' AND quizId = ?';
+    params.push(String(quizId));
+  } else {
+    sql += ' AND ue = ?';
+    params.push(String(ue));
+  }
   sql += ' AND LOWER(TRIM(filiere)) = LOWER(TRIM(?))';
   params.push(req.user.filiere || '');
   sql += ' AND LOWER(TRIM(niveau)) = LOWER(TRIM(?))';
@@ -219,12 +241,17 @@ router.get('/ranking', requireStudent, (req, res) => {
   const niveau = String(req.user.niveau || '').trim();
   const faculte = studentFaculte(req.user);
   const ue = String(req.query.ue || '').trim();
+  const quizId = String(req.query.quizId || '').trim();
   const sessionTimestamp = req.query.sessionTimestamp !== undefined
     ? Number(req.query.sessionTimestamp)
     : null;
 
   let sql = 'SELECT * FROM results WHERE 1 = 1';
   const params = [];
+  if (quizId) {
+    sql += ' AND quizId = ?';
+    params.push(quizId);
+  }
   if (filiere) {
     sql += ' AND LOWER(TRIM(filiere)) = LOWER(TRIM(?))';
     params.push(filiere);
@@ -257,6 +284,7 @@ router.get('/mine', requireStudent, (req, res) => {
   const email = (req.user.email || '').toLowerCase();
   const name = (req.user.name || '').trim();
   const ue = req.query.ue;
+  const quizId = req.query.quizId;
 
   let rows = db.prepare(`
     SELECT * FROM results
@@ -264,7 +292,9 @@ router.get('/mine', requireStudent, (req, res) => {
     ORDER BY date DESC
   `).all(email, name);
 
-  if (ue) {
+  if (quizId) {
+    rows = rows.filter(r => (r.quizId || r.ue) === quizId);
+  } else if (ue) {
     rows = rows.filter(r => r.ue === ue);
   }
 

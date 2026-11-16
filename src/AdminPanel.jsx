@@ -106,6 +106,7 @@ export default function AdminPanel() {
   const [niveau, setNiveau] = useState('L1');
   const [semestre, setSemestre] = useState('1');
   const [ue, setUe] = useState('');
+  const [quizTitle, setQuizTitle] = useState('');
   const [manualUe, setManualUe] = useState(false);
   const [launchTime, setLaunchTime] = useState('');
   const [endTime, setEndTime] = useState('');
@@ -559,35 +560,44 @@ export default function AdminPanel() {
       return;
     }
 
+    const testTitle = quizTitle.trim() || targetUe;
     const ueInfo = allUes.find(u => (u.code || u.id || '').toUpperCase() === targetUe);
+    const metadata = {
+      ue: targetUe,
+      title: testTitle,
+      faculte,
+      filiere,
+      niveau,
+      semestre,
+      ueLabel: ueInfo?.label || targetUe,
+      timePerQuestion: parseInt(timePerQuestion) || 60,
+      drawCount: drawCount === '' ? 0 : Math.max(0, parseInt(drawCount) || 0),
+      launchTime: launchTime ? new Date(launchTime).getTime() : undefined,
+      endTime: endTime ? new Date(endTime).getTime() : undefined
+    };
+
     setImporting(true);
     try {
-      // Import atomique côté serveur : remplace les anciennes questions
-      // et fusionne les métadonnées du quiz
-      const res = await api(`/quizzes/${encodeURIComponent(targetUe)}/questions`, {
+      // 1. Créer (ou retrouver) le test nommé, même UE mais intitulé distinct.
+      const created = await api('/quizzes', { method: 'POST', auth: 'admin', body: metadata });
+      const targetQuizId = created?.quiz?.id || targetUe;
+
+      // 2. Importer les questions sur ce test précis.
+      const res = await api(`/quizzes/${encodeURIComponent(targetQuizId)}/questions`, {
         method: 'POST',
         auth: 'admin',
-        body: {
-          questions: parsedCsvData.questions,
-          faculte,
-          filiere,
-          niveau,
-          semestre,
-          ueLabel: ueInfo?.label || targetUe,
-          timePerQuestion: parseInt(timePerQuestion) || 60,
-          drawCount: drawCount === '' ? 0 : Math.max(0, parseInt(drawCount) || 0)
-        }
+        body: { ...metadata, questions: parsedCsvData.questions }
       });
       const count = res.count;
 
-      alert(`Succès ! ${count} questions importées pour l'UE ${targetUe}.`);
+      alert(`Succès ! ${count} questions importées pour « ${testTitle} » (${targetUe}).`);
       setShowCsvPreview(false);
       setParsedCsvData(null);
       setCsvFile(null);
       fetchHistory();
       fetchUpcoming();
       fetchUes();
-      if (inspectQuizId === targetUe) loadInspectQuestions(targetUe);
+      if (inspectQuizId === targetQuizId) loadInspectQuestions(targetQuizId);
     } catch (err) {
       alert("Erreur lors de l'enregistrement : " + err.message);
     } finally {
@@ -595,6 +605,7 @@ export default function AdminPanel() {
     }
   }, [
     ue,
+    quizTitle,
     parsedCsvData,
     faculte,
     filiere,
@@ -602,6 +613,8 @@ export default function AdminPanel() {
     semestre,
     timePerQuestion,
     drawCount,
+    launchTime,
+    endTime,
     allUes,
     fetchHistory,
     fetchUpcoming,
@@ -620,6 +633,7 @@ export default function AdminPanel() {
       alert("Renseignez la date et l'heure d'ouverture : sans cela, les étudiants ne verront pas l'épreuve.");
       return;
     }
+    const testTitle = quizTitle.trim() || targetUe;
     const ueInfo = allUes.find(u => (u.code || u.id || '').toUpperCase() === targetUe);
     const data = {
       faculte,
@@ -627,6 +641,7 @@ export default function AdminPanel() {
       niveau,
       semestre,
       ue: targetUe,
+      title: testTitle,
       ueLabel: ueInfo?.label || targetUe,
       timePerQuestion: parseInt(timePerQuestion) || 60,
       drawCount: drawCount === '' ? 0 : Math.max(0, parseInt(drawCount) || 0),
@@ -634,12 +649,12 @@ export default function AdminPanel() {
     };
     if (endTime) data.endTime = new Date(endTime).getTime();
 
-    await api(`/quizzes/${encodeURIComponent(targetUe)}`, { method: 'POST', auth: 'admin', body: data });
-    alert(`Épreuve ${targetUe} programmée avec succès !`);
+    await api('/quizzes', { method: 'POST', auth: 'admin', body: data });
+    alert(`Épreuve « ${testTitle} » (${targetUe}) programmée avec succès !`);
     fetchHistory();
     fetchUpcoming();
     fetchUes();
-  }, [ue, faculte, filiere, niveau, semestre, timePerQuestion, drawCount, launchTime, endTime, allUes, fetchHistory, fetchUpcoming, fetchUes]);
+  }, [ue, quizTitle, faculte, filiere, niveau, semestre, timePerQuestion, drawCount, launchTime, endTime, allUes, fetchHistory, fetchUpcoming, fetchUes]);
 
   const deleteSingleQuestion = useCallback(
     async (qId) => {
@@ -693,7 +708,7 @@ export default function AdminPanel() {
     }
     setLoadingResults(true);
     try {
-      const data = await api(`/admin/results?ue=${encodeURIComponent(quizId)}`, { auth: 'admin' });
+      const data = await api(`/admin/results?quizId=${encodeURIComponent(quizId)}`, { auth: 'admin' });
       setResultsList(data.results);
     } catch (err) {
       console.warn('Erreur chargement résultats :', err);
@@ -1173,7 +1188,9 @@ export default function AdminPanel() {
 
   // ─── Exports résultats ────────────────────────────────────────────────
   const exportCSV = async (quizId) => {
-    const data = await api(`/admin/results?ue=${encodeURIComponent(quizId)}`, { auth: 'admin' });
+    const data = await api(`/admin/results?quizId=${encodeURIComponent(quizId)}`, { auth: 'admin' });
+    const linked = history.find(q => q.id === quizId);
+    const testLabel = linked?.title ? `${linked.title} (${linked.ue || quizId})` : quizId;
     const rows = data.results.map(r => ({
       Nom: r.name,
       Email: r.email || '-',
@@ -1194,7 +1211,7 @@ export default function AdminPanel() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Resultats_${quizId}.csv`;
+    a.download = `Resultats_${(testLabel || quizId).replace(/[^a-zA-Z0-9_-]+/g, '_')}.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -1202,7 +1219,9 @@ export default function AdminPanel() {
   };
 
   const exportPDF = async (quizId) => {
-    const data = await api(`/admin/results?ue=${encodeURIComponent(quizId)}`, { auth: 'admin' });
+    const data = await api(`/admin/results?quizId=${encodeURIComponent(quizId)}`, { auth: 'admin' });
+    const linked = history.find(q => q.id === quizId);
+    const testLabel = linked?.title ? `${linked.title} (${linked.ue || quizId})` : quizId;
     const rows = data.results.map(r => [
       r.name,
       r.email || '-',
@@ -1217,7 +1236,7 @@ export default function AdminPanel() {
     }
     const docPdf = new jsPDF();
     docPdf.setFontSize(14);
-    docPdf.text(`Procès-Verbal Officiel des Résultats · ${quizId}`, 14, 14);
+    docPdf.text(`Procès-Verbal Officiel des Résultats · ${testLabel}`, 14, 14);
     docPdf.setFontSize(9);
     docPdf.text(`Généré le ${new Date().toLocaleString('fr-FR')} • QCM App`, 14, 21);
     docPdf.autoTable({
@@ -1227,7 +1246,7 @@ export default function AdminPanel() {
       styles: { fontSize: 8 },
       headStyles: { fillColor: [30, 58, 138] }
     });
-    docPdf.save(`PV_${quizId}.pdf`);
+    docPdf.save(`PV_${(testLabel || quizId).replace(/[^a-zA-Z0-9_-]+/g, '_')}.pdf`);
   };
 
   /**
@@ -1681,9 +1700,9 @@ export default function AdminPanel() {
                             <span className="text-[10px] font-bold text-blue-300 bg-blue-600/15 px-2 py-0.5 rounded-full">
                               {q.filiere} · {q.niveau}
                             </span>
-                            <h4 className="font-black text-white text-sm mt-1 truncate">{q.ue || q.id}</h4>
+                            <h4 className="font-black text-white text-sm mt-1 truncate">{q.title || q.ue || q.id}</h4>
                             <p className="text-[11px] text-slate-500">
-                              Semestre {q.semestre || 1} • {q.questionCount || 0} questions
+                              UE {q.ue || q.id} · Semestre {q.semestre || 1} • {q.questionCount || 0} questions
                             </p>
                           </div>
                           <div className="text-right shrink-0 ml-3">
@@ -1716,9 +1735,9 @@ export default function AdminPanel() {
                             className="flex items-center justify-between p-3 bg-slate-950 border border-slate-800 rounded-xl"
                           >
                             <div className="min-w-0">
-                              <h4 className="font-black text-white text-sm truncate">{q.ue || q.id}</h4>
+                              <h4 className="font-black text-white text-sm truncate">{q.title || q.ue || q.id}</h4>
                               <p className="text-[11px] text-slate-500">
-                                {q.filiere} • {q.niveau} · {formatDate(q.launchTime)}
+                                {q.ue || q.id} · {q.filiere} • {q.niveau} · {formatDate(q.launchTime)}
                               </p>
                             </div>
                             <button
@@ -1896,6 +1915,47 @@ export default function AdminPanel() {
                     </div>
                   </div>
 
+                  <div className="grid grid-cols-1 gap-3">
+                    <div>
+                      <label className={label}>Nom du test</label>
+                      <input
+                        type="text"
+                        className={input}
+                        placeholder="Ex. Test 1, Contrôle continu, Rattrapage…"
+                        value={quizTitle}
+                        onChange={e => setQuizTitle(e.target.value)}
+                      />
+                      <p className="text-[11px] text-slate-500 mt-1">
+                        Deux tests différents peuvent porter sur la même UE. Donnez-leur un nom
+                        distinct (Test 1, Test 2…) pour les retrouver facilement.
+                      </p>
+                      {(() => {
+                        const code = ue.trim().toUpperCase();
+                        if (!code) return null;
+                        const existingTests = history.filter(
+                          q => String(q.ue || q.id).toUpperCase() === code
+                        );
+                        if (!existingTests.length) return null;
+                        return (
+                          <div className="flex flex-wrap gap-1.5 mt-2">
+                            <span className="text-[10px] font-bold text-slate-500 self-center">
+                              Tests existants :
+                            </span>
+                            {existingTests.map(q => (
+                              <span
+                                key={q.id}
+                                className="text-[10px] font-bold px-2 py-1 rounded-full bg-slate-800 text-slate-300 border border-slate-700"
+                                title={`${q.id} · ${q.filiere || '?'} ${q.niveau || ''}`}
+                              >
+                                {q.title || q.id} · {formatDate(q.launchTime)}
+                              </span>
+                            ))}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
+
                   <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                     <div>
                       <label className={label}>Unité d'enseignement</label>
@@ -1918,6 +1978,23 @@ export default function AdminPanel() {
                             if (info.filiere) setFiliere(info.filiere);
                             if (info.niveau) setNiveau(info.niveau);
                           }
+                          // Propose automatiquement le prochain nom de test
+                          // (Test 1, Test 2…) pour éviter d'écraser un test existant.
+                          const code = String(value).toUpperCase();
+                          const existingTests = history.filter(q => {
+                            const qUe = String(q.ue || q.id).toUpperCase();
+                            return qUe === code && String(q.title || '').toUpperCase() !== code;
+                          });
+                          const numbers = existingTests
+                            .map(q => {
+                              const match = String(q.title || '').match(/Test\s*(\d+)/i);
+                              return match ? Number(match[1]) : 0;
+                            })
+                            .filter(n => n > 0);
+                          const nextNumber = Math.max(existingTests.length, ...numbers, 0) + 1;
+                          setQuizTitle(prev => (prev.trim()
+                            ? prev
+                            : (existingTests.length ? `Test ${nextNumber}` : '')));
                         }}
                       >
                         <option value="">Sélectionner une UE…</option>
@@ -2047,8 +2124,8 @@ export default function AdminPanel() {
                   </div>
 
                   <div className="bg-blue-950/40 border border-blue-900/50 rounded-xl p-3 text-[11px] text-blue-200 leading-relaxed">
-                    L'import remplace les questions existantes de l'UE et fusionne les métadonnées
-                    (filière, niveau, minuterie) définies ci-contre.
+                    L'import remplace les questions existantes du test sélectionné (UE + nom du test)
+                    et fusionne les métadonnées (filière, niveau, minuterie) définies ci-contre.
                   </div>
                 </div>
               </div>
@@ -2102,9 +2179,9 @@ export default function AdminPanel() {
                                 {isUpcoming ? 'À venir' : 'Terminée'}
                               </span>
                             </div>
-                            <h4 className="font-black text-white text-base mt-1">{q.ue || q.id}</h4>
+                            <h4 className="font-black text-white text-base mt-1">{q.title || q.ue || q.id}</h4>
                             <p className="text-[11px] text-slate-500">
-                              {q.questionCount || 0} questions{q.drawCount ? ` • ${q.drawCount} tirées/étudiant` : ''} • {q.timePerQuestion || 60}s/question •
+                              UE {q.ue || q.id} · {q.questionCount || 0} questions{q.drawCount ? ` • ${q.drawCount} tirées/étudiant` : ''} • {q.timePerQuestion || 60}s/question •
                               Ouverture : {formatDate(q.launchTime)}
                               {q.endTime ? ` • Clôture : ${formatDate(q.endTime)}` : ''}
                             </p>
@@ -3138,7 +3215,7 @@ export default function AdminPanel() {
                       <option value="">· Sélectionner une évaluation ·</option>
                       {filteredHistory.map(q => (
                         <option key={q.id} value={q.id}>
-                          {q.ue || q.id} · {q.filiere || '?'} {q.niveau || ''} ({formatDate(q.launchTime)})
+                          {q.title || q.ue || q.id} · UE {q.ue || q.id} · {q.filiere || '?'} {q.niveau || ''} ({formatDate(q.launchTime)})
                         </option>
                       ))}
                     </select>
@@ -3201,7 +3278,7 @@ export default function AdminPanel() {
                     <div className="px-6 py-4 border-b border-slate-800">
                       <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
                         <Icon name="trophy" size={15} className="text-amber-400" />
-                        Résultats · {resultsQuizId}
+                        Résultats · {history.find(q => q.id === resultsQuizId)?.title || resultsQuizId}
                       </h3>
                     </div>
                     {loadingResults ? (
@@ -4958,7 +5035,7 @@ export default function AdminPanel() {
             {/* Actions */}
             <div className="px-6 py-4 border-t border-slate-800 flex items-center justify-between gap-3 flex-wrap">
               <p className="text-[11px] text-slate-500">
-                L'import remplacera toutes les questions existantes de cette UE.
+                L'import remplacera toutes les questions existantes de ce test (même UE + même nom).
               </p>
               <div className="flex gap-2">
                 <button onClick={() => setShowCsvPreview(false)} className={btnSecondary}>
