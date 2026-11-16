@@ -98,6 +98,17 @@ export default function AiTutor({ open, onClose, context, status }) {
   const unavailable = aiStatus ? aiStatus.available === false : false;
   const blocked = unavailable || quotaReached || remaining === 0;
 
+  // Empêche le défilement de la page en arrière-plan lorsque le tuteur est
+  // ouvert (le panneau et sa discussion restent les seules zones défilantes).
+  useEffect(() => {
+    if (!open) return undefined;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [open]);
+
   // Recharge la conversation sauvegardée à l'ouverture (ou au changement de
   // contexte). Le rafraîchissement de la page ne perd plus l'historique.
   useEffect(() => {
@@ -279,7 +290,7 @@ export default function AiTutor({ open, onClose, context, status }) {
         )}
 
         {/* Discussion */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto overscroll-contain px-4 py-4 space-y-3">
           {unavailable && (
             <div className="flex items-start gap-2 bg-slate-800/60 border border-slate-700 text-slate-300 text-xs rounded-xl px-3.5 py-3">
               <Icon name="info" size={15} className="mt-0.5" />

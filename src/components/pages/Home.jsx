@@ -5,6 +5,9 @@ import { getCurrentUser } from '../../services/authService';
 import usePageTitle from '../../hooks/usePageTitle';
 import Icon from '../ui/icons.jsx';
 
+// Chaîne officielle QCM App : invitée sur toutes les pages, connecté ou non.
+const WHATSAPP_CHANNEL = 'https://whatsapp.com/channel/0029Vb96OnjLCoXA4RDPES2n';
+
 const FEATURES = [
   {
     icon: 'clock',
@@ -143,19 +146,19 @@ export default function Home() {
             détaillées, rattrapages garantis et emploi du temps public.
           </p>
 
-          <div className="flex flex-wrap items-center justify-center gap-3 mt-8">
+          <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center justify-center gap-3 mt-8">
             {user ? (
               <>
                 <Link
                   to="/dashboard"
-                  className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-black text-sm px-7 py-3.5 rounded-2xl transition shadow-lg shadow-blue-600/30"
+                  className="inline-flex w-full sm:w-auto items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-black text-sm px-7 py-3.5 rounded-2xl transition shadow-lg shadow-blue-600/30"
                 >
                   Accéder à mon espace
                   <Icon name="arrow-right" size={16} />
                 </Link>
                 <Link
                   to="/schedule"
-                  className="inline-flex items-center gap-2 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-bold text-sm px-6 py-3.5 rounded-2xl transition"
+                  className="inline-flex w-full sm:w-auto items-center justify-center gap-2 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-bold text-sm px-6 py-3.5 rounded-2xl transition"
                 >
                   <Icon name="calendar" size={16} />
                   Voir le planning
@@ -165,25 +168,35 @@ export default function Home() {
               <>
                 <Link
                   to="/register"
-                  className="bg-blue-600 hover:bg-blue-500 text-white font-black text-sm px-7 py-3.5 rounded-2xl transition shadow-lg shadow-blue-600/30"
+                  className="inline-flex w-full sm:w-auto items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-black text-sm px-7 py-3.5 rounded-2xl transition shadow-lg shadow-blue-600/30"
                 >
                   Créer mon compte étudiant
+                  <Icon name="arrow-right" size={16} />
                 </Link>
                 <Link
                   to="/schedule"
-                  className="inline-flex items-center gap-2 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-bold text-sm px-6 py-3.5 rounded-2xl transition"
+                  className="inline-flex w-full sm:w-auto items-center justify-center gap-2 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-bold text-sm px-6 py-3.5 rounded-2xl transition"
                 >
                   <Icon name="calendar" size={16} />
                   Voir le planning public
                 </Link>
                 <Link
                   to="/login"
-                  className="text-blue-300 hover:text-white text-sm font-bold underline-offset-4 hover:underline"
+                  className="inline-flex w-full sm:w-auto items-center justify-center text-blue-300 hover:text-white text-sm font-bold underline-offset-4 hover:underline py-2"
                 >
                   Déjà inscrit ? Se connecter
                 </Link>
               </>
             )}
+            <a
+              href={WHATSAPP_CHANNEL}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex w-full sm:w-auto items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm px-6 py-3.5 rounded-2xl transition shadow-lg shadow-emerald-600/25"
+            >
+              <Icon name="chat" size={16} />
+              Rejoindre la chaîne WhatsApp
+            </a>
           </div>
         </div>
       </section>
@@ -350,6 +363,15 @@ export default function Home() {
                 </>
               )}
             </div>
+            <a
+              href={WHATSAPP_CHANNEL}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-5 inline-flex items-center justify-center gap-2 text-emerald-200 hover:text-white text-xs font-bold bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-400/30 px-4 py-2.5 rounded-xl transition"
+            >
+              <Icon name="chat" size={14} />
+              Suivre la chaîne WhatsApp officielle
+            </a>
           </div>
         </div>
       </section>

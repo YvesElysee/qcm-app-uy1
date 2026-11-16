@@ -146,7 +146,7 @@ export default function NotificationBell({ compact = false }) {
       {open && (
         <div
           role="menu"
-          className="absolute right-0 top-full mt-2 w-[min(92vw,22rem)] bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl shadow-black/50 overflow-hidden z-50"
+          className="fixed inset-x-3 top-[4.5rem] w-auto bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl shadow-black/50 overflow-hidden z-[60] sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[22rem]"
         >
           <div className="px-4 py-3 bg-slate-900/70 border-b border-slate-700 flex items-center justify-between gap-2">
             <div>

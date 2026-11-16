@@ -52,6 +52,16 @@ export default function Footer() {
           <ul className="space-y-2 text-xs">
             <li>QCM App</li>
             <li>Évaluation en ligne · Année académique 2025-2026</li>
+            <li>
+              <a
+                href="https://whatsapp.com/channel/0029Vb96OnjLCoXA4RDPES2n"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 font-bold text-emerald-400 hover:text-emerald-300 transition"
+              >
+                Rejoindre la chaîne WhatsApp
+              </a>
+            </li>
           </ul>
         </div>
       </div>

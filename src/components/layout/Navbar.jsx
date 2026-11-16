@@ -5,6 +5,8 @@ import StudentProfile from '../StudentProfile';
 import NotificationBell from '../NotificationBell';
 import Icon from '../ui/icons.jsx';
 
+const WHATSAPP_CHANNEL = 'https://whatsapp.com/channel/0029Vb96OnjLCoXA4RDPES2n';
+
 /**
  * Barre de navigation partagée par toutes les pages publiques/étudiantes.
  * - Desktop : liens à plat + menu utilisateur.
@@ -114,13 +116,6 @@ export default function Navbar() {
         : 'text-slate-300 hover:text-white hover:bg-slate-800'
     }`;
 
-  const mobileLinkClass = ({ isActive }) =>
-    `flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-bold transition ${
-      isActive
-        ? 'bg-blue-600 text-white'
-        : 'text-slate-300 hover:text-white hover:bg-slate-800'
-    }`;
-
   const initials = (user?.name || '?')
     .trim()
     .split(/\s+/)
@@ -161,6 +156,17 @@ export default function Navbar() {
 
           {/* ── Zone droite ── */}
           <div className="flex items-center gap-2">
+            <a
+              href={WHATSAPP_CHANNEL}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Rejoindre la chaîne WhatsApp QCM App"
+              title="Rejoindre la chaîne WhatsApp QCM App"
+              className="inline-flex items-center justify-center gap-2 w-10 h-10 lg:w-auto lg:h-auto lg:px-3 lg:py-2 rounded-xl bg-emerald-600/15 hover:bg-emerald-600/25 border border-emerald-500/30 text-emerald-300 text-xs font-bold transition"
+            >
+              <Icon name="chat" size={17} />
+              <span className="hidden lg:inline">Chaîne WhatsApp</span>
+            </a>
             {user && <NotificationBell />}
             {user ? (
               <div className="relative hidden md:block" ref={userMenuRef}>
@@ -339,43 +345,21 @@ export default function Navbar() {
               </div>
             )}
 
-            <nav className="space-y-1" aria-label="Navigation mobile">
-              {links.map(l => (
-                <NavLink
-                  key={l.to}
-                  to={l.to}
-                  end={l.end}
-                  onClick={() => setMobileOpen(false)}
-                  className={mobileLinkClass}
-                >
-                  <Icon
-                    name={
-                      l.to === '/' ? 'home'
-                        : l.to === '/schedule' ? 'calendar'
-                        : l.to === '/exercises' ? 'sparkles'
-                        : l.to === '/resources' ? 'book'
-                        : l.to === '/contact' ? 'chat'
-                        : 'graduation'
-                    }
-                    size={17}
-                  />
-                  {l.label}
-                </NavLink>
-              ))}
-            </nav>
+            <a
+              href={WHATSAPP_CHANNEL}
+              target="_blank"
+              rel="noreferrer"
+              onClick={() => setMobileOpen(false)}
+              className="flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-bold bg-emerald-600/15 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-600/25 transition"
+            >
+              <Icon name="chat" size={17} />
+              Rejoindre la chaîne WhatsApp
+            </a>
 
             {user && (
               <>
                 <div className="h-px bg-slate-800 my-3" />
                 <div className="space-y-1">
-                  <button
-                    type="button"
-                    onClick={openAi}
-                    className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-bold text-blue-300 hover:bg-slate-800 transition"
-                  >
-                    <Icon name="sparkles" size={17} />
-                    Tuteur IA
-                  </button>
                   <button
                     type="button"
                     onClick={openProfile}

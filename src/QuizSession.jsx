@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { api } from './services/api';
 import Icon from './components/ui/icons.jsx';
 import AiTutor from './components/ai/AiTutor.jsx';
@@ -23,6 +23,7 @@ const MAX_VIOLATIONS = 3;
 
 export default function QuizSession() {
   const { quizId } = useParams();
+  const navigate = useNavigate();
   const [questions, setQuestions] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [score, setScore] = useState(0);
@@ -52,6 +53,7 @@ export default function QuizSession() {
   const [violations, setViolations] = useState(0);
   const [warningMessage, setWarningMessage] = useState('');
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [exitPrompt, setExitPrompt] = useState(false);
 
   const submitted = useRef(false);
   const timerInterval = useRef(null);
@@ -60,6 +62,8 @@ export default function QuizSession() {
   const phaseRef = useRef(phase);
   const violationsRef = useRef(0);
   const fullscreenRef = useRef(false);
+  const allowLeaveRef = useRef(false);
+  const deadlineRef = useRef(null);
 
   const user = JSON.parse(localStorage.getItem('userSession')) || { name: 'Anonyme' };
   const safeName = (user.name || 'Anonyme').trim();
@@ -140,7 +144,7 @@ export default function QuizSession() {
       const saved = localStorage.getItem(storageKey);
       if (saved) {
         try {
-          const { qs, idx, responses: savedResponses, ans, quizSession } = JSON.parse(saved);
+          const { qs, idx, responses: savedResponses, ans, quizSession, deadline } = JSON.parse(saved);
           if (qs && quizSession === (meta.launchTime || 0)) {
             const restored = savedResponses || {};
             if (!savedResponses && Array.isArray(ans)) {
@@ -152,6 +156,12 @@ export default function QuizSession() {
             setResponses(restored);
             setQuestions(qs);
             setCurrentIndex(idx || 0);
+            if (meta.timePerQuestion > 0 && Number.isFinite(deadline)) {
+              const maxMs = meta.timePerQuestion * 1000;
+              const remaining = Math.min(maxMs, Math.max(0, deadline - Date.now()));
+              deadlineRef.current = deadline;
+              setTimeLeft(remaining);
+            }
             setPhase(meta.launchTime && meta.launchTime > Date.now() ? 'waiting' : 'quiz');
             return;
           }
@@ -161,6 +171,9 @@ export default function QuizSession() {
       try {
         const qs = await loadFresh();
         setQuestions(qs);
+        if (meta.timePerQuestion > 0) {
+          deadlineRef.current = Date.now() + meta.timePerQuestion * 1000;
+        }
         setPhase(meta.launchTime && meta.launchTime > Date.now() ? 'waiting' : 'quiz');
       } catch (err) {
         setAccessError(
@@ -178,7 +191,8 @@ export default function QuizSession() {
     if (phase !== 'quiz' || questions.length === 0) return;
     localStorage.setItem(storageKey, JSON.stringify({
       qs: questions, idx: currentIndex, responses,
-      quizSession: quizMeta?.launchTime || 0
+      quizSession: quizMeta?.launchTime || 0,
+      deadline: deadlineRef.current
     }));
   }, [currentIndex, phase, responses, questions, quizMeta?.launchTime, storageKey]);
 
@@ -324,6 +338,9 @@ export default function QuizSession() {
 
     // Aucun feedback intermédiaire : la correction n'apparaît qu'à la fin.
     if (currentIndex + 1 < questions.length) {
+      if (quizMeta?.timePerQuestion > 0) {
+        deadlineRef.current = Date.now() + quizMeta.timePerQuestion * 1000;
+      }
       setCurrentIndex(i => i + 1);
       setTimeLeft(quizMeta?.timePerQuestion ? quizMeta.timePerQuestion * 1000 : null);
     } else {
@@ -482,6 +499,30 @@ export default function QuizSession() {
     const t = setTimeout(() => setWarningMessage(''), 9000);
     return () => clearTimeout(t);
   }, [warningMessage]);
+
+  // ── Sortie de l'épreuve : retour navigateur bloqué ────────────────────
+  // Un étudiant ne peut ni revenir à la question précédente ni relancer
+  // l'épreuve. Toute tentative de sortie affiche un avertissement explicite.
+  useEffect(() => {
+    if (phase !== 'quiz') return undefined;
+    allowLeaveRef.current = false;
+
+    // Sentinelle : absorbe le premier « retour » du navigateur.
+    window.history.pushState({ qcmQuizGuard: true }, '', window.location.href);
+    const onPopState = () => {
+      if (allowLeaveRef.current) return;
+      window.history.pushState({ qcmQuizGuard: true }, '', window.location.href);
+      setExitPrompt(true);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [phase]);
+
+  const confirmExit = useCallback(() => {
+    allowLeaveRef.current = true;
+    setExitPrompt(false);
+    navigate('/dashboard', { replace: true });
+  }, [navigate]);
 
   // ── Sélection d'une option ───────────────────────────────────────────
   const handleOptionClick = useCallback((opt) => {
@@ -904,53 +945,95 @@ export default function QuizSession() {
         </div>
       )}
 
-      {/* Top bar */}
-      <div className="bg-slate-900 border-b border-slate-800 px-4 py-3 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <span className="bg-blue-600/20 text-blue-300 text-xs font-bold px-2.5 py-1 rounded-full">{quizId}</span>
-          <span className="text-slate-300 text-sm font-semibold">{safeName}</span>
-        </div>
-        <div className="flex items-center gap-2.5">
-          <span className={`flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full ${violations ? 'bg-red-950/60 text-red-300' : 'bg-slate-800 text-slate-400'}`}>
-            <Icon name="shield" size={12} />
-            {violations} alerte(s)
-          </span>
-          <button
-            onClick={toggleFullscreen}
-            className="inline-flex items-center gap-1.5 text-[11px] font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded-full transition"
-          >
-            <Icon name={isFullscreen ? 'close' : 'eye'} size={12} />
-            {isFullscreen ? 'Quitter le plein écran' : 'Plein écran'}
-          </button>
-          <span className="flex items-center gap-1.5 text-xs text-slate-400 bg-slate-800 px-2.5 py-1 rounded-full">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            {participants} en cours
-          </span>
-          <span className="bg-blue-600/20 text-blue-300 text-xs font-bold px-2.5 py-1 rounded-full">{currentIndex + 1} / {questions.length}</span>
-        </div>
-      </div>
-
-      {/* Progress bar */}
-      <div className="h-1 bg-slate-800">
-        <div className="h-1 bg-blue-600 transition-all duration-500" style={{ width: `${progress}%` }}></div>
-      </div>
-
-      {/* Timer */}
-      {quizMeta?.timePerQuestion > 0 && (
-        <div className="bg-slate-900 px-4 py-2 border-b border-slate-800">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-xs text-slate-400 font-semibold">Temps restant</span>
-            <span className={`text-sm font-black font-mono ${timerPct <= 20 ? 'text-red-400 animate-pulse' : 'text-slate-200'}`}>{fmtMs(timeLeft)}</span>
-          </div>
-          <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
-            <div className={`h-2 rounded-full transition-all duration-500 ${timerColor}`} style={{ width: `${timerPct}%` }}></div>
+      {/* Avertissement de sortie */}
+      {exitPrompt && (
+        <div className="fixed inset-0 z-[80] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl p-6 shadow-2xl shadow-black/60">
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center mb-4">
+              <Icon name="alert" size={22} />
+            </div>
+            <h2 className="text-lg font-black text-white">Quitter l'épreuve ?</h2>
+            <p className="text-sm text-slate-300 mt-2 leading-relaxed">
+              Cette épreuve <strong className="text-white">ne pourra pas être recommencée</strong>.
+              Votre session reste ouverte et se poursuit jusqu'à la fin du temps imparti.
+            </p>
+            <p className="text-xs text-slate-400 mt-2 leading-relaxed">
+              Si vous revenez, vous reprendrez à la question en cours, sans pouvoir revenir aux
+              questions précédentes.
+            </p>
+            <div className="flex flex-col-reverse sm:flex-row gap-2 mt-5">
+              <button
+                type="button"
+                onClick={confirmExit}
+                className="flex-1 text-xs font-bold text-red-300 hover:text-white bg-red-950/50 hover:bg-red-900/60 border border-red-800 px-4 py-2.5 rounded-xl transition"
+              >
+                Quitter quand même
+              </button>
+              <button
+                type="button"
+                onClick={() => setExitPrompt(false)}
+                className="flex-1 text-xs font-black text-white bg-blue-600 hover:bg-blue-500 px-4 py-2.5 rounded-xl transition"
+              >
+                Rester dans l'épreuve
+              </button>
+            </div>
           </div>
         </div>
       )}
 
+      {/* Top bar + progression + timer : toujours visibles, même sur mobile */}
+      <div className="sticky top-0 z-30 bg-slate-900 border-b border-slate-800 shadow-lg shadow-black/20">
+        <div className="px-3 sm:px-4 py-2.5 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="bg-blue-600/20 text-blue-300 text-[11px] sm:text-xs font-bold px-2 sm:px-2.5 py-1 rounded-full shrink-0">{quizId}</span>
+            <span className="text-slate-300 text-xs sm:text-sm font-semibold truncate max-w-24 sm:max-w-none">{safeName}</span>
+          </div>
+          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+            <span className={`hidden sm:flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full ${violations ? 'bg-red-950/60 text-red-300' : 'bg-slate-800 text-slate-400'}`}>
+              <Icon name="shield" size={12} />
+              {violations} alerte(s)
+            </span>
+            <button
+              onClick={toggleFullscreen}
+              aria-label={isFullscreen ? 'Quitter le plein écran' : 'Passer en plein écran'}
+              className="inline-flex items-center gap-1.5 text-[11px] font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-2 sm:px-2.5 py-1 rounded-full transition"
+            >
+              <Icon name={isFullscreen ? 'close' : 'eye'} size={12} />
+              <span className="hidden md:inline">{isFullscreen ? 'Quitter le plein écran' : 'Plein écran'}</span>
+            </button>
+            <span className="hidden sm:flex items-center gap-1.5 text-xs text-slate-400 bg-slate-800 px-2.5 py-1 rounded-full">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              {participants}
+            </span>
+            <span className="bg-blue-600/20 text-blue-300 text-[11px] sm:text-xs font-bold px-2 sm:px-2.5 py-1 rounded-full">{currentIndex + 1} / {questions.length}</span>
+          </div>
+        </div>
+
+        <div className="h-1 bg-slate-800">
+          <div className="h-1 bg-blue-600 transition-all duration-500" style={{ width: `${progress}%` }}></div>
+        </div>
+
+        {quizMeta?.timePerQuestion > 0 && (
+          <div className="px-3 sm:px-4 py-2 border-t border-slate-800/70 bg-slate-900">
+            <div className="flex items-center justify-between gap-3 mb-1">
+              <span className="text-[11px] sm:text-xs text-slate-400 font-semibold flex items-center gap-1.5">
+                <Icon name="clock" size={12} />
+                Temps restant
+              </span>
+              <span className={`text-base sm:text-sm font-black font-mono tabular-nums ${timerPct <= 20 ? 'text-red-400 animate-pulse' : 'text-slate-100'}`}>
+                {fmtMs(timeLeft === null ? quizMeta.timePerQuestion * 1000 : timeLeft)}
+              </span>
+            </div>
+            <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+              <div className={`h-2 rounded-full transition-all duration-500 ${timerColor}`} style={{ width: `${timerPct}%` }}></div>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Question */}
-      <div className="flex-1 flex flex-col items-center pt-8 px-4 pb-20">
-        <div className="w-full max-w-3xl bg-slate-900 p-8 rounded-2xl border border-slate-800 shadow-xl shadow-black/30">
+      <div className="flex-1 flex flex-col items-center pt-4 sm:pt-8 px-3 sm:px-4 pb-24">
+        <div className="w-full max-w-3xl bg-slate-900 p-4 sm:p-8 rounded-2xl border border-slate-800 shadow-xl shadow-black/30">
           <div className="flex items-center gap-2 mb-4 flex-wrap">
             {q.tags && String(q.tags).split(/[;,]/).filter(Boolean).map(tag => (
               <span key={tag} className="text-[10px] font-bold text-blue-300 bg-blue-600/15 border border-blue-600/30 px-2 py-0.5 rounded-full">
@@ -970,13 +1053,13 @@ export default function QuizSession() {
             )}
           </div>
 
-          <h2 className="text-xl font-bold mb-8 text-slate-100 leading-relaxed">{q.Question}</h2>
+          <h2 className="text-base sm:text-xl font-bold mb-5 sm:mb-8 text-slate-100 leading-relaxed">{q.Question}</h2>
 
-          <div className="grid grid-cols-1 gap-3 mb-6">
+          <div className="grid grid-cols-1 gap-2.5 sm:gap-3 mb-5 sm:mb-6">
             {shuffledOptions.map(opt => {
               const isSelected = opt === selectedOption;
 
-              const cls = 'w-full text-left p-4 border rounded-xl transition font-semibold text-sm ' +
+              const cls = 'w-full text-left p-3.5 sm:p-4 border rounded-xl transition font-semibold text-sm break-words ' +
                 (isSelected
                   ? 'bg-blue-600/20 border-blue-500 text-blue-100'
                   : 'border-slate-800 bg-slate-950 text-slate-200 hover:bg-slate-800 hover:border-blue-600 cursor-pointer');
