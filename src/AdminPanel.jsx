@@ -1991,7 +1991,9 @@ export default function AdminPanel() {
                               return match ? Number(match[1]) : 0;
                             })
                             .filter(n => n > 0);
-                          const nextNumber = Math.max(existingTests.length, ...numbers, 0) + 1;
+                          const nextNumber = numbers.length
+                            ? Math.max(...numbers) + 1
+                            : existingTests.length + 1;
                           setQuizTitle(prev => (prev.trim()
                             ? prev
                             : (existingTests.length ? `Test ${nextNumber}` : '')));
