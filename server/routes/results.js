@@ -56,6 +56,27 @@ function optionsOf(question) {
 }
 
 /**
+ * Détermine si la réponse soumise correspond à la bonne réponse.
+ *
+ * Le site envoie le texte exact de l'option cochée, mais les anciens clients
+ * (et certaines intégrations) envoient la lettre A/B/C/D. On accepte les deux
+ * afin de ne jamais marquer à tort une copie comme fausse.
+ */
+function answerMatches(selected, question, correct) {
+  if (!selected) return false;
+  if (selected === correct) return true;
+
+  const direct = String(question?.ReponseCorrecte || '').trim().toUpperCase();
+  const letter = ['A', 'B', 'C', 'D'].includes(direct)
+    ? direct
+    : ['A', 'B', 'C', 'D'].find(
+        (label) => String(question?.[`Opt${label}`] || '').trim() === correct
+      ) || '';
+
+  return !!letter && selected.length <= 2 && selected.toUpperCase() === letter;
+}
+
+/**
  * Enregistre une copie. Le score, la correction et les cartes de révision sont
  * calculés ici : un client modifié ne peut pas s'attribuer une note.
  */
@@ -105,7 +126,7 @@ router.post('/', requireStudent, (req, res) => {
       : (submitted?.selected ?? (typeof fallback === 'string' ? fallback : fallback?.selected) ?? '');
     const selected = String(rawSelected || '').trim();
     const correct = normalizeCorrect(q);
-    const isOk = selected !== '' && selected === correct;
+    const isOk = answerMatches(selected, q, correct);
 
     return {
       questionId: q.id,
@@ -114,6 +135,7 @@ router.post('/', requireStudent, (req, res) => {
       selected: selected || null,
       correct,
       isOk,
+      explication: q.explication || '',
       tags: q.tags || '',
       difficulte: q.difficulte || 'moyenne'
     };

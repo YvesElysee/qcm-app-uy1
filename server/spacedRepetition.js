@@ -45,7 +45,7 @@ export function upsertWrongCard(user, ue, question, selected) {
     const ease = Math.max(MIN_EASE, Number(existing.ease) - 0.2);
     db.prepare(`
       UPDATE review_cards SET
-        question = ?, options = ?, correct = ?, lastSelected = ?,
+        question = ?, options = ?, correct = ?, explication = ?, lastSelected = ?,
         ease = ?, intervalDays = 1, repetitions = 0,
         lapses = lapses + 1, dueAt = ?, updatedAt = ?
       WHERE id = ?
@@ -53,6 +53,7 @@ export function upsertWrongCard(user, ue, question, selected) {
       String(question.Question || '').trim(),
       JSON.stringify(optionsOf(question)),
       normalizeCorrect(question),
+      String(question.explication || '').slice(0, 2000),
       String(selected || ''),
       ease,
       new Date(now.getTime() + DAY_MS).toISOString(),
@@ -64,9 +65,9 @@ export function upsertWrongCard(user, ue, question, selected) {
 
   db.prepare(`
     INSERT INTO review_cards
-      (userId, ue, questionId, question, options, correct, lastSelected,
+      (userId, ue, questionId, question, options, correct, explication, lastSelected,
        ease, intervalDays, repetitions, lapses, dueAt, createdAt, updatedAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 2.5, 1, 0, 1, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 2.5, 1, 0, 1, ?, ?, ?)
   `).run(
     user.id,
     ue,
@@ -74,6 +75,7 @@ export function upsertWrongCard(user, ue, question, selected) {
     String(question.Question || '').trim(),
     JSON.stringify(optionsOf(question)),
     normalizeCorrect(question),
+    String(question.explication || '').slice(0, 2000),
     String(selected || ''),
     new Date(now.getTime() + DAY_MS).toISOString(),
     nowIso,

@@ -28,6 +28,7 @@ import catalogRoutes from './routes/catalog.js';
 import notificationsRoutes from './routes/notifications.js';
 import resourcesRoutes from './routes/resources.js';
 import quizRequestsRoutes, { adminRouter as quizRequestsAdminRoutes } from './routes/quizRequests.js';
+import exercisesRoutes from './routes/exercises.js';
 import { scheduleBackups } from './backup.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -52,6 +53,7 @@ app.use('/api/review', reviewRoutes);
 app.use('/api/catalog', catalogRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/resources', resourcesRoutes);
+app.use('/api/exercises', exercisesRoutes);
 app.use('/api/quiz-requests', quizRequestsRoutes);
 app.use('/api/admin/quiz-requests', quizRequestsAdminRoutes);
 

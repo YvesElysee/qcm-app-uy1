@@ -2,6 +2,8 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from './services/api';
 import Icon from './components/ui/icons.jsx';
+import AiTutor from './components/ai/AiTutor.jsx';
+import { fetchAiStatus } from './services/aiService.js';
 
 // Shuffle déterministe par seed (nom étudiant)
 function seededShuffle(arr, seed) {
@@ -41,6 +43,11 @@ export default function QuizSession() {
   const [accessError, setAccessError] = useState('');
   const [resultError, setResultError] = useState('');
 
+  // Tuteur IA de fin d'épreuve
+  const [aiStatus, setAiStatus] = useState(null);
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiContext, setAiContext] = useState(null);
+
   // Anti-triche
   const [violations, setViolations] = useState(0);
   const [warningMessage, setWarningMessage] = useState('');
@@ -68,6 +75,15 @@ export default function QuizSession() {
   useEffect(() => {
     phaseRef.current = phase;
   }, [phase]);
+
+  // Disponibilité du tuteur IA pour l'aide de fin d'épreuve.
+  useEffect(() => {
+    let active = true;
+    fetchAiStatus()
+      .then((next) => { if (active) setAiStatus(next); })
+      .catch(() => { /* assistant indisponible : l'aide reste masquée */ });
+    return () => { active = false; };
+  }, []);
 
   // ── Chargement des questions ─────────────────────────────────────────
   const loadFresh = useCallback(async () => {
@@ -562,6 +578,30 @@ export default function QuizSession() {
     </div>
   );
 
+  const aiAvailable = aiStatus?.available === true;
+
+  const openTutorGeneral = () => {
+    setAiContext({ key: `general_${quizId}`, kind: 'general', quizId });
+    setAiOpen(true);
+  };
+
+  const openTutorForAnswer = (answer, index) => {
+    const options = ['A', 'B', 'C', 'D']
+      .map((label) => ({ label, text: answer.options?.['Opt' + label] }))
+      .filter((option) => typeof option.text === 'string' && option.text.trim() !== '');
+    setAiContext({
+      key: `q${answer.questionId ?? index}_${quizId}`,
+      kind: 'question',
+      quizId,
+      questionId: answer.questionId,
+      question: answer.question,
+      options,
+      selected: answer.selected || '',
+      correct: answer.correct || ''
+    });
+    setAiOpen(true);
+  };
+
   if (phase === 'finished') {
     const myEntry = leaderboard.find(e => e.name === safeName);
     const myRank = leaderboard.findIndex(e => e.name === safeName) + 1;
@@ -601,15 +641,43 @@ export default function QuizSession() {
             </div>
           )}
 
-          <div className="flex gap-3 mb-5">
+          {aiAvailable && (
+            <div className="bg-gradient-to-r from-blue-950/70 to-indigo-950/60 border border-blue-700/50 rounded-2xl p-4 mb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <span className="w-10 h-10 rounded-xl bg-blue-600/20 border border-blue-500/30 text-blue-300 flex items-center justify-center shrink-0">
+                  <Icon name="sparkles" size={18} />
+                </span>
+                <div>
+                  <h2 className="text-sm font-black text-white">Besoin d'aide pour comprendre ?</h2>
+                  <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
+                    Le tuteur IA peut expliquer chaque erreur et vous proposer une méthode de révision.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={openTutorGeneral}
+                className="shrink-0 inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-black px-4 py-2.5 rounded-xl transition shadow-md shadow-blue-600/25"
+              >
+                <Icon name="chat" size={14} />
+                Discuter avec l'IA
+              </button>
+            </div>
+          )}
+
+          <div className="flex flex-col sm:flex-row gap-3 mb-5">
             <Link to={`/review/${quizId}`} className="flex-1 inline-flex items-center justify-center gap-2 bg-blue-600 text-white py-3 rounded-xl font-bold text-center hover:bg-blue-500 transition shadow text-sm">
               <Icon name="eye" size={15} />
               Relire ma copie
             </Link>
-            <Link to="/revision" className="flex-1 inline-flex items-center justify-center gap-2 bg-emerald-600 text-white py-3 rounded-xl font-bold text-center hover:bg-emerald-500 transition shadow text-sm">
+            <button
+              type="button"
+              onClick={openTutorGeneral}
+              className="flex-1 inline-flex items-center justify-center gap-2 bg-indigo-600 text-white py-3 rounded-xl font-bold text-center hover:bg-indigo-500 transition shadow text-sm"
+            >
               <Icon name="sparkles" size={15} />
-              Réviser mes erreurs
-            </Link>
+              Aide IA
+            </button>
             <Link to="/schedule" className="flex-1 inline-flex items-center justify-center gap-2 bg-slate-900 border border-slate-700 text-slate-200 py-3 rounded-xl font-bold text-center hover:bg-slate-800 hover:border-slate-600 transition text-sm">
               <Icon name="calendar" size={15} />
               Emploi du temps
@@ -702,6 +770,27 @@ export default function QuizSession() {
                           </p>
                         )}
                       </div>
+
+                      {a.explication && (
+                        <div className="mt-2.5 bg-indigo-950/40 border border-indigo-800/60 rounded-lg px-3 py-2.5">
+                          <p className="text-[9px] font-black uppercase tracking-wider text-indigo-300 mb-1 flex items-center gap-1.5">
+                            <Icon name="lightbulb" size={11} />
+                            Explication
+                          </p>
+                          <p className="text-[11px] text-slate-200 leading-relaxed">{a.explication}</p>
+                        </div>
+                      )}
+
+                      {aiAvailable && (
+                        <button
+                          type="button"
+                          onClick={() => openTutorForAnswer(a, index)}
+                          className="mt-2.5 inline-flex items-center gap-1.5 text-[11px] font-bold text-blue-300 hover:text-white bg-blue-950/60 hover:bg-blue-900 border border-blue-800 hover:border-blue-700 px-3 py-1.5 rounded-lg transition"
+                        >
+                          <Icon name="sparkles" size={12} />
+                          Comprendre cette question avec l'IA
+                        </button>
+                      )}
                     </div>
                   );
                 })}
@@ -759,6 +848,16 @@ export default function QuizSession() {
             </div>
           </div>
         </div>
+
+        {aiContext && (
+          <AiTutor
+            key={aiContext.key || 'none'}
+            open={aiOpen}
+            onClose={() => setAiOpen(false)}
+            context={aiContext}
+            status={aiStatus}
+          />
+        )}
       </div>
     );
   }

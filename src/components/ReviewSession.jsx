@@ -148,6 +148,7 @@ export default function ReviewSession() {
                         selected,
                         correct,
                         isOk,
+                        explication: a.explication || fallback.explication || '',
                         tags: a.tags || '',
                         difficulte: a.difficulte || 'moyenne'
                     };
@@ -160,6 +161,7 @@ export default function ReviewSession() {
                     selected,
                     correct,
                     isOk,
+                    explication: fallback.explication || '',
                     tags: fallback.tags || '',
                     difficulte: fallback.difficulte || 'moyenne'
                 };
@@ -249,10 +251,6 @@ export default function ReviewSession() {
                         Retour à mon espace
                     </Link>
                     <div className="flex items-center gap-2">
-                        <Link to="/revision" className="mb-2 inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3.5 py-2 rounded-xl transition shadow-lg shadow-emerald-600/20">
-                            <Icon name="sparkles" size={14} />
-                            Réviser mes erreurs
-                        </Link>
                         {aiAvailable && (
                             <button
                                 onClick={openTutorGeneral}
@@ -390,6 +388,16 @@ export default function ReviewSession() {
                                         <p className="mt-2 text-xs text-emerald-300 bg-emerald-950/40 border border-emerald-800/60 rounded-lg px-3 py-2">
                                             Bonne réponse : <strong className="text-white">{correctChoice.text}</strong>
                                         </p>
+                                    )}
+
+                                    {item.explication && (
+                                        <div className="mt-3 bg-indigo-950/40 border border-indigo-800/60 rounded-xl px-3.5 py-3">
+                                            <p className="text-[10px] font-black uppercase tracking-wider text-indigo-300 mb-1 flex items-center gap-1.5">
+                                                <Icon name="lightbulb" size={12} />
+                                                Explication
+                                            </p>
+                                            <p className="text-xs text-slate-200 leading-relaxed">{item.explication}</p>
+                                        </div>
                                     )}
 
                                     {/* Aide IA sur cette question (uniquement si erreur) */}

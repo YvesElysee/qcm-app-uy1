@@ -24,6 +24,7 @@ function parseCard(row) {
     question: row.question,
     options,
     correct: row.correct,
+    explication: row.explication || '',
     lastSelected: row.lastSelected || '',
     ease: row.ease,
     intervalDays: row.intervalDays,

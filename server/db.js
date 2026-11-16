@@ -75,6 +75,7 @@ db.exec(`
     OptC             TEXT DEFAULT '',
     OptD             TEXT DEFAULT '',
     ReponseCorrecte  TEXT NOT NULL,
+    explication      TEXT DEFAULT '',           -- justification pédagogique (affichée après le QCM)
     tags             TEXT DEFAULT '',           -- étiquettes libres séparées par des virgules
     difficulte       TEXT DEFAULT 'moyenne',    -- facile | moyenne | difficile
     position         INTEGER DEFAULT 0
@@ -189,6 +190,7 @@ db.exec(`
     question        TEXT NOT NULL,
     options         TEXT,                      -- JSON { OptA, OptB, OptC, OptD }
     correct         TEXT NOT NULL,
+    explication     TEXT DEFAULT '',
     lastSelected    TEXT,
     ease            REAL DEFAULT 2.5,
     intervalDays    INTEGER DEFAULT 1,
@@ -327,6 +329,38 @@ db.exec(`
   CREATE UNIQUE INDEX IF NOT EXISTS idx_referrals_referred
     ON referrals(referredUserId);
   CREATE INDEX IF NOT EXISTS idx_referrals_referrer ON referrals(referrerId);
+
+  -- Générateur d'exercices (Mathématiques) : documents personnels déposés par
+  -- l'étudiant et historiques de génération. Les fichiers restent hors du
+  -- dossier public et ne sont visibles que par leur propriétaire.
+  CREATE TABLE IF NOT EXISTS student_documents (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    userId       TEXT NOT NULL,
+    originalName TEXT NOT NULL,
+    storedName   TEXT NOT NULL,
+    mimeType     TEXT DEFAULT '',
+    size         INTEGER DEFAULT 0,
+    charCount    INTEGER DEFAULT 0,
+    textContent  TEXT DEFAULT '',
+    createdAt    TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_student_documents_user
+    ON student_documents(userId, createdAt);
+
+  CREATE TABLE IF NOT EXISTS student_exercises (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    userId      TEXT NOT NULL,
+    filiere     TEXT DEFAULT '',
+    niveau      TEXT DEFAULT '',
+    type        TEXT DEFAULT 'mixte',
+    prompt      TEXT DEFAULT '',
+    documentIds TEXT DEFAULT '',
+    content     TEXT DEFAULT '[]',
+    provider    TEXT DEFAULT '',
+    createdAt   TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_student_exercises_user
+    ON student_exercises(userId, createdAt);
 `);
 
 /**
@@ -344,6 +378,8 @@ function ensureColumn(table, column, definition) {
 ensureColumn('quizzes', 'drawCount', 'INTEGER DEFAULT 0');
 ensureColumn('questions', 'tags', "TEXT DEFAULT ''");
 ensureColumn('questions', 'difficulte', "TEXT DEFAULT 'moyenne'");
+ensureColumn('questions', 'explication', "TEXT DEFAULT ''");
+ensureColumn('review_cards', 'explication', "TEXT DEFAULT ''");
 // Dimension faculté (migration douce des bases existantes)
 ensureColumn('users', 'faculte', "TEXT DEFAULT 'FACSCIENCES'");
 ensureColumn('quizzes', 'faculte', "TEXT DEFAULT 'FACSCIENCES'");

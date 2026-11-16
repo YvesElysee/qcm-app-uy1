@@ -7,10 +7,10 @@ import Icon from '../ui/icons.jsx';
 
 /**
  * Barre de navigation partagée par toutes les pages publiques/étudiantes.
- * - Responsive : liens à plat sur desktop, menu hamburger sur mobile
- * - Zone utilisateur connecté : avatar + menu déroulant (espace, profil, sortie)
- * - Non connecté : boutons Connexion / Inscription
- * Thème sombre (slate-900) pour rester lisible au-dessus des pages claires et sombres.
+ * - Desktop : liens à plat + menu utilisateur.
+ * - Mobile  : tiroir latéral coulissant sur fond flouté + barre de navigation
+ *   fixe en bas de l'écran (accueil, planning, IA, ressources, espace).
+ * Thème sombre (slate-900) pour rester lisible au-dessus des pages claires.
  */
 export default function Navbar() {
   const user = getCurrentUser();
@@ -40,6 +40,21 @@ export default function Navbar() {
     };
   }, [userMenuOpen]);
 
+  // Tiroir mobile : fermeture sur Échap + blocage du défilement de fond
+  useEffect(() => {
+    if (!mobileOpen) return undefined;
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') setMobileOpen(false);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = previous;
+    };
+  }, [mobileOpen]);
+
   const handleLogout = () => {
     logoutStudent();
     navigate('/');
@@ -51,18 +66,46 @@ export default function Navbar() {
     setShowProfile(true);
   };
 
+  const openAi = () => {
+    setMobileOpen(false);
+    window.dispatchEvent(new CustomEvent('qcm:open-ai'));
+  };
+
   // Liens principaux (Contact et Mon espace n'ont de sens que connecté)
+  const mathFiliere = String(user?.filiere || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  const canGenerateExercises = !!user
+    && /math/i.test(mathFiliere)
+    && ['L1', 'L2', 'L3', 'M1'].includes(String(user?.niveau || '').trim().toUpperCase());
+
   const links = [
     { to: '/', label: 'Accueil', end: true },
     { to: '/schedule', label: 'Planning' },
     ...(user
       ? [
+          ...(canGenerateExercises ? [{ to: '/exercises', label: 'Exercices' }] : []),
           { to: '/resources', label: 'Ressources' },
           { to: '/contact', label: 'Contact' },
           { to: '/dashboard', label: 'Mon espace' }
         ]
       : [])
   ];
+
+  const bottomLinks = user
+    ? [
+        { to: '/', label: 'Accueil', icon: 'home', end: true },
+        { to: '/schedule', label: 'Planning', icon: 'calendar' },
+        { action: 'ai', label: 'Tuteur IA', icon: 'sparkles' },
+        { to: '/resources', label: 'Ressources', icon: 'book' },
+        { to: '/dashboard', label: 'Espace', icon: 'graduation' }
+      ]
+    : [
+        { to: '/', label: 'Accueil', icon: 'home', end: true },
+        { to: '/schedule', label: 'Planning', icon: 'calendar' },
+        { to: '/login', label: 'Connexion', icon: 'user' },
+        { to: '/register', label: 'Inscription', icon: 'graduation' }
+      ];
 
   const desktopLinkClass = ({ isActive }) =>
     `text-xs font-bold px-3 py-2 rounded-xl transition ${
@@ -72,7 +115,7 @@ export default function Navbar() {
     }`;
 
   const mobileLinkClass = ({ isActive }) =>
-    `block px-3 py-2.5 rounded-xl text-sm font-bold transition ${
+    `flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-bold transition ${
       isActive
         ? 'bg-blue-600 text-white'
         : 'text-slate-300 hover:text-white hover:bg-slate-800'
@@ -170,6 +213,24 @@ export default function Navbar() {
                         <Icon name="book" size={15} />
                         Ressources de cours
                       </NavLink>
+                      {canGenerateExercises && (
+                        <NavLink
+                          to="/exercises"
+                          onClick={() => setUserMenuOpen(false)}
+                          className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-slate-200 hover:bg-slate-700 hover:text-white transition"
+                        >
+                          <Icon name="sparkles" size={15} />
+                          Générateur d'exercices
+                        </NavLink>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => { setUserMenuOpen(false); openAi(); }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-slate-200 hover:bg-slate-700 hover:text-white transition"
+                      >
+                        <Icon name="sparkles" size={15} />
+                        Tuteur IA
+                      </button>
                       <button
                         type="button"
                         onClick={openProfile}
@@ -211,65 +272,132 @@ export default function Navbar() {
             {/* Burger mobile */}
             <button
               type="button"
-              onClick={() => setMobileOpen(o => !o)}
+              onClick={() => setMobileOpen(true)}
               aria-label="Ouvrir le menu"
               aria-expanded={mobileOpen}
               className="md:hidden w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center justify-center text-slate-200 transition"
             >
-              {mobileOpen ? (
-                <Icon name="close" size={20} />
-              ) : (
-                <Icon name="menu" size={20} />
-              )}
+              <Icon name="menu" size={20} />
             </button>
           </div>
         </div>
+      </header>
 
-        {/* ── Menu mobile déroulant ── */}
-        {mobileOpen && (
-          <nav className="md:hidden border-t border-slate-800 bg-slate-900 px-4 py-3 space-y-1" aria-label="Navigation mobile">
-            {links.map(l => (
-              <NavLink
-                key={l.to}
-                to={l.to}
-                end={l.end}
-                onClick={() => setMobileOpen(false)}
-                className={mobileLinkClass}
-              >
-                {l.label}
-              </NavLink>
-            ))}
+      {/* ── Tiroir mobile coulissant + fond flouté ── */}
+      <div
+        className={`md:hidden fixed inset-0 z-[70] ${mobileOpen ? '' : 'pointer-events-none'}`}
+        aria-hidden={!mobileOpen}
+      >
+        <div
+          onClick={() => setMobileOpen(false)}
+          className={`absolute inset-0 bg-slate-950/60 backdrop-blur-md transition-opacity duration-300 ${
+            mobileOpen ? 'opacity-100' : 'opacity-0'
+          }`}
+        />
+        <aside
+          role="dialog"
+          aria-label="Menu mobile"
+          className={`absolute right-0 top-0 h-full w-[86%] max-w-sm bg-slate-900 border-l border-slate-800 shadow-2xl flex flex-col transition-transform duration-300 ease-out ${
+            mobileOpen ? 'translate-x-0' : 'translate-x-full'
+          }`}
+        >
+          <div className="flex items-center justify-between px-4 h-16 border-b border-slate-800 shrink-0">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center font-black">
+                QA
+              </span>
+              <div className="min-w-0">
+                <p className="text-sm font-black text-white leading-tight">QCM App</p>
+                <p className="text-[11px] text-slate-400 truncate">Plateforme d'évaluation</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setMobileOpen(false)}
+              aria-label="Fermer le menu"
+              className="w-9 h-9 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 flex items-center justify-center"
+            >
+              <Icon name="close" size={18} />
+            </button>
+          </div>
 
-            <div className="h-px bg-slate-800 my-2" />
-
-            {user ? (
-              <>
-                <div className="px-3 py-2">
-                  <p className="text-xs font-black text-white truncate">{user.name}</p>
-                  <p className="text-[11px] text-slate-400 truncate">{user.email}</p>
-                  <p className="text-[11px] text-blue-300 mt-0.5 font-bold">
-                    {user.filiere} • {user.niveau}
-                  </p>
+          <div className="flex-1 overflow-y-auto px-3 py-3">
+            {user && (
+              <div className="mb-3 rounded-2xl bg-slate-800/70 border border-slate-700 p-3.5">
+                <div className="flex items-center gap-3">
+                  <span className="w-10 h-10 rounded-xl bg-blue-600 text-white text-sm font-black flex items-center justify-center">
+                    {initials}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-black text-white truncate">{user.name}</p>
+                    <p className="text-[11px] text-slate-400 truncate">{user.email}</p>
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={openProfile}
-                  className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-bold text-slate-300 hover:bg-slate-800 hover:text-white transition"
+                <p className="text-[11px] text-blue-300 mt-2 font-bold">
+                  {user.filiere} • {user.niveau}
+                </p>
+              </div>
+            )}
+
+            <nav className="space-y-1" aria-label="Navigation mobile">
+              {links.map(l => (
+                <NavLink
+                  key={l.to}
+                  to={l.to}
+                  end={l.end}
+                  onClick={() => setMobileOpen(false)}
+                  className={mobileLinkClass}
                 >
-                  <Icon name="user" size={16} />
-                  Mon profil
-                </button>
-                <button
-                  type="button"
-                  onClick={handleLogout}
-                  className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-bold text-red-400 hover:bg-red-950/50 hover:text-red-300 transition"
-                >
-                  <Icon name="logout" size={16} />
-                  Se déconnecter
-                </button>
+                  <Icon
+                    name={
+                      l.to === '/' ? 'home'
+                        : l.to === '/schedule' ? 'calendar'
+                        : l.to === '/exercises' ? 'sparkles'
+                        : l.to === '/resources' ? 'book'
+                        : l.to === '/contact' ? 'chat'
+                        : 'graduation'
+                    }
+                    size={17}
+                  />
+                  {l.label}
+                </NavLink>
+              ))}
+            </nav>
+
+            {user && (
+              <>
+                <div className="h-px bg-slate-800 my-3" />
+                <div className="space-y-1">
+                  <button
+                    type="button"
+                    onClick={openAi}
+                    className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-bold text-blue-300 hover:bg-slate-800 transition"
+                  >
+                    <Icon name="sparkles" size={17} />
+                    Tuteur IA
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openProfile}
+                    className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-bold text-slate-300 hover:bg-slate-800 hover:text-white transition"
+                  >
+                    <Icon name="user" size={17} />
+                    Mon profil
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-bold text-red-400 hover:bg-red-950/50 hover:text-red-300 transition"
+                  >
+                    <Icon name="logout" size={17} />
+                    Se déconnecter
+                  </button>
+                </div>
               </>
-            ) : (
-              <div className="flex gap-2 pt-1">
+            )}
+
+            {!user && (
+              <div className="flex gap-2 pt-4">
                 <Link
                   to="/login"
                   onClick={() => setMobileOpen(false)}
@@ -286,13 +414,54 @@ export default function Navbar() {
                 </Link>
               </div>
             )}
-          </nav>
-        )}
-      </header>
+          </div>
+        </aside>
+      </div>
+
+      {/* ── Navigation fixe du bas (mobile) ── */}
+      <nav
+        aria-label="Navigation rapide"
+        className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 pb-[env(safe-area-inset-bottom)]"
+      >
+        <div className="grid grid-cols-5">
+          {bottomLinks.map((item) => {
+            if (item.action === 'ai') {
+              return (
+                <button
+                  key="ai"
+                  type="button"
+                  onClick={openAi}
+                  className="flex flex-col items-center justify-center gap-1 py-2.5 text-[10px] font-bold text-blue-300 active:bg-slate-800 transition"
+                >
+                  <span className="w-9 h-9 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center">
+                    <Icon name="sparkles" size={18} />
+                  </span>
+                  {item.label}
+                </button>
+              );
+            }
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                className={({ isActive }) =>
+                  `flex flex-col items-center justify-center gap-1 py-2.5 text-[10px] font-bold transition active:bg-slate-800 ${
+                    isActive ? 'text-blue-300' : 'text-slate-400'
+                  }`
+                }
+              >
+                <Icon name={item.icon} size={18} />
+                {item.label}
+              </NavLink>
+            );
+          })}
+        </div>
+      </nav>
 
       {/* ── Modal profil (point d'entrée unique, partagé entre pages) ── */}
       {showProfile && user && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[80] p-4">
           <StudentProfile
             onClose={() => setShowProfile(false)}
             onProfileUpdated={() => {

@@ -165,7 +165,7 @@ router.get('/:id/questions', (req, res) => {
   }
 
   const allQuestions = db.prepare(`
-    SELECT id, Question, OptA, OptB, OptC, OptD, ReponseCorrecte, tags, difficulte
+    SELECT id, Question, OptA, OptB, OptC, OptD, ReponseCorrecte, explication, tags, difficulte
     FROM questions WHERE quizId = ? ORDER BY position ASC, id ASC
   `).all(req.params.id);
 
@@ -301,8 +301,8 @@ router.post('/:id/questions', requireAdmin, (req, res) => {
   const replaceAll = db.transaction((rows) => {
     db.prepare('DELETE FROM questions WHERE quizId = ?').run(id);
     const insert = db.prepare(`
-      INSERT INTO questions (quizId, Question, OptA, OptB, OptC, OptD, ReponseCorrecte, tags, difficulte, position)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO questions (quizId, Question, OptA, OptB, OptC, OptD, ReponseCorrecte, explication, tags, difficulte, position)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     rows.forEach((q, i) => {
       insert.run(
@@ -313,6 +313,10 @@ router.post('/:id/questions', requireAdmin, (req, res) => {
         String(q.OptC || '').trim(),
         String(q.OptD || '').trim(),
         String(q.ReponseCorrecte || q.OptA || '').trim(),
+        String(
+          q.Explication || q.explication || q.explanation ||
+          q.justification || q.commentaire || ''
+        ).trim().slice(0, 2000),
         String(q.Tags || q.tags || '').trim(),
         String(q.Difficulte || q.difficulte || 'moyenne').trim().toLowerCase(),
         i

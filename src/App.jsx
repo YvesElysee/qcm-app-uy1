@@ -5,12 +5,13 @@ import QuizSession from './QuizSession';
 import Login from './components/Login';
 import Schedule from './components/Schedule';
 import ReviewSession from './components/ReviewSession';
-import RevisionSession from './components/RevisionSession';
 import StudentAuth from './components/StudentAuth';
 import StudentDashboard from './components/StudentDashboard';
 import StudentResources from './components/StudentResources';
+import ExerciseGenerator from './components/ExerciseGenerator';
 import Navbar from './components/layout/Navbar';
 import Footer from './components/layout/Footer';
+import AiLauncher from './components/ai/AiLauncher';
 import ScrollToTop from './components/ScrollToTop';
 import Home from './components/pages/Home';
 import NotFound from './components/pages/NotFound';
@@ -59,6 +60,7 @@ function Layout({ children }) {
       <Navbar />
       <div className="flex-1 flex flex-col">{children}</div>
       <Footer />
+      <AiLauncher />
     </div>
   );
 }
@@ -96,6 +98,12 @@ export default function App() {
           element={<RequireStudent><Layout><StudentResources /></Layout></RequireStudent>}
         />
 
+        {/* Générateur d'exercices (Mathématiques L1 → M1, contrôlé serveur) */}
+        <Route
+          path="/exercises"
+          element={<RequireStudent><Layout><ExerciseGenerator /></Layout></RequireStudent>}
+        />
+
         {/* Emploi du temps public */}
         <Route path="/schedule" element={<Layout><Schedule /></Layout>} />
 
@@ -112,11 +120,7 @@ export default function App() {
           element={<RequireStudent><Layout><ReviewSession /></Layout></RequireStudent>}
         />
 
-        {/* Révisions intelligentes (répétition espacée) */}
-        <Route
-          path="/revision"
-          element={<RequireStudent><Layout><RevisionSession /></Layout></RequireStudent>}
-        />
+        {/* Révisions intelligentes (retirées de l'espace étudiant) */}
 
         {/* Espace Administrateur · portail discret, sans lien public */}
         <Route path={ADMIN_LOGIN_PATH} element={<Login />} />

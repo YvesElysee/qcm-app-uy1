@@ -32,12 +32,16 @@ export default function StudentDashboard() {
   const registeredNiveau = currentUser?.niveau || 'L1';
   const faculte = currentUser?.faculte || '';
   const selectedNiveau = registeredNiveau;
+  const isMathsFiliere = /math/i.test(
+    String(filiere).normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  );
+  const canGenerateExercises =
+    isMathsFiliere && ['L1', 'L2', 'L3', 'M1'].includes(String(registeredNiveau || '').trim().toUpperCase());
 
   // Données
   const [availableUes, setAvailableUes] = useState([]);
   const [allQuizzes, setAllQuizzes] = useState([]);
   const [myResults, setMyResults] = useState([]);
-  const [reviewStats, setReviewStats] = useState(null);
   const [filiereRequest, setFiliereRequest] = useState(null);
   const [quizRequests, setQuizRequests] = useState([]);
   const [referral, setReferral] = useState(null);
@@ -76,17 +80,15 @@ export default function StudentDashboard() {
       // 2. Charger les Quizzes de la filière et du niveau sélectionné
       // 3. Charger STRICTEMENT les résultats de CET utilisateur (filtrés par le serveur)
       const scope = `filiere=${encodeURIComponent(filiere)}&niveau=${encodeURIComponent(selectedNiveau)}&faculte=${encodeURIComponent(faculte)}`;
-      const [uesData, quizzesData, resultsData, reviewData, requestData, quizRequestsData] = await Promise.all([
+      const [uesData, quizzesData, resultsData, requestData, quizRequestsData] = await Promise.all([
         api(`/ues?${scope}`),
         api(`/quizzes?${scope}&sort=asc`),
         api('/results/mine', { auth: 'student' }).catch(() => ({ results: [] })),
-        api('/review/stats', { auth: 'student' }).catch(() => null),
         api('/auth/filiere-request', { auth: 'student' }).catch(() => ({ request: null })),
         api('/quiz-requests/mine', { auth: 'student' }).catch(() => ({ requests: [], referral: null }))
       ]);
 
       setAvailableUes(uesData.ues);
-      setReviewStats(reviewData);
       setFiliereRequest(requestData?.request || null);
       setQuizRequests(Array.isArray(quizRequestsData?.requests) ? quizRequestsData.requests : []);
       setReferral(quizRequestsData?.referral || null);
@@ -274,11 +276,11 @@ export default function StudentDashboard() {
   if (!currentUser) return null;
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 pb-16">
+    <div className="min-h-screen bg-slate-900 text-slate-100 pb-28 md:pb-16">
       {/* ── Main Content ── */}
-      <main className="max-w-6xl mx-auto px-4 pt-6 space-y-6">
+      <main className="max-w-6xl mx-auto px-3 sm:px-4 pt-4 sm:pt-6 space-y-4 sm:space-y-6">
         {/* ── Bandeau Profil & Filière Cadenassée (Point 3) ── */}
-        <div className="bg-gradient-to-r from-blue-900/60 via-indigo-900/50 to-slate-900 border border-blue-500/20 rounded-3xl p-6 shadow-xl relative overflow-hidden">
+        <div className="bg-gradient-to-r from-blue-900/60 via-indigo-900/50 to-slate-900 border border-blue-500/20 rounded-3xl p-4 sm:p-6 shadow-xl relative overflow-hidden">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
             <div>
               <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -288,7 +290,7 @@ export default function StudentDashboard() {
                 <span className="text-slate-600">•</span>
                 <span className="text-xs text-slate-300 font-medium">{currentUser.anneeAcademique || '2025-2026'}</span>
               </div>
-              <h2 className="text-2xl font-black text-white">
+              <h2 className="text-xl sm:text-2xl font-black text-white">
                 Bienvenue, {currentUser.name}
               </h2>
               <div className="flex items-center gap-2 mt-2 flex-wrap text-xs">
@@ -313,31 +315,87 @@ export default function StudentDashboard() {
               </div>
             </div>
 
-            {/* Niveau verrouillé sur l'inscription (aucune permutation) */}
-            <div className="bg-slate-950/60 p-3 rounded-2xl border border-slate-800">
-              <span className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
-                <Icon name="lock" size={12} />
-                Parcours verrouillé
-              </span>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="px-3 py-1.5 rounded-xl text-xs font-black bg-blue-600 text-white shadow-md shadow-blue-500/30">
-                  {selectedNiveau}
-                </span>
-                <span className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-800 text-slate-300">
-                  {filiere}
-                </span>
-                {faculte && (
-                  <span className="px-3 py-1.5 rounded-xl text-[10px] font-bold bg-slate-800 text-slate-400 uppercase tracking-wider">
-                    {faculte}
-                  </span>
-                )}
-              </div>
-              <p className="text-[10px] text-slate-500 mt-2 max-w-48">
-                Votre niveau et votre filière sont ceux de votre inscription.
-              </p>
-            </div>
           </div>
         </div>
+
+        {/* ── Aide & découverte : tuteur IA + dépôt de documents ── */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="bg-gradient-to-br from-blue-950/70 to-slate-900 border border-blue-700/40 rounded-2xl p-5 flex flex-col gap-3">
+            <div className="flex items-start gap-3">
+              <span className="w-10 h-10 rounded-xl bg-blue-600/20 border border-blue-500/30 text-blue-300 flex items-center justify-center shrink-0">
+                <Icon name="sparkles" size={19} />
+              </span>
+              <div>
+                <h3 className="text-sm font-black text-white">Un tuteur IA est inclus</h3>
+                <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                  Posez vos questions, faites-vous expliquer une notion ou une erreur de QCM,
+                  à tout moment. L'IA connaît votre filière et votre niveau.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent('qcm:open-ai'))}
+              className="mt-auto w-full inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-black py-2.5 rounded-xl transition shadow-md shadow-blue-600/25"
+            >
+              <Icon name="chat" size={14} />
+              Ouvrir le tuteur IA
+            </button>
+          </div>
+
+          <div className="bg-gradient-to-br from-emerald-950/60 to-slate-900 border border-emerald-700/40 rounded-2xl p-5 flex flex-col gap-3">
+            <div className="flex items-start gap-3">
+              <span className="w-10 h-10 rounded-xl bg-emerald-600/20 border border-emerald-500/30 text-emerald-300 flex items-center justify-center shrink-0">
+                <Icon name="upload" size={19} />
+              </span>
+              <div>
+                <h3 className="text-sm font-black text-white">Partagez vos cours</h3>
+                <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                  PDF, Word, PowerPoint, Excel… Déposez vos documents de cours : ils aident
+                  l'équipe à produire des QCM et des exercices pour votre filière.
+                </p>
+              </div>
+            </div>
+            <Link
+              to="/resources"
+              className="mt-auto w-full inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black py-2.5 rounded-xl transition shadow-md shadow-emerald-600/25"
+            >
+              <Icon name="document" size={14} />
+              Déposer un document
+            </Link>
+          </div>
+        </div>
+
+        {/* ── Générateur d'exercices (Mathématiques L1 → M1) ── */}
+        {canGenerateExercises && (
+          <Link
+            to="/exercises"
+            className="block bg-gradient-to-r from-indigo-950/70 via-slate-900 to-blue-950/60 border border-indigo-700/40 rounded-2xl p-5 hover:border-indigo-500/60 transition group"
+          >
+            <div className="flex items-start gap-3">
+              <span className="w-11 h-11 rounded-xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-300 flex items-center justify-center shrink-0">
+                <Icon name="sparkles" size={20} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <h3 className="text-sm font-black text-white flex items-center gap-2 flex-wrap">
+                  Générateur d'exercices de Mathématiques
+                  <span className="text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2 py-0.5 rounded-full">
+                    Nouveau
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                  Déposez vos cours et générez des QCM, QRO ou exercices de calcul corrigés,
+                  adaptés à votre niveau. Réservé aux étudiants de Mathématiques (L1 → M1).
+                </p>
+              </div>
+              <Icon
+                name="arrow-right"
+                size={18}
+                className="text-indigo-300 group-hover:translate-x-0.5 transition-transform shrink-0 mt-1"
+              />
+            </div>
+          </Link>
+        )}
 
         {/* ── Suivi de la demande de filière (si absente du catalogue) ── */}
         {filiereRequest && filiereRequest.status !== 'approved' && (
@@ -372,46 +430,6 @@ export default function StudentDashboard() {
             </div>
           </div>
         )}
-
-        {/* ── Révisions intelligentes (répétition espacée) ── */}
-        <div className="bg-slate-800/50 border border-slate-700/60 rounded-3xl p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 border ${
-              (reviewStats?.due || 0) > 0
-                ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
-                : 'bg-blue-500/15 border-blue-500/30 text-blue-400'
-            }`}>
-              <Icon name="sparkles" size={20} />
-            </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-base font-black text-white">Révisions intelligentes</h3>
-                {(reviewStats?.due || 0) > 0 && (
-                  <span className="bg-emerald-500/20 text-emerald-300 text-[10px] font-black px-2 py-0.5 rounded-full">
-                    {reviewStats.due} carte(s) à réviser
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-slate-400 mt-1">
-                {reviewStats?.total
-                  ? `${reviewStats.total} question(s) issue(s) de vos erreurs, planifiées par répétition espacée.`
-                  : 'Les questions ratées lors de vos QCM seront ajoutées ici automatiquement.'}
-              </p>
-              {reviewStats?.nextDueAt && (
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Prochaine échéance : {formatDate(reviewStats.nextDueAt)}
-                </p>
-              )}
-            </div>
-          </div>
-          <Link
-            to="/revision"
-            className="shrink-0 inline-flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black px-4 py-2.5 rounded-xl transition shadow-md shadow-emerald-600/20"
-          >
-            <Icon name="refresh" size={13} />
-            {(reviewStats?.due || 0) > 0 ? 'Réviser maintenant' : 'Ouvrir mes révisions'}
-          </Link>
-        </div>
 
         {/* ── Avertissement & Alerte Prochain Quizz (Point 4) ── */}
         {nextQuiz && (

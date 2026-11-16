@@ -177,6 +177,7 @@ export default function AdminPanel() {
   const [aiDocFile, setAiDocFile] = useState(null);
   const [aiDocUploading, setAiDocUploading] = useState(false);
   const [aiDocError, setAiDocError] = useState('');
+  const [aiDocNotice, setAiDocNotice] = useState('');
   const [genPrompt, setGenPrompt] = useState('');
   const [genCount, setGenCount] = useState('10');
   const [genDifficulte, setGenDifficulte] = useState('moyenne');
@@ -961,8 +962,9 @@ export default function AdminPanel() {
   const uploadAiDoc = useCallback(async (e) => {
     e.preventDefault();
     setAiDocError('');
+    setAiDocNotice('');
     if (!aiDocFile) {
-      setAiDocError('Sélectionnez un document PDF, TXT, MD, CSV ou JSON.');
+      setAiDocError("Sélectionnez un document (PDF, Word, PowerPoint, Excel, texte, archive…)");
       return;
     }
     setAiDocUploading(true);
@@ -979,6 +981,15 @@ export default function AdminPanel() {
       if (!res.ok) throw new Error(data.error || 'Dépôt impossible.');
 
       setAiDocFile(null);
+      const doc = data.document || {};
+      setAiDocNotice(
+        [
+          `« ${doc.originalName || 'Document'} » lu avec succès`,
+          doc.method ? `(${doc.method})` : '',
+          doc.charCount ? `· ${formatNumber(doc.charCount)} caractères extraits.` : '',
+          doc.warning ? ` ${doc.warning}` : ''
+        ].filter(Boolean).join(' ')
+      );
       await fetchAiDocs();
     } catch (err) {
       setAiDocError(err.message || 'Dépôt impossible.');
@@ -1813,6 +1824,15 @@ export default function AdminPanel() {
                               );
                             })}
                           </div>
+                          {(q.explication || q.Explication) && (
+                            <div className="mt-2.5 bg-indigo-950/40 border border-indigo-800/60 rounded-lg px-3 py-2">
+                              <p className="text-[9px] font-black uppercase tracking-wider text-indigo-300 mb-0.5 flex items-center gap-1.5">
+                                <Icon name="lightbulb" size={11} />
+                                Explication
+                              </p>
+                              <p className="text-[11px] text-slate-300 leading-relaxed">{q.explication || q.Explication}</p>
+                            </div>
+                          )}
                         </div>
                       ))}
                       {inspectQuestions.length === 0 && (
@@ -4144,7 +4164,7 @@ export default function AdminPanel() {
                       Documents de référence
                     </h3>
                     <p className="text-[11px] text-slate-500 mt-0.5">
-                      PDF, TXT, MD, CSV ou JSON · 20 Mo max. Le texte est extrait pour nourrir l'IA.
+                      PDF, Word, PowerPoint, Excel, OpenDocument, RTF, HTML, EPUB, TXT, MD, CSV, JSON, XML et ZIP · 25 Mo max. Le texte est extrait automatiquement.
                     </p>
                   </div>
 
@@ -4154,10 +4174,16 @@ export default function AdminPanel() {
                     </div>
                   )}
 
+                  {aiDocNotice && (
+                    <div className="bg-emerald-950/50 border border-emerald-800 text-emerald-300 text-xs rounded-xl p-3">
+                      {aiDocNotice}
+                    </div>
+                  )}
+
                   <form onSubmit={uploadAiDoc} className="flex flex-col sm:flex-row gap-2">
                     <input
                       type="file"
-                      accept=".pdf,.txt,.md,.markdown,.csv,.json"
+                      accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.odt,.ods,.odp,.rtf,.txt,.md,.markdown,.csv,.json,.xml,.html,.htm,.epub,.zip"
                       onChange={e => setAiDocFile(e.target.files?.[0] || null)}
                       className="flex-1 text-xs text-slate-400 file:mr-2 file:py-2 file:px-3 file:rounded-xl file:border-0 file:bg-slate-800 file:text-slate-200 file:text-xs file:font-bold hover:file:bg-slate-700 file:cursor-pointer"
                     />
@@ -4456,6 +4482,12 @@ export default function AdminPanel() {
                             );
                           })}
                         </div>
+                        {q.explication && (
+                          <div className="mt-2.5 bg-indigo-950/40 border border-indigo-800/60 rounded-lg px-3 py-2">
+                            <p className="text-[9px] font-black uppercase tracking-wider text-indigo-300 mb-0.5">Explication</p>
+                            <p className="text-[11px] text-slate-300 leading-relaxed">{q.explication}</p>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -4913,6 +4945,12 @@ export default function AdminPanel() {
                       );
                     })}
                   </div>
+                  {q.Explication && (
+                    <div className="mt-2 bg-indigo-950/40 border border-indigo-800/60 rounded-lg px-3 py-2">
+                      <p className="text-[9px] font-black uppercase tracking-wider text-indigo-300 mb-0.5">Explication</p>
+                      <p className="text-[11px] text-slate-300 leading-relaxed">{q.Explication}</p>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

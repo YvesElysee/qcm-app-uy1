@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Icon from '../ui/icons.jsx';
 import AiMarkdown from './AiMarkdown.jsx';
 import { askTutor, fetchAiStatus } from '../../services/aiService.js';
+import { getCurrentUser } from '../../services/authService';
 
 /**
  * Drawer « Tuteur IA » · aide les étudiants à comprendre leurs mauvaises
@@ -47,6 +48,40 @@ function newId() {
   return `msg-${idSeq}-${Math.random().toString(36).slice(2)}`;
 }
 
+// ── Persistance locale de la discussion ─────────────────────────────
+// La conversation est conservée par étudiant et par contexte (question ou
+// QCM). Un rafraîchissement du site ne la fait donc plus disparaître.
+const MAX_SAVED_MESSAGES = 60;
+
+function storageKeyFor(context) {
+  if (!context?.key) return '';
+  const user = getCurrentUser();
+  const identity = user?.id || user?.email || 'anon';
+  return `qcm_ai_history:${identity}:${context.key}`;
+}
+
+function readSavedHistory(key) {
+  if (!key || typeof localStorage === 'undefined') return [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || '[]');
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+      .map((m) => ({ role: m.role, content: m.content, id: m.id || newId() }));
+  } catch {
+    return [];
+  }
+}
+
+function persistHistory(key, messages) {
+  if (!key || typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(key, JSON.stringify(messages.slice(-MAX_SAVED_MESSAGES)));
+  } catch {
+    /* stockage plein ou désactivé : la discussion reste en mémoire */
+  }
+}
+
 export default function AiTutor({ open, onClose, context, status }) {
   const [history, setHistory] = useState([]);
   const [input, setInput] = useState('');
@@ -58,9 +93,21 @@ export default function AiTutor({ open, onClose, context, status }) {
   const [quotaReached, setQuotaReached] = useState(false);
   const [resetAt, setResetAt] = useState(null);
   const scrollRef = useRef(null);
+  const storageKey = storageKeyFor(context);
 
   const unavailable = aiStatus ? aiStatus.available === false : false;
   const blocked = unavailable || quotaReached || remaining === 0;
+
+  // Recharge la conversation sauvegardée à l'ouverture (ou au changement de
+  // contexte). Le rafraîchissement de la page ne perd plus l'historique.
+  useEffect(() => {
+    if (!open) return undefined;
+    let active = true;
+    Promise.resolve().then(() => {
+      if (active) setHistory(readSavedHistory(storageKey));
+    });
+    return () => { active = false; };
+  }, [open, storageKey]);
 
   // Le quota est propre à la question ouverte : on interroge le serveur à
   // chaque ouverture (et à chaque changement de contexte) pour afficher le
@@ -108,14 +155,21 @@ export default function AiTutor({ open, onClose, context, status }) {
 
       const previous = history.map(({ role, content: c }) => ({ role, content: c }));
       const userMessage = { role: 'user', content, id: newId() };
-      setHistory((h) => [...h, userMessage]);
+      const withUser = [...history, userMessage];
+      setHistory(withUser);
+      persistHistory(storageKey, withUser);
       setInput('');
       setError(null);
       setLoading(true);
 
       try {
         const data = await askTutor({ context, message: content, history: previous });
-        setHistory((h) => [...h, { role: 'assistant', content: data.reply, id: newId() }]);
+        const assistantMessage = { role: 'assistant', content: data.reply, id: newId() };
+        setHistory((h) => {
+          const next = [...h, assistantMessage];
+          persistHistory(storageKey, next);
+          return next;
+        });
         if (Number.isFinite(data.limit)) setLimit(data.limit);
         if (Number.isFinite(data.remaining)) setRemaining(data.remaining);
         if (data.resetAt) setResetAt(data.resetAt);
@@ -131,7 +185,7 @@ export default function AiTutor({ open, onClose, context, status }) {
         setLoading(false);
       }
     },
-    [input, loading, blocked, history, context]
+    [input, loading, blocked, history, context, storageKey]
   );
 
   const quickPrompts =

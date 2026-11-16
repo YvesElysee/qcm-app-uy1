@@ -37,6 +37,18 @@ const FEATURES = [
     style: 'bg-purple-500/15 text-purple-300'
   },
   {
+    icon: 'sparkles',
+    title: 'Tuteur IA inclus',
+    desc: 'Un assistant intelligent explique vos erreurs, détaille les notions et vous aide à réviser, à tout moment.',
+    style: 'bg-indigo-500/15 text-indigo-300'
+  },
+  {
+    icon: 'upload',
+    title: 'Partage de cours',
+    desc: 'Déposez vos documents (PDF, Word, PowerPoint, Excel…) et aidez à produire des QCM pour votre filière.',
+    style: 'bg-teal-500/15 text-teal-300'
+  },
+  {
     icon: 'lock',
     title: 'Comptes sécurisés',
     desc: 'Mots de passe protégés côté serveur et sessions par jeton : vos résultats ne sont visibles que par vous.',
@@ -62,27 +74,15 @@ const STEPS = [
   }
 ];
 
-function formatDate(ts) {
-  if (!ts) return '-';
-  return new Date(ts).toLocaleDateString('fr-FR', {
-    weekday: 'short',
-    day: '2-digit',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit'
-  });
-}
-
 /**
- * Page d'accueil publique : présentation du portail, statistiques en direct
- * (API publique) et prochaines évaluations.
+ * Page d'accueil publique : présentation du portail et statistiques en direct
+ * (API publique).
  */
 export default function Home() {
   usePageTitle('Accueil');
 
   const user = getCurrentUser();
   const [stats, setStats] = useState(null);
-  const [upcoming, setUpcoming] = useState([]);
 
   // Statistiques publiques : QCM, UE, étudiants inscrits et épreuves à venir
   useEffect(() => {
@@ -99,17 +99,11 @@ export default function Home() {
       }
       if (ignore) return;
 
-      const nowMs = Date.now();
-      const upcomingList = quizList
-        .filter(q => q.launchTime && q.launchTime > nowMs)
-        .sort((a, b) => a.launchTime - b.launchTime);
-
-      setUpcoming(upcomingList);
       setStats(publicStats || {
         quizzes: quizList.length,
         ues: 0,
         students: 0,
-        upcoming: upcomingList.length
+        upcoming: 0
       });
     })();
     return () => {
@@ -216,51 +210,62 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ── Prochaines évaluations ── */}
-      <section className="max-w-6xl mx-auto px-4 mt-14">
-        <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-6 md:p-8">
-          <div className="flex items-center justify-between flex-wrap gap-3 mb-5">
-            <div>
-              <h2 className="text-xl font-black text-white">Prochaines évaluations</h2>
-              <p className="text-xs text-slate-400 mt-0.5">Programmation officielle · consultable librement</p>
+      {/* ── IA & documents : ce que beaucoup d'étudiants ignorent ── */}
+      <section className="max-w-6xl mx-auto px-4 mt-14" aria-label="Tuteur IA et partage de cours">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="relative overflow-hidden bg-gradient-to-br from-blue-950 via-slate-900 to-indigo-950 border border-blue-700/40 rounded-3xl p-6 md:p-8">
+            <div className="absolute -top-10 -right-10 w-40 h-40 bg-blue-600/20 rounded-full blur-3xl" aria-hidden="true" />
+            <div className="relative">
+              <span className="inline-flex items-center gap-2 bg-blue-500/15 border border-blue-500/30 text-blue-300 text-[11px] font-bold px-3 py-1 rounded-full">
+                <Icon name="sparkles" size={13} />
+                Nouveau · Tuteur IA
+              </span>
+              <h2 className="text-xl md:text-2xl font-black text-white mt-4">
+                Une IA pour vous expliquer, pas pour tricher
+              </h2>
+              <p className="text-xs md:text-sm text-slate-300 mt-2 leading-relaxed">
+                Après chaque QCM, demandez au tuteur IA pourquoi une réponse est fausse,
+                faites-vous réexpliquer une notion ou obtenir une méthode de révision.
+                Il est inclus dans votre espace étudiant.
+              </p>
+              <div className="flex flex-wrap gap-2 mt-5">
+                <Link
+                  to={user ? '/dashboard' : '/register'}
+                  className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-black px-4 py-2.5 rounded-xl transition shadow-md shadow-blue-600/25"
+                >
+                  <Icon name="chat" size={14} />
+                  {user ? 'Ouvrir le tuteur IA' : 'Créer un compte pour en profiter'}
+                </Link>
+              </div>
             </div>
-            <Link
-              to="/schedule"
-              className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-300 hover:text-white bg-blue-950/60 border border-blue-800/60 hover:bg-blue-900 px-4 py-2 rounded-xl transition"
-            >
-              Tout le planning
-              <Icon name="arrow-right" size={13} />
-            </Link>
           </div>
 
-          {upcoming.length === 0 ? (
-            <div className="text-center py-8 border border-dashed border-slate-700 rounded-2xl text-slate-400 text-xs">
-              Aucune évaluation programmée pour le moment. Revenez bientôt !
+          <div className="relative overflow-hidden bg-gradient-to-br from-emerald-950 via-slate-900 to-teal-950 border border-emerald-700/40 rounded-3xl p-6 md:p-8">
+            <div className="absolute -top-10 -right-10 w-40 h-40 bg-emerald-600/20 rounded-full blur-3xl" aria-hidden="true" />
+            <div className="relative">
+              <span className="inline-flex items-center gap-2 bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[11px] font-bold px-3 py-1 rounded-full">
+                <Icon name="upload" size={13} />
+                Partage de cours
+              </span>
+              <h2 className="text-xl md:text-2xl font-black text-white mt-4">
+                Déposez vos documents, on construit vos QCM
+              </h2>
+              <p className="text-xs md:text-sm text-slate-300 mt-2 leading-relaxed">
+                PDF, Word, PowerPoint, Excel, texte… Partagez vos cours et annales.
+                Plus votre filière dépose de documents, plus vite ses QCM et exercices
+                sont produits par l'équipe.
+              </p>
+              <div className="flex flex-wrap gap-2 mt-5">
+                <Link
+                  to={user ? '/resources' : '/register'}
+                  className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black px-4 py-2.5 rounded-xl transition shadow-md shadow-emerald-600/25"
+                >
+                  <Icon name="document" size={14} />
+                  {user ? 'Déposer un document' : "Rejoindre ma filière"}
+                </Link>
+              </div>
             </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              {upcoming.slice(0, 3).map(q => (
-                <div key={q.id} className="bg-slate-950/60 border border-slate-800 hover:border-blue-500/50 rounded-2xl p-4 transition">
-                  <div className="flex items-center gap-1.5 mb-2 flex-wrap">
-                    <span className="bg-blue-500/15 text-blue-300 text-[10px] font-black px-2 py-0.5 rounded-full">
-                      {q.filiere}
-                    </span>
-                    <span className="bg-slate-800 text-slate-300 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                      {q.niveau}
-                    </span>
-                  </div>
-                  <h3 className="font-black text-white text-base truncate">{q.ue || q.id}</h3>
-                  <p className="flex items-center gap-1.5 text-xs text-slate-400 mt-1">
-                    <Icon name="clock" size={13} />
-                    {formatDate(q.launchTime)}
-                  </p>
-                  {q.endTime && (
-                    <p className="text-[11px] text-slate-500 mt-0.5">Clôture : {formatDate(q.endTime)}</p>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+          </div>
         </div>
       </section>
 

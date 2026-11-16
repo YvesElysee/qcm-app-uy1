@@ -92,10 +92,12 @@ Conçue avec **React 19 + Vite 8 + Tailwind CSS** et un **backend Node.js / Expr
 - **Configuration SMTP Google en direct** : saisie de l'adresse Gmail et du mot de passe d'application à 16 caractères, avec outil de test d'envoi d'email en temps réel.
 
 ### 7. Tuteur IA (proxy serveur sécurisé)
+- **Disponible partout dans l'espace étudiant** : bouton flottant sur desktop, entrée dédiée dans la barre de navigation mobile et rappel de découverte lors de la première visite.
 - Après une épreuve, la **correction** propose un **Tuteur IA** intégré pour comprendre les mauvaises réponses :
   - Bouton global *Aide IA pour réviser* et bandeau récapitulatif du nombre d'erreurs.
   - Bouton *Comprendre cette erreur avec l'IA* sur chaque question ratée (la question, les options, la réponse choisie et la bonne réponse alimentent le contexte).
   - Conversations guidées : le tuteur explique **pourquoi** la réponse est incorrecte au lieu de donner la lettre de la solution.
+- **Historique persistant** : la conversation est conservée dans le navigateur par étudiant et par contexte (question ou QCM). Un rafraîchissement du site ne la fait plus disparaître.
 - **Aucune clé côté navigateur** : les appels passent par le proxy serveur `/api/ai/tutor`. Les clés `GROQ_API_KEYS` / `GEMINI_API_KEYS` restent dans le `.env` du serveur, avec **rotation automatique** et **repli d'un fournisseur à l'autre** en cas d'erreur ou de quota atteint.
 - L'assistant s'identifie uniquement comme **QCM App** : il ne révèle jamais le fournisseur, le modèle ou la technologie sous-jacente.
 - **Réponse lisible** : le tuteur rend le Markdown (gras, listes, tableaux) et les formules mathématiques LaTeX (`\(...\)`, `\[...\]`) avec **KaTeX**. L'étudiant ne voit jamais les astérisques ni les délimiteurs bruts.
@@ -104,9 +106,10 @@ Conçue avec **React 19 + Vite 8 + Tailwind CSS** et un **backend Node.js / Expr
 - **Tableau de bord admin « Tuteur IA »** : nombre de requêtes (aujourd'hui, semaine, mois), requêtes réussies / en erreur / refusées par quota, **tokens consommés** (annoncés par les fournisseurs), **budget mensuel restant** (`AI_TOKEN_BUDGET` − consommation du mois), graphique des 30 derniers jours, étudiants les plus consommateurs et questions les plus travaillées.
 
 ### 8. Génération de QCM par IA (administration)
-- **Documents de référence** : l'admin dépose des fichiers PDF, TXT, MD, CSV ou JSON (20 Mo max). Le texte est extrait côté serveur (y compris les PDF via `pdf-parse`) et stocké avec sa métadonnée en SQLite.
-- **Génération guidée** : prompt libre, nombre de questions (1 à 40), difficulté, faculté, filière, niveau et UE. Les 3 documents les plus récents sont utilisés par défaut, ou une sélection explicite.
-- **Questions contrôlées** : chaque proposition contient 4 options, une seule bonne réponse, des tags et un niveau de difficulté. Un aperçu complet est affiché avant utilisation.
+- **Tous les formats de documents** : PDF, DOC/DOCX, PPT/PPTX, XLS/XLSX, OpenDocument (ODT/ODS/ODP), RTF, HTML, EPUB, TXT, MD, CSV, JSON, XML et ZIP (25 Mo max). L'extracteur universel `server/textExtract.js` prend en charge les fichiers Office, OpenDocument et les archives, avec repli sur `pdftotext` / LibreOffice lorsqu'ils sont installés.
+- **Extraction robuste** : les PDF scannés ou les images sans texte renvoient un message explicite en français ; les documents structurés (DOCX, PPTX, XLSX, ODT, EPUB) sont lus directement sans dépendance npm supplémentaire.
+- **Génération guidée et par lots** : prompt libre, nombre de questions (1 à 40), difficulté, faculté, filière, niveau et UE. Les 3 documents les plus récents sont utilisés par défaut, ou une sélection explicite. La génération procède par lots de 10 avec déduplication et nouvelle tentative pour garantir la cohérence.
+- **Questions contrôlées** : chaque proposition contient 4 options, une seule bonne réponse, des tags, un niveau de difficulté et une **explication obligatoire**. Un aperçu complet (dont l'explication) est affiché avant utilisation.
 - **Enregistrement direct optionnel** : les questions peuvent être enregistrées dans une épreuve existante (code de l'épreuve, temps par question, semestre). Les anciennes questions de cette épreuve sont alors remplacées.
 - **Sécurité & budget** : accès strictement administrateur, documents stockés hors du dossier public, consommation décomptée du **budget mensuel de tokens IA**. Sans clé configurée, l'API répond `503` avec un message explicite.
 
@@ -116,12 +119,19 @@ Conçue avec **React 19 + Vite 8 + Tailwind CSS** et un **backend Node.js / Expr
 - **Téléchargement contrôlé** : les fichiers sont stockés hors du dossier public et servis par `GET /api/resources/:id/download`, qui vérifie la portée avant d'envoyer le fichier.
 - **Modération admin** : publication de ressources officielles pour n'importe quel parcours, filtrage par faculté / filière / niveau, téléchargement et suppression.
 
+### 9 bis. Générateur d'exercices de Mathématiques (L1 → M1)
+- **Accès ciblé** : fonctionnalité réservée aux étudiants de la filière **Mathématiques**, niveaux **L1, L2, L3 et M1**. Le contrôle est appliqué côté serveur (`/api/exercises/*`) et l'interface affiche un message explicite aux autres parcours.
+- **Documents personnels** : l'étudiant dépose ses propres cours, TD ou annales (PDF, Word, PowerPoint, Excel, OpenDocument, texte, archive… 25 Mo max). Chaque document est rattaché à son compte et invisible des autres étudiants.
+- **Formats d'exercices variés** : QCM à 4 options, QRO (question à réponse ouverte), exercice de calcul avec étapes, vrai/faux justifié, série mixte ou exercice libre (démonstration, modélisation).
+- **Correction pédagogique** : chaque exercice généré comporte une réponse ou un corrigé modèle, les étapes clés et une explication. L'étudiant peut masquer ou afficher la correction.
+- **Historique personnel** : les générations récentes sont conservées et peuvent être rouvertes ou supprimées. Le budget mensuel de tokens IA est partagé avec le générateur de QCM de l'administration.
+
 ### 10. Évaluations sécurisées & apprentissage adaptatif
 - **Correction 100 % côté serveur** : l'API publique ne renvoie jamais `ReponseCorrecte`. L'étudiant n'envoie que ses choix ; le serveur calcule le score, la note et la correction détaillée, puis les restitue après soumission. L'inspecteur admin conserve l'accès complet via son jeton.
 - **Contrôle d'accès centralisé** : `server/access.js` vérifie la **faculté + filière + niveau** pour consulter une épreuve, charger ses questions, déposer une copie, télécharger une ressource ou consulter un classement. L'administration dispose d'un bypass explicite.
 - **Anti-triche pendant l'épreuve** : détection des changements d'onglet, blocage du copier/coller et du menu contextuel, avertissement visuel, plein écran proposé et **soumission automatique au 3ᵉ incident**.
-- **Banque de questions enrichie** : tags libres, niveau de difficulté (`facile`, `moyenne`, `difficile`) et nombre de questions tirées par étudiant. Le tirage est **déterministe par étudiant** (même tirage en cas de reprise, ordre différent d'un étudiant à l'autre).
-- **Révisions intelligentes** : chaque erreur crée une carte de révision planifiée par **répétition espacée** (algorithme SM-2 simplifié). L'espace `/revision` permet de réviser les cartes dues, de consulter toutes ses cartes et de suivre ses échéances par UE.
+- **Banque de questions enrichie** : tags libres, niveau de difficulté (`facile`, `moyenne`, `difficile`), **explication pédagogique** et nombre de questions tirées par étudiant. Le tirage est **déterministe par étudiant** (même tirage en cas de reprise, ordre différent d'un étudiant à l'autre).
+- **Explication à la correction** : à la fin du QCM et dans « Relire ma copie », chaque question affiche la bonne réponse et son **explication**. L'explication est stockée côté serveur et n'est révélée qu'après soumission (jamais pendant l'épreuve).
 - **Correction visible après l'épreuve** : à la fin du QCM, l'étudiant voit immédiatement les cases qu'il a cochées et la bonne réponse pour chaque question. La correction reste **inaccessible pendant l'épreuve** ; elle est également disponible dans « Relire ma copie » (y compris pour les anciennes copies).
 - **Classements par salle** : une salle correspond à la classe de l'étudiant (**faculté + filière + niveau**). L'administration dispose d'un onglet *Classements* filtrable par UE, faculté, filière et niveau, avec **export CSV et PDF**. Chaque étudiant peut afficher le classement de sa propre salle depuis son espace ; le serveur ignore tout niveau demandé et utilise **son niveau d'inscription**.
 - **Sauvegarde automatique SQLite** : copies cohérentes via `db.backup()`, rotation configurable, téléchargement et suppression depuis l'administration, et **export complet** des résultats (une ligne par réponse) au format CSV.
@@ -246,10 +256,12 @@ npm start
 | `POST /api/resources` | étudiant / admin | Déposer une ressource (multipart, portée imposée pour l'étudiant) |
 | `GET /api/resources/:id/download` | étudiant autorisé / admin | Téléchargement contrôlé hors dossier public |
 | `DELETE /api/resources/:id` | auteur / admin | Supprimer une ressource |
-| `GET /api/review/stats` | étudiant | Statistiques de révision espacée par UE |
-| `GET /api/review` | étudiant | Cartes dues (`?all=1` pour toutes, `?ue=` pour filtrer) |
-| `POST /api/review/:id/answer` | étudiant | Réévaluer une carte (`remembered`) |
-| `DELETE /api/review/:id` | étudiant | Supprimer une carte de révision |
+| `GET /api/exercises/access` | étudiant | Vérifier l'éligibilité (Mathématiques L1 → M1) et lister les types d'exercices |
+| `GET /api/exercises/documents` | étudiant éligible | Mes documents personnels |
+| `POST /api/exercises/documents` | étudiant éligible | Déposer un document (multipart, extraction universelle) |
+| `DELETE /api/exercises/documents/:id` | propriétaire | Supprimer un document personnel |
+| `POST /api/exercises/generate` | étudiant éligible | Générer des exercices corrigés à partir de ses documents |
+| `GET /api/exercises/history` · `DELETE /:id` | étudiant éligible | Consulter / supprimer ses générations récentes |
 | `POST /api/feedback` | étudiant | Envoyer un message/suggestion |
 | `GET /api/feedback/mine` | étudiant | Suivi de mes messages |
 | `GET /api/feedback` · `PATCH` · `DELETE` | admin | Gestion des messages |
@@ -258,7 +270,7 @@ npm start
 | `GET /api/ai/status` | étudiant | Disponibilité de l'assistant + quotas restants (dont fenêtre 24 h par question) |
 | `POST /api/ai/tutor` | étudiant | Question au tuteur (rotation de clés, quota 2/erreur sur 24 h) |
 | `GET /api/ai-generation/documents` | admin | Documents de référence déposés |
-| `POST /api/ai-generation/documents` | admin | Déposer un PDF/TXT/MD/CSV/JSON (20 Mo max) |
+| `POST /api/ai-generation/documents` | admin | Déposer un document (tous formats Office/OpenDocument/PDF/texte, 25 Mo max) |
 | `DELETE /api/ai-generation/documents/:id` | admin | Supprimer un document de référence |
 | `POST /api/ai-generation/generate` | admin | Générer des questions (prompt + documents, enregistrement direct optionnel) |
 | `GET /api/admin/ai-usage` | admin | Requêtes, tokens consommés et budget mensuel restant |
@@ -294,7 +306,7 @@ npm start
 │   ├── backup.js               # Sauvegardes SQLite planifiées (db.backup + rotation)
 │   ├── questionDraw.js         # Tirage déterministe des questions par étudiant
 │   ├── ranking.js              # Classements par salle (faculté + filière + niveau), meilleure tentative
-│   ├── spacedRepetition.js     # Algorithme de répétition espacée (cartes d'erreurs)
+│   ├── textExtract.js          # Extracteur universel (PDF, Office, ODF, EPUB, RTF, HTML, ZIP…)
 │   └── routes/
 │       ├── auth.js             # Inscription, connexion, MDP oublié (3 étapes), profil, demande de filière
 │       ├── catalog.js          # Catalogue public facultés / filières / niveaux
@@ -303,12 +315,12 @@ npm start
 │       ├── notifications.js    # Liste, lecture et suppression des notifications étudiantes
 │       ├── quizRequests.js     # Demandes de QCM (pétitions, seuil, modération admin, auto-approbation)
 │       ├── resources.js        # Ressources de cours (dépôt, téléchargement contrôlé, modération)
-│       ├── review.js           # Révisions intelligentes : cartes dues, réponses, stats
+│       ├── exercises.js        # Générateur d'exercices Mathématiques (documents personnels, QCM/QRO/calcul)
 │       ├── feedback.js         # Messages & suggestions étudiants
 │       ├── ues.js              # Unités d'enseignement (faculté, filière, niveau)
 │       ├── admin.js            # Login admin, catalogue, demandes, étudiants, résultats, analytique, classements
 │       ├── ai.js               # Tuteur IA : proxy Groq/Gemini, quotas 24 h, tokens, identité QCM App
-│       ├── aiGeneration.js     # Génération de QCM : documents de référence, extraction PDF, prompt
+│       ├── aiGeneration.js     # Génération de QCM : documents de référence, extraction universelle, prompt, explications
 │       └── settings.js         # Configuration & test SMTP
 ├── src/                        # Frontend React 19
 │   ├── components/
@@ -316,11 +328,12 @@ npm start
 │   │   │   ├── Navbar.jsx      # Barre de navigation partagée (responsive, notifications, menu utilisateur)
 │   │   │   └── Footer.jsx     # Pied de page partagé (navigation, infos institution)
 │   │   ├── pages/
-│   │   │   ├── Home.jsx       # Accueil public : présentation, stats en direct, prochaines évaluations
+│   │   │   ├── Home.jsx       # Accueil public : présentation et stats en direct
 │   │   │   ├── ContactPage.jsx # Page « Contacter l'administration » (espace étudiant)
 │   │   │   └── NotFound.jsx    # Page 404
 │   │   ├── ai/
-│   │   │   ├── AiTutor.jsx     # Drawer « Tuteur IA » (proxy serveur, quotas 24 h)
+│   │   │   ├── AiTutor.jsx     # Drawer « Tuteur IA » (proxy serveur, quotas 24 h, historique)
+│   │   │   ├── AiLauncher.jsx  # Bouton flottant + découverte du tuteur IA
 │   │   │   └── AiMarkdown.jsx  # Rendu Markdown + formules LaTeX (KaTeX)
 │   │   ├── ui/
 │   │   │   └── icons.jsx       # Bibliothèque d'icônes SVG au trait (aucun emoji)
@@ -328,7 +341,7 @@ npm start
 │   │   ├── Login.jsx           # Accès sécurisé Administrateur
 │   │   ├── NotificationBell.jsx # Cloche de notifications (compteur non-lues, liste, lecture)
 │   │   ├── ReviewSession.jsx   # Relecture détaillée d'une copie d'examen (+ Tuteur IA)
-│   │   ├── RevisionSession.jsx # Révisions espacées des erreurs (cartes dues / toutes)
+│   │   ├── ExerciseGenerator.jsx # Générateur d'exercices Mathématiques (L1 → M1)
 │   │   ├── Schedule.jsx        # Emploi du temps public & étudiant (portée verrouillée si connecté)
 │   │   ├── StudentAuth.jsx     # Connexion, Inscription catalogue & Récupération MDP
 │   │   ├── StudentDashboard.jsx # Tableau de bord étudiant (parcours verrouillé, alertes, rattrapages)
@@ -348,28 +361,28 @@ npm start
 │   ├── config.js               # URL discrète du portail administrateur
 │   ├── QuizSession.jsx         # Moteur de passage de QCM (Live & Rattrapage, correction à la fin)
 │   └── main.jsx
-├── data/                       # Base SQLite + ressources + documents IA + sauvegardes (gitignoré)
+├── data/                       # Base SQLite + ressources + documents IA/personnels + sauvegardes (gitignoré)
 └── .env                        # ADMIN_PASSWORD, SMTP, IA, PORT (voir .env.example)
 ```
 
 Les fichiers déposés (ressources de cours et documents de référence IA) sont stockés
 hors du dossier public, sous `DATA_DIR` :
-`resources/`, `ai-documents/` et `backups/`. Seules les routes authentifiées et
-autorisées permettent de les télécharger.
+`resources/`, `ai-documents/`, `student-documents/` et `backups/`. Seules les
+routes authentifiées et autorisées permettent de les télécharger.
 
 ### Navigation (routes)
 
 | Route | Accès | Description |
 | --- | --- | --- |
-| `/` | Public | Accueil : présentation, statistiques en direct, prochaines évaluations |
+| `/` | Public | Accueil : présentation et statistiques en direct |
 | `/login`, `/register`, `/forgot-password` | Public (redirige vers `/dashboard` si connecté) | Authentification étudiant |
 | `/dashboard` | Étudiant connecté | Espace personnel verrouillé sur faculté + filière + niveau : UE, évaluations, rattrapages, résultats |
 | `/resources` | Étudiant connecté | Ressources de cours du parcours : téléchargement et dépôt |
+| `/exercises` | Étudiant Mathématiques L1 → M1 | Générateur d'exercices corrigés à partir de documents personnels |
 | `/schedule` | Public / étudiant | Emploi du temps des évaluations (limité au parcours si connecté) |
 | `/contact` | Étudiant connecté | Suggestions / contact administration |
 | `/quiz/:quizId` | Étudiant connecté | Session d'évaluation (immersif, sans navbar) |
 | `/review/:quizId` | Étudiant connecté | Relecture de copie |
-| `/revision` | Étudiant connecté | Révisions intelligentes (répétition espacée) |
 | Portail admin (URL discrète, voir `src/config.js`) | Admin | Connexion + panneau d'administration (aucun lien public) |
 | `*` | · | Page 404 |
 
@@ -390,7 +403,7 @@ La **navbar** et le **footer** sont partagés sur toutes les pages standard ; le
 - **Tuteur IA sans clé exposée** : les appels passent par `/api/ai/*`, avec rotation de clés, repli automatique et quotas persistés en base.
 - **Cloisonnement faculté / filière / niveau** : `server/access.js` vérifie la portée exacte pour les métadonnées d'épreuve, les questions, la soumission d'une copie, les classements et les ressources. Un étudiant ne peut jamais lire ni modifier les données d'un autre parcours ; seul un jeton admin valide bypasse ces règles.
 - **Ressources et documents IA hors dossier public** : les fichiers sont stockés sous `DATA_DIR` et servis uniquement par des routes contrôlées. Les documents de référence IA sont réservés à l'administration.
-- **Uploads limités** : 25 Mo pour les ressources de cours, 20 Mo pour les documents IA, extensions autorisées explicitement, noms de fichiers normalisés côté serveur.
+- **Uploads limités** : 25 Mo pour les ressources de cours, les documents IA et les documents personnels du générateur d'exercices ; extraction universelle et noms de fichiers normalisés côté serveur.
 - **Notifications personnelles** : chaque étudiant ne lit que ses propres notifications (`userId` issu du jeton), avec déduplication par événement.
 - **Demandes et parrainage** : la portée d'une demande de QCM est toujours déduite du jeton (jamais du corps de la requête). Les codes de parrainage sont uniques et un compte ne peut être rattaché qu'à un seul parrain.
 - Toutes les **écritures** (QCM, questions, UEs, messages, résultats, étudiants, catalogue, demandes de filière, ressources, SMTP) exigent un **jeton administrateur**.
