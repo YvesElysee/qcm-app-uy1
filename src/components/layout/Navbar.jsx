@@ -3,9 +3,17 @@ import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { getCurrentUser, logoutStudent } from '../../services/authService';
 import StudentProfile from '../StudentProfile';
 import NotificationBell from '../NotificationBell';
+import OnboardingGuide from '../OnboardingGuide';
+import AiTutor from '../ai/AiTutor';
 import Icon from '../ui/icons.jsx';
 
 const WHATSAPP_CHANNEL = 'https://whatsapp.com/channel/0029Vb96OnjLCoXA4RDPES2n';
+
+/**
+ * Clé de suivi du mode d'emploi : le guide ne s'ouvre automatiquement qu'une
+ * seule fois par étudiant (et par navigateur).
+ */
+const guideSeenKey = (identity) => `qcm_guide_seen_v1:${identity}`;
 
 /**
  * Barre de navigation partagée par toutes les pages publiques/étudiantes.
@@ -21,7 +29,24 @@ export default function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
   const userMenuRef = useRef(null);
+  const identity = user?.id || user?.email || '';
+
+  // Premier passage : on présente le mode d'emploi (une seule fois par compte).
+  useEffect(() => {
+    if (!identity) return undefined;
+    let seen;
+    try {
+      seen = localStorage.getItem(guideSeenKey(identity)) === '1';
+    } catch {
+      seen = false;
+    }
+    if (seen) return undefined;
+    const timer = setTimeout(() => setGuideOpen(true), 800);
+    return () => clearTimeout(timer);
+  }, [identity]);
 
   // Ferme le menu utilisateur au clic extérieur ou sur Échap
   useEffect(() => {
@@ -68,6 +93,28 @@ export default function Navbar() {
     setShowProfile(true);
   };
 
+  const openAi = () => {
+    setUserMenuOpen(false);
+    setMobileOpen(false);
+    setAiOpen(true);
+  };
+
+  const openGuide = () => {
+    setUserMenuOpen(false);
+    setMobileOpen(false);
+    setGuideOpen(true);
+  };
+
+  const closeGuide = () => {
+    setGuideOpen(false);
+    if (!identity) return;
+    try {
+      localStorage.setItem(guideSeenKey(identity), '1');
+    } catch {
+      /* stockage indisponible : le guide se réaffichera à la prochaine visite */
+    }
+  };
+
   // Liens principaux (Contact et Mon espace n'ont de sens que connecté)
   const mathFiliere = String(user?.filiere || '')
     .normalize('NFD')
@@ -93,6 +140,7 @@ export default function Navbar() {
     ? [
         { to: '/', label: 'Accueil', icon: 'home', end: true },
         { to: '/schedule', label: 'Planning', icon: 'calendar' },
+        { action: 'ai', label: 'Tuteur IA', icon: 'sparkles' },
         { to: '/resources', label: 'Ressources', icon: 'book' },
         { to: '/dashboard', label: 'Espace', icon: 'graduation' }
       ]
@@ -146,10 +194,33 @@ export default function Navbar() {
                 {l.label}
               </NavLink>
             ))}
+            {user && (
+              <button
+                type="button"
+                onClick={openAi}
+                title="Ouvrir le tuteur IA"
+                className="ml-1 inline-flex items-center gap-1.5 text-xs font-black px-3 py-2 rounded-xl bg-blue-600/15 hover:bg-blue-600/25 border border-blue-500/30 text-blue-300 transition"
+              >
+                <Icon name="sparkles" size={14} />
+                <span className="hidden xl:inline">Tuteur IA</span>
+              </button>
+            )}
           </nav>
 
           {/* ── Zone droite ── */}
           <div className="flex items-center gap-2">
+            {user && (
+              <button
+                type="button"
+                onClick={openGuide}
+                aria-label="Guide d'utilisation des boutons"
+                title="Guide d'utilisation des boutons"
+                className="hidden sm:flex items-center justify-center gap-2 w-10 h-10 lg:w-auto lg:h-auto lg:px-3 lg:py-2 rounded-xl bg-blue-600/10 hover:bg-blue-600/20 border border-blue-500/30 text-blue-300 text-xs font-bold transition"
+              >
+                <Icon name="lightbulb" size={17} />
+                <span className="hidden lg:inline">Guide</span>
+              </button>
+            )}
             <a
               href={WHATSAPP_CHANNEL}
               target="_blank"
@@ -223,6 +294,22 @@ export default function Navbar() {
                           Générateur d'exercices
                         </NavLink>
                       )}
+                      <button
+                        type="button"
+                        onClick={openAi}
+                        className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-blue-300 hover:bg-blue-600/15 hover:text-blue-200 transition"
+                      >
+                        <Icon name="sparkles" size={15} />
+                        Tuteur IA
+                      </button>
+                      <button
+                        type="button"
+                        onClick={openGuide}
+                        className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-slate-200 hover:bg-slate-700 hover:text-white transition"
+                      >
+                        <Icon name="lightbulb" size={15} />
+                        Guide des boutons
+                      </button>
                       <button
                         type="button"
                         onClick={openProfile}
@@ -348,6 +435,22 @@ export default function Navbar() {
                 <div className="space-y-1">
                   <button
                     type="button"
+                    onClick={openAi}
+                    className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-bold text-blue-300 hover:bg-blue-600/15 hover:text-blue-200 transition"
+                  >
+                    <Icon name="sparkles" size={17} />
+                    Tuteur IA
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openGuide}
+                    className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-bold text-slate-300 hover:bg-slate-800 hover:text-white transition"
+                  >
+                    <Icon name="lightbulb" size={17} />
+                    Guide des boutons
+                  </button>
+                  <button
+                    type="button"
                     onClick={openProfile}
                     className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-bold text-slate-300 hover:bg-slate-800 hover:text-white transition"
                   >
@@ -395,6 +498,19 @@ export default function Navbar() {
       >
         <div className="grid grid-cols-5">
           {bottomLinks.map((item) => {
+            if (item.action === 'ai') {
+              return (
+                <button
+                  key="ai"
+                  type="button"
+                  onClick={openAi}
+                  className="flex flex-col items-center justify-center gap-1 py-2.5 text-[10px] font-bold transition active:bg-slate-800 text-blue-300"
+                >
+                  <Icon name={item.icon} size={18} />
+                  {item.label}
+                </button>
+              );
+            }
             return (
               <NavLink
                 key={item.to}
@@ -427,6 +543,17 @@ export default function Navbar() {
           />
         </div>
       )}
+      {/* ── Tuteur IA global (accès depuis la navbar) ── */}
+      {user && (
+        <AiTutor
+          open={aiOpen}
+          onClose={() => setAiOpen(false)}
+          context={{ key: 'general_navbar', kind: 'general', quizId: '' }}
+        />
+      )}
+
+      {/* ── Mode d'emploi de première utilisation ── */}
+      {user && <OnboardingGuide open={guideOpen} onClose={closeGuide} />}
     </>
   );
 }
