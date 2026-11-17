@@ -17,6 +17,7 @@ import {
 } from '../access.js';
 import { notifyQuizAvailable } from '../notifications.js';
 import { approveRequestsForQuiz } from './quizRequests.js';
+import { normalizeImportedQuestion } from '../answerUtils.js';
 
 const router = Router();
 
@@ -502,20 +503,20 @@ router.post('/:id/questions', requireAdmin, (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     rows.forEach((q, i) => {
+      // Normalisation serveur : même si un ancien client envoie une lettre,
+      // un chiffre ou une réponse préfixée, on stocke le texte de l'option.
+      const clean = normalizeImportedQuestion(q);
       insert.run(
         id,
-        String(q.Question || '').trim(),
-        String(q.OptA || '').trim(),
-        String(q.OptB || '').trim(),
-        String(q.OptC || '').trim(),
-        String(q.OptD || '').trim(),
-        String(q.ReponseCorrecte || q.OptA || '').trim(),
-        String(
-          q.Explication || q.explication || q.explanation ||
-          q.justification || q.commentaire || ''
-        ).trim().slice(0, 2000),
-        String(q.Tags || q.tags || '').trim(),
-        String(q.Difficulte || q.difficulte || 'moyenne').trim().toLowerCase(),
+        clean.Question,
+        clean.OptA,
+        clean.OptB,
+        clean.OptC,
+        clean.OptD,
+        clean.ReponseCorrecte,
+        clean.explication,
+        clean.tags,
+        clean.difficulte,
         i
       );
     });

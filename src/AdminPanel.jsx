@@ -1967,24 +1967,13 @@ export default function AdminPanel() {
                               <Icon name="trash" size={14} />
                             </button>
                           </div>
-                          {(q.tags || q.difficulte) && (
+                          {q.tags && (
                             <div className="flex items-center gap-1.5 flex-wrap mt-2">
-                              {q.tags && String(q.tags).split(/[;,]/).filter(Boolean).map(tag => (
+                              {String(q.tags).split(/[;,]/).filter(Boolean).map(tag => (
                                 <span key={tag} className="text-[10px] font-bold text-blue-300 bg-blue-600/15 border border-blue-600/30 px-2 py-0.5 rounded-full">
                                   {tag.trim()}
                                 </span>
                               ))}
-                              {q.difficulte && (
-                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                                  q.difficulte === 'facile'
-                                    ? 'text-emerald-300 bg-emerald-600/15 border-emerald-600/30'
-                                    : q.difficulte === 'difficile'
-                                      ? 'text-red-300 bg-red-600/15 border-red-600/30'
-                                      : 'text-amber-300 bg-amber-600/15 border-amber-600/30'
-                                }`}>
-                                  {q.difficulte}
-                                </span>
-                              )}
                             </div>
                           )}
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] mt-3">
@@ -4857,15 +4846,6 @@ export default function AdminPanel() {
                               {tag.trim()}
                             </span>
                           ))}
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                            q.difficulte === 'facile'
-                              ? 'text-emerald-300 bg-emerald-600/15 border-emerald-600/30'
-                              : q.difficulte === 'difficile'
-                                ? 'text-red-300 bg-red-600/15 border-red-600/30'
-                                : 'text-amber-300 bg-amber-600/15 border-amber-600/30'
-                          }`}>
-                            {q.difficulte}
-                          </span>
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] mt-3">
                           {['A', 'B', 'C', 'D'].map(l => {
@@ -5316,24 +5296,13 @@ export default function AdminPanel() {
                     <span className="text-slate-500 mr-1.5">Q{i + 1}.</span>
                     {q.Question}
                   </p>
-                  {(q.Tags || q.Difficulte) && (
+                  {q.Tags && (
                     <div className="flex items-center gap-1.5 flex-wrap mt-2">
-                      {q.Tags && String(q.Tags).split(/[;,]/).filter(Boolean).map(tag => (
+                      {String(q.Tags).split(/[;,]/).filter(Boolean).map(tag => (
                         <span key={tag} className="text-[10px] font-bold text-blue-300 bg-blue-600/15 border border-blue-600/30 px-2 py-0.5 rounded-full">
                           {tag.trim()}
                         </span>
                       ))}
-                      {q.Difficulte && (
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                          q.Difficulte === 'facile'
-                            ? 'text-emerald-300 bg-emerald-600/15 border-emerald-600/30'
-                            : q.Difficulte === 'difficile'
-                              ? 'text-red-300 bg-red-600/15 border-red-600/30'
-                              : 'text-amber-300 bg-amber-600/15 border-amber-600/30'
-                        }`}>
-                          {q.Difficulte}
-                        </span>
-                      )}
                     </div>
                   )}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[11px] mt-2">

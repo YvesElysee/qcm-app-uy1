@@ -35,17 +35,6 @@ function optionsListOf(options) {
         .filter(o => typeof o.text === 'string' && o.text.trim() !== '');
 }
 
-function difficultyMeta(value) {
-    const key = String(value || 'moyenne').toLowerCase();
-    if (key === 'facile') {
-        return { key, label: 'Facile', cls: 'text-emerald-300 bg-emerald-600/15 border-emerald-600/30' };
-    }
-    if (key === 'difficile') {
-        return { key, label: 'Difficile', cls: 'text-red-300 bg-red-600/15 border-red-600/30' };
-    }
-    return { key: 'moyenne', label: 'Moyenne', cls: 'text-amber-300 bg-amber-600/15 border-amber-600/30' };
-}
-
 /**
  * Retrouve l'option réellement cochée, que la copie stocke le texte complet
  * (nouvelles copies) ou seulement la lettre A/B/C/D (anciennes copies).
@@ -216,21 +205,6 @@ export default function ReviewSession() {
         [items, onlyErrors]
     );
 
-    // Résumé par difficulté (nombre d'erreurs / total) pour cibler les révisions.
-    const difficultySummary = useMemo(() => {
-        const buckets = {
-            facile: { label: 'Facile', total: 0, wrong: 0 },
-            moyenne: { label: 'Moyenne', total: 0, wrong: 0 },
-            difficile: { label: 'Difficile', total: 0, wrong: 0 }
-        };
-        items.forEach(item => {
-            const meta = difficultyMeta(item.difficulte);
-            buckets[meta.key].total += 1;
-            if (!item.isOk) buckets[meta.key].wrong += 1;
-        });
-        return Object.values(buckets).filter(b => b.total > 0);
-    }, [items]);
-
     const practiceById = useMemo(() => {
         const map = new Map();
         (practiceResult?.answers || []).forEach(a => map.set(Number(a.questionId), a));
@@ -385,14 +359,13 @@ export default function ReviewSession() {
                 selectedChoice?.text || '—',
                 correctChoice?.text || item.correct || '—',
                 item.isOk ? 'Correct' : (selectedChoice ? 'Incorrect' : 'Sans réponse'),
-                difficultyMeta(item.difficulte).label,
                 String(item.explication || '').slice(0, 260)
             ];
         });
 
         doc.autoTable({
             startY: 28,
-            head: [['N°', 'Question', 'Votre réponse', 'Bonne réponse', 'Statut', 'Difficulté', 'Explication']],
+            head: [['N°', 'Question', 'Votre réponse', 'Bonne réponse', 'Statut', 'Explication']],
             body: rows,
             styles: { fontSize: 7, cellPadding: 1.5 },
             headStyles: { fillColor: [30, 58, 138] },
@@ -402,8 +375,7 @@ export default function ReviewSession() {
                 2: { cellWidth: 50 },
                 3: { cellWidth: 50 },
                 4: { cellWidth: 22 },
-                5: { cellWidth: 22 },
-                6: { cellWidth: 82 }
+                5: { cellWidth: 100 }
             }
         });
 
@@ -468,30 +440,6 @@ export default function ReviewSession() {
                         </div>
                     </div>
                 </div>
-
-                {/* Résumé par difficulté */}
-                {difficultySummary.length > 0 && (
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 mb-5">
-                        <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2 flex items-center gap-1.5">
-                            <Icon name="chart" size={13} className="text-blue-400" />
-                            Résumé par difficulté
-                        </p>
-                        <div className="grid grid-cols-3 gap-2">
-                            {difficultySummary.map(bucket => {
-                                const meta = difficultyMeta(bucket.label);
-                                return (
-                                    <div key={bucket.label} className={`rounded-xl border px-3 py-2 ${meta.cls}`}>
-                                        <p className="text-[10px] font-black uppercase tracking-wider">{bucket.label}</p>
-                                        <p className="text-lg font-black text-white mt-0.5">
-                                            {bucket.total - bucket.wrong}/{bucket.total}
-                                        </p>
-                                        <p className="text-[10px] opacity-80">{bucket.wrong} erreur(s)</p>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
-                )}
 
                 {/* Bandeau tuteur IA si des erreurs existent */}
                 {wrongCount > 0 && aiAvailable && (
@@ -602,9 +550,6 @@ export default function ReviewSession() {
                                         {item.isOk ? 'Correct' : notAnswered ? 'Sans réponse' : 'Incorrect'} · Q{i + 1}
                                     </span>
                                     <div className="flex items-center gap-1.5">
-                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${difficultyMeta(item.difficulte).cls}`}>
-                                            {difficultyMeta(item.difficulte).label}
-                                        </span>
                                         {item.tags && String(item.tags).split(/[;,]/).filter(Boolean).map(tag => (
                                             <span key={tag} className="text-[10px] font-bold text-blue-300 bg-blue-600/15 border border-blue-600/30 px-2 py-0.5 rounded-full">
                                                 {tag.trim()}

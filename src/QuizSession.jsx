@@ -1047,17 +1047,6 @@ export default function QuizSession() {
                 {tag.trim()}
               </span>
             ))}
-            {q.difficulte && (
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                q.difficulte === 'facile'
-                  ? 'text-emerald-300 bg-emerald-600/15 border-emerald-600/30'
-                  : q.difficulte === 'difficile'
-                    ? 'text-red-300 bg-red-600/15 border-red-600/30'
-                    : 'text-amber-300 bg-amber-600/15 border-amber-600/30'
-              }`}>
-                {q.difficulte}
-              </span>
-            )}
           </div>
 
           <h2 className="text-base sm:text-xl font-bold mb-5 sm:mb-8 text-slate-100 leading-relaxed">{q.Question}</h2>

@@ -7,19 +7,13 @@
  * - non  : retour à 1 jour et pénalité de facilité.
  */
 import { db } from './db.js';
+import { normalizeCorrect } from './answerUtils.js';
+
+export { normalizeCorrect };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MIN_EASE = 1.3;
 const MAX_EASE = 3.0;
-
-export function normalizeCorrect(question) {
-  const raw = String(question?.ReponseCorrecte || '').trim();
-  const upper = raw.toUpperCase();
-  if (['A', 'B', 'C', 'D'].includes(upper)) {
-    return String(question?.[`Opt${upper}`] || raw).trim();
-  }
-  return raw;
-}
 
 function optionsOf(question) {
   return {

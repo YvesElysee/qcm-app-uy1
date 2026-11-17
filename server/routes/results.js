@@ -7,7 +7,8 @@
 import { Router } from 'express';
 import { db } from '../db.js';
 import { requireStudent } from '../auth.js';
-import { normalizeCorrect, upsertWrongCard } from '../spacedRepetition.js';
+import { normalizeCorrect, answersEqual } from '../answerUtils.js';
+import { upsertWrongCard } from '../spacedRepetition.js';
 import { drawForStudent } from '../questionDraw.js';
 import { buildRankingGroups } from '../ranking.js';
 import {
@@ -58,24 +59,29 @@ function optionsOf(question) {
 }
 
 /**
- * Détermine si la réponse soumise correspond à la bonne réponse.
+ * Questions réellement présentées à l'étudiant.
  *
- * Le site envoie le texte exact de l'option cochée, mais les anciens clients
- * (et certaines intégrations) envoient la lettre A/B/C/D. On accepte les deux
- * afin de ne jamais marquer à tort une copie comme fausse.
+ * Le serveur recalcule le tirage, mais il prend en compte les identifiants
+ * envoyés par le client lorsqu'ils sont cohérents avec l'épreuve. Cela évite
+ * qu'un simple changement de date de programmation (graine du tirage) fasse
+ * corriger une copie sur les mauvaises questions — cause de notes à zéro.
  */
-function answerMatches(selected, question, correct) {
-  if (!selected) return false;
-  if (selected === correct) return true;
+function presentedQuestions(quizQuestions, quiz, user, questionIds) {
+  const fallback = drawForStudent(quizQuestions, quiz, user);
+  if (!Array.isArray(questionIds) || questionIds.length === 0) return fallback;
 
-  const direct = String(question?.ReponseCorrecte || '').trim().toUpperCase();
-  const letter = ['A', 'B', 'C', 'D'].includes(direct)
-    ? direct
-    : ['A', 'B', 'C', 'D'].find(
-        (label) => String(question?.[`Opt${label}`] || '').trim() === correct
-      ) || '';
+  const count = Number(quiz?.drawCount) || 0;
+  const expected = count > 0 ? Math.min(count, quizQuestions.length) : quizQuestions.length;
+  if (questionIds.length !== expected) return fallback;
 
-  return !!letter && selected.length <= 2 && selected.toUpperCase() === letter;
+  const ids = questionIds.map(Number);
+  if (ids.some((id) => !Number.isFinite(id))) return fallback;
+  if (new Set(ids).size !== ids.length) return fallback;
+
+  const byId = new Map(quizQuestions.map((q) => [Number(q.id), q]));
+  const picked = ids.map((id) => byId.get(id));
+  if (picked.some((question) => !question)) return fallback;
+  return picked;
 }
 
 /**
@@ -83,7 +89,7 @@ function answerMatches(selected, question, correct) {
  * calculés ici : un client modifié ne peut pas s'attribuer une note.
  */
 router.post('/', requireStudent, (req, res) => {
-  const { ue, quizId, answers, isMakeup } = req.body || {};
+  const { ue, quizId, answers, questionIds, isMakeup } = req.body || {};
 
   if ((!ue && !quizId) || !Array.isArray(answers)) {
     return res.status(400).json({ error: 'Données de résultat incomplètes.' });
@@ -119,9 +125,9 @@ router.post('/', requireStudent, (req, res) => {
 
   const byId = new Map(quizQuestions.map(q => [Number(q.id), q]));
 
-  // Le serveur recalcule lui-même le tirage : un client modifié ne peut pas
-  // réduire artificiellement le nombre de questions pour gonfler sa note.
-  const presented = drawForStudent(quizQuestions, quiz, req.user);
+  // Le serveur vérifie le tirage : un client modifié ne peut pas réduire
+  // artificiellement le nombre de questions pour gonfler sa note.
+  const presented = presentedQuestions(quizQuestions, quiz, req.user, questionIds);
 
   const answerByQuestion = new Map();
   answers.forEach((a) => {
@@ -137,7 +143,7 @@ router.post('/', requireStudent, (req, res) => {
       : (submitted?.selected ?? (typeof fallback === 'string' ? fallback : fallback?.selected) ?? '');
     const selected = String(rawSelected || '').trim();
     const correct = normalizeCorrect(q);
-    const isOk = answerMatches(selected, q, correct);
+    const isOk = answersEqual(selected, q, correct);
 
     return {
       questionId: q.id,
@@ -251,7 +257,7 @@ router.post('/training', requireStudent, (req, res) => {
       : (submitted?.selected ?? (typeof fallback === 'string' ? fallback : fallback?.selected) ?? '');
     const selected = String(rawSelected || '').trim();
     const correct = normalizeCorrect(q);
-    const isOk = answerMatches(selected, q, correct);
+    const isOk = answersEqual(selected, q, correct);
 
     return {
       questionId: q.id,
