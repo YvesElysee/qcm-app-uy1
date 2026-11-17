@@ -10,6 +10,7 @@ import { api } from './api';
 const DEFAULT_STATUS = {
   available: false,
   maxPerError: 2,
+  generalLimit: 5,
   dailyLimit: 0,
   remainingToday: 0,
   remainingForContext: null,
@@ -40,6 +41,7 @@ export async function fetchAiStatus({ context, signal } = {}) {
     return {
       available: !!data.available,
       maxPerError: Number.isFinite(data.maxPerError) ? data.maxPerError : DEFAULT_STATUS.maxPerError,
+      generalLimit: Number.isFinite(data.generalLimit) ? data.generalLimit : DEFAULT_STATUS.generalLimit,
       dailyLimit: Number.isFinite(data.dailyLimit) ? data.dailyLimit : 0,
       remainingToday: Number.isFinite(data.remainingToday) ? data.remainingToday : 0,
       contextKey: data.contextKey || null,

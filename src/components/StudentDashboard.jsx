@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { api } from '../services/api';
 import { getCurrentUser } from '../services/authService';
 import ContactAdmin from './ContactAdmin';
@@ -8,7 +8,16 @@ import Icon from './ui/icons.jsx';
 
 export default function StudentDashboard() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [currentUser, setCurrentUser] = useState(getCurrentUser());
+  // Lien profond depuis une notification : le test concerné est mis en avant.
+  const focusQuizId = searchParams.get('quiz') || '';
+
+  // Division de l'expérience par semestre. Tant que l'étudiant n'a pas choisi
+  // explicitement un semestre, on affiche celui du test ciblé par une
+  // notification, sinon le semestre académique courant (S1 : sept.-janv.,
+  // S2 : févr.-août).
+  const [semesterChoice, setSemesterChoice] = useState(null);
 
   usePageTitle('Mon espace étudiant');
 
@@ -52,6 +61,17 @@ export default function StudentDashboard() {
   const [copiedReferral, setCopiedReferral] = useState(false);
   const [nowTs, setNowTs] = useState(0);
   const [loading, setLoading] = useState(true);
+
+  // Semestre affiché : choix explicite de l'étudiant, sinon semestre du test
+  // ciblé par le lien de notification, sinon semestre académique courant.
+  const academicSemester = (() => {
+    const month = new Date().getMonth();
+    return month >= 8 || month === 0 ? '1' : '2';
+  })();
+  const focusedQuiz = focusQuizId ? allQuizzes.find(q => q.id === focusQuizId) : null;
+  const activeSemester = semesterChoice
+    || (focusedQuiz?.semestre ? String(focusedQuiz.semestre) : null)
+    || academicSemester;
 
   // Classement de la salle (filière + niveau) · chargé uniquement sur demande
   const [showRankings, setShowRankings] = useState(false);
@@ -118,6 +138,17 @@ export default function StudentDashboard() {
     const load = async () => { await loadData(); };
     load();
   }, [loadData]);
+
+  // Lien profond depuis une notification : on fait défiler jusqu'au test visé
+  // dès que les données sont chargées (et dès que le semestre correspondant
+  // est affiché).
+  useEffect(() => {
+    if (!focusQuizId || loading) return;
+    const target = document.getElementById(`test-${focusQuizId}`);
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [focusQuizId, loading, activeSemester]);
 
   const requestNotificationPermission = async () => {
     if (typeof Notification === 'undefined') {
@@ -211,10 +242,27 @@ export default function StudentDashboard() {
   const now = nowTs;
   const passedQuizIds = new Set(myResults.map(r => r.quizId || r.ue));
 
+  // Division par semestre : une matière ou un test sans semestre renseigné
+  // reste visible quel que soit le filtre sélectionné.
+  const matchesSemester = (value) =>
+    activeSemester === 'all' || !value || String(value) === activeSemester;
+  const semesterLabel = activeSemester === 'all' ? 'Tous les semestres' : `Semestre ${activeSemester}`;
+  const semesterQuizzes = allQuizzes.filter(q => matchesSemester(q.semestre));
+  // Une UE est visible si elle appartient au semestre OU si elle possède au
+  // moins un test dans ce semestre (une même UE peut être enseignée sur les
+  // deux semestres).
+  const ueCodesWithSemesterTests = new Set(
+    semesterQuizzes.map(q => String(q.ue || q.id).toUpperCase())
+  );
+  const semesterUes = availableUes.filter(ue =>
+    matchesSemester(ue.semestre) ||
+    ueCodesWithSemesterTests.has(String(ue.id || ue.code).toUpperCase())
+  );
+
   // Plusieurs tests peuvent partager la même UE : on choisit pour la carte
   // rapide celui qui est en cours, sinon le prochain, sinon le plus récent.
   const quizByUe = new Map();
-  allQuizzes.forEach(q => {
+  semesterQuizzes.forEach(q => {
     const key = String(q.ue || q.id).toUpperCase();
     const priority = (item) => {
       if (!item.questionCount || !item.launchTime) return 0;
@@ -234,8 +282,19 @@ export default function StudentDashboard() {
     }
   });
 
+  // Tous les tests regroupés par UE (plusieurs tests possibles sur une matière)
+  const quizzesByUe = new Map();
+  semesterQuizzes.forEach(q => {
+    const key = String(q.ue || q.id).toUpperCase();
+    if (!quizzesByUe.has(key)) quizzesByUe.set(key, []);
+    quizzesByUe.get(key).push(q);
+  });
+  quizzesByUe.forEach(list => {
+    list.sort((a, b) => (a.launchTime || Number.MAX_SAFE_INTEGER) - (b.launchTime || Number.MAX_SAFE_INTEGER));
+  });
+
   // Toutes les épreuves programmées (date renseignée), triées chronologiquement
-  const scheduledQuizzes = allQuizzes
+  const scheduledQuizzes = semesterQuizzes
     .filter(q => q.launchTime)
     .sort((a, b) => a.launchTime - b.launchTime);
 
@@ -334,29 +393,73 @@ export default function StudentDashboard() {
           </div>
         </div>
 
-        {/* ── Aide & découverte : tuteur IA + dépôt de documents ── */}
+        {/* ── Division par semestre ── */}
+        <div className="bg-slate-800/50 border border-slate-700/60 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <span className="w-9 h-9 rounded-xl bg-emerald-600/20 border border-emerald-500/30 text-emerald-300 flex items-center justify-center shrink-0">
+              <Icon name="book" size={17} />
+            </span>
+            <div>
+              <h3 className="text-sm font-black text-white">Mon semestre</h3>
+              <p className="text-[11px] text-slate-400">
+                Les matières et tests affichés correspondent au semestre sélectionné.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 bg-slate-950/60 border border-slate-700 rounded-xl p-1 self-start sm:self-auto">
+            {[
+              { value: '1', label: 'Semestre 1' },
+              { value: '2', label: 'Semestre 2' },
+              { value: 'all', label: 'Tous' }
+            ].map(tab => (
+              <button
+                key={tab.value}
+                type="button"
+                onClick={() => setSemesterChoice(tab.value)}
+                className={`px-3 py-1.5 rounded-lg text-[11px] font-black transition ${
+                  activeSemester === tab.value
+                    ? 'bg-emerald-500 text-slate-950 shadow'
+                    : 'text-slate-300 hover:bg-slate-800'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* ── Révision & dépôt de documents ── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="bg-gradient-to-br from-blue-950/70 to-slate-900 border border-blue-700/40 rounded-2xl p-5 flex flex-col gap-3">
             <div className="flex items-start gap-3">
               <span className="w-10 h-10 rounded-xl bg-blue-600/20 border border-blue-500/30 text-blue-300 flex items-center justify-center shrink-0">
-                <Icon name="sparkles" size={19} />
+                <Icon name="lightbulb" size={19} />
               </span>
               <div>
-                <h3 className="text-sm font-black text-white">Un tuteur IA est inclus</h3>
+                <h3 className="text-sm font-black text-white">Réviser après un QCM</h3>
                 <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                  Posez vos questions, faites-vous expliquer une notion ou une erreur de QCM,
-                  à tout moment. L'IA connaît votre filière et votre niveau.
+                  Relisez vos copies, refaites vos erreurs et, en fin de sujet,
+                  demandez à l'aide à la révision de vous expliquer les questions ratées.
                 </p>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => window.dispatchEvent(new CustomEvent('qcm:open-ai'))}
-              className="mt-auto w-full inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-black py-2.5 rounded-xl transition shadow-md shadow-blue-600/25"
-            >
-              <Icon name="chat" size={14} />
-              Ouvrir le tuteur IA
-            </button>
+            {myResults.length > 0 ? (
+              <Link
+                to={`/review/${myResults[0].quizId || myResults[0].ue}`}
+                className="mt-auto w-full inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-black py-2.5 rounded-xl transition shadow-md shadow-blue-600/25"
+              >
+                <Icon name="eye" size={14} />
+                Revoir ma dernière copie
+              </Link>
+            ) : (
+              <Link
+                to="/schedule"
+                className="mt-auto w-full inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-black py-2.5 rounded-xl transition shadow-md shadow-blue-600/25"
+              >
+                <Icon name="calendar" size={14} />
+                Voir les évaluations
+              </Link>
+            )}
           </div>
 
           <div className="bg-gradient-to-br from-emerald-950/60 to-slate-900 border border-emerald-700/40 rounded-2xl p-5 flex flex-col gap-3">
@@ -511,7 +614,7 @@ export default function StudentDashboard() {
                   Épreuves programmées ({scheduledQuizzes.length})
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  {filiere} • {selectedNiveau} · rejoignez l'épreuve au moment prévu ou rattrapez celles que vous avez manquées.
+                  {filiere} • {selectedNiveau} · {semesterLabel} · rejoignez l'épreuve au moment prévu ou rattrapez celles que vous avez manquées.
                 </p>
               </div>
               <Link
@@ -544,9 +647,10 @@ export default function StudentDashboard() {
                 return (
                   <div
                     key={q.id}
-                    className={`bg-slate-900/80 border rounded-2xl p-4 flex flex-col justify-between gap-3 ${
+                    id={`test-${q.id}`}
+                    className={`bg-slate-900/80 border rounded-2xl p-4 flex flex-col justify-between gap-3 scroll-mt-24 ${
                       isOpen ? 'border-emerald-500/40' : isMissed ? 'border-red-500/30' : 'border-slate-700/80'
-                    }`}
+                    } ${focusQuizId === q.id ? 'ring-2 ring-blue-500 border-blue-500' : ''}`}
                   >
                     <div>
                       <div className="flex items-center gap-2 flex-wrap mb-1">
@@ -620,7 +724,7 @@ export default function StudentDashboard() {
               </p>
             </div>
             <span className="bg-blue-600/20 text-blue-300 border border-blue-500/30 text-xs font-bold px-3 py-1 rounded-full">
-              {availableUes.length} UE(s) répertoriée(s)
+              {semesterUes.length} UE(s) · {semesterLabel}
             </span>
           </div>
 
@@ -628,15 +732,15 @@ export default function StudentDashboard() {
             <div className="py-12 text-center text-slate-500 animate-pulse text-sm">
               Chargement des matières...
             </div>
-          ) : availableUes.length === 0 ? (
+          ) : semesterUes.length === 0 ? (
             <div className="text-center py-10 bg-slate-900/50 rounded-2xl border border-dashed border-slate-700 text-slate-400 text-xs">
-              Aucune unité d'enseignement enregistrée pour {filiere} en {selectedNiveau}.
+              Aucune unité d'enseignement enregistrée pour {filiere} en {selectedNiveau} ({semesterLabel.toLowerCase()}).
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-              {availableUes.map(ue => {
+              {semesterUes.map(ue => {
                 const { quiz, state } = getQuizState(ue.id);
-                const passedResult = myResults.find(r => (r.quizId || r.ue) === (quiz?.id || ue.id));
+                const ueTests = quizzesByUe.get(String(ue.id).toUpperCase()) || [];
 
                 const statusMeta = {
                   none: { label: 'Non programmée', cls: 'bg-slate-600/40 text-slate-300' },
@@ -655,7 +759,7 @@ export default function StudentDashboard() {
                     <div>
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">
-                          {filiere} • {selectedNiveau}
+                          {filiere} • {selectedNiveau}{ue.semestre ? ` • S${ue.semestre}` : ''}
                         </span>
                         <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${statusMeta.cls}`}>
                           {statusMeta.label}
@@ -665,16 +769,53 @@ export default function StudentDashboard() {
                       <p className="text-xs text-slate-300 line-clamp-2 mt-0.5">
                         {ue.label || ue.id}
                       </p>
-                      {quiz?.launchTime && (
-                        <p className="text-[11px] text-slate-400 mt-1">
-                          {state === 'upcoming' ? 'Prévue' : 'Programmée'} : {formatDate(quiz.launchTime)}
-                        </p>
-                      )}
-                      {passedResult && (
-                        <p className="text-[11px] text-emerald-300 mt-1 font-bold">
-                          Note : {passedResult.total ? ((passedResult.score / passedResult.total) * 20).toFixed(1) : '-'}/20
-                          {passedResult.isMakeup ? ' (rattrapage)' : ''}
-                        </p>
+
+                      {/* Tous les tests de cette UE, regroupés sur la même carte */}
+                      {ueTests.length > 0 && (
+                        <div className="mt-2.5 space-y-1.5">
+                          <p className="text-[10px] font-black uppercase tracking-wider text-slate-500">
+                            {ueTests.length} test(s) sur cette UE
+                          </p>
+                          {ueTests.map(test => {
+                            const taken = myResults.find(r => (r.quizId || r.ue) === test.id);
+                            const testNote = taken?.total
+                              ? ((taken.score / taken.total) * 20).toFixed(1)
+                              : null;
+                            const isCurrent = quiz?.id === test.id;
+                            return (
+                              <div
+                                key={test.id}
+                                className={`flex items-center justify-between gap-2 rounded-lg border px-2 py-1.5 ${
+                                  isCurrent
+                                    ? 'bg-blue-950/40 border-blue-700/60'
+                                    : 'bg-slate-950/50 border-slate-800'
+                                }`}
+                              >
+                                <span className="min-w-0">
+                                  <span className="block text-[11px] font-bold text-slate-200 truncate">
+                                    {test.title || test.ue || test.id}
+                                  </span>
+                                  <span className="block text-[10px] text-slate-500">
+                                    {test.launchTime ? formatDate(test.launchTime) : 'Non programmé'}
+                                  </span>
+                                </span>
+                                {taken ? (
+                                  <Link
+                                    to={`/review/${test.id}`}
+                                    className="shrink-0 text-[10px] font-black text-emerald-300 hover:text-emerald-200"
+                                    title="Relire ma copie"
+                                  >
+                                    {testNote ? `${testNote}/20` : 'Relire'}
+                                  </Link>
+                                ) : (
+                                  <span className="shrink-0 text-[10px] font-bold text-slate-500">
+                                    {test.questionCount || 0} q.
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
                       )}
                     </div>
 

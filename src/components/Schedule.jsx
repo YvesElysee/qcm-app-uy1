@@ -22,7 +22,8 @@ export default function Schedule() {
 
   const [filter, setFilter] = useState({
     filiere: userFiliere,
-    niveau: userNiveau
+    niveau: userNiveau,
+    semestre: ''
   });
 
   const [myResults, setMyResults] = useState([]);
@@ -63,9 +64,11 @@ export default function Schedule() {
 
   const passedQuizIds = new Set(myResults.map(r => r.quizId || r.ue));
 
+  // Un test sans semestre renseigné reste visible dans tous les semestres.
   const filtered = (list) => list.filter(q =>
     (!filter.filiere || q.filiere === filter.filiere) &&
-    (!filter.niveau || q.niveau === filter.niveau)
+    (!filter.niveau || q.niveau === filter.niveau) &&
+    (!filter.semestre || !q.semestre || String(q.semestre) === filter.semestre)
   );
 
   const formatDate = (ts) => new Date(ts).toLocaleString('fr-FR', {
@@ -273,6 +276,26 @@ export default function Schedule() {
                   {userFaculte}
                 </span>
               )}
+              <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-xl p-1">
+                {[
+                  { value: '', label: 'Tous' },
+                  { value: '1', label: 'S1' },
+                  { value: '2', label: 'S2' }
+                ].map(tab => (
+                  <button
+                    key={tab.value || 'all'}
+                    type="button"
+                    onClick={() => setFilter(f => ({ ...f, semestre: tab.value }))}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-black transition ${
+                      filter.semestre === tab.value
+                        ? 'bg-emerald-500 text-slate-950'
+                        : 'text-slate-300 hover:bg-slate-800'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
             </>
           ) : (
             <>
@@ -300,6 +323,19 @@ export default function Schedule() {
                   <option>L3</option>
                   <option>M1</option>
                   <option>M2</option>
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400 font-bold">Semestre :</span>
+                <select
+                  className="p-2 border border-slate-800 bg-slate-950 text-slate-200 rounded-xl text-xs outline-none focus:border-blue-600 transition font-bold"
+                  value={filter.semestre}
+                  onChange={e => setFilter(f => ({ ...f, semestre: e.target.value }))}
+                >
+                  <option value="">Tous</option>
+                  <option value="1">Semestre 1</option>
+                  <option value="2">Semestre 2</option>
                 </select>
               </div>
             </>

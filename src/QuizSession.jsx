@@ -692,7 +692,8 @@ export default function QuizSession() {
                 <div>
                   <h2 className="text-sm font-black text-white">Besoin d'aide pour comprendre ?</h2>
                   <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
-                    Le tuteur IA peut expliquer chaque erreur et vous proposer une méthode de révision.
+                    L'aide à la révision explique vos erreurs et propose des méthodes de révision
+                    (5 questions par jour, toutes matières confondues).
                   </p>
                 </div>
               </div>

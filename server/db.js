@@ -132,7 +132,8 @@ db.exec(`
     code     TEXT,
     label    TEXT,
     filiere  TEXT,
-    niveau   TEXT
+    niveau   TEXT,
+    semestre TEXT DEFAULT ''                    -- '1' | '2' (division par semestre)
   );
 
   -- Paramètres système (ex-"settings/smtp") · stockés en JSON
@@ -384,6 +385,7 @@ ensureColumn('review_cards', 'explication', "TEXT DEFAULT ''");
 ensureColumn('users', 'faculte', "TEXT DEFAULT 'FACSCIENCES'");
 ensureColumn('quizzes', 'faculte', "TEXT DEFAULT 'FACSCIENCES'");
 ensureColumn('ues', 'faculte', "TEXT DEFAULT 'FACSCIENCES'");
+ensureColumn('ues', 'semestre', "TEXT DEFAULT ''");
 ensureColumn('results', 'faculte', "TEXT DEFAULT ''");
 // Plusieurs tests peuvent désormais porter sur la même UE : les lignes sont
 // identifiées par un `id` propre et un `title` lisible (ex. « Test 1 »).
@@ -398,6 +400,25 @@ db.exec(`
     WHERE title IS NULL OR TRIM(title) = '';
   UPDATE results SET quizId = ue WHERE quizId IS NULL OR TRIM(quizId) = '';
   UPDATE results SET quizTitle = ue WHERE quizTitle IS NULL OR TRIM(quizTitle) = '';
+`);
+
+// Division par semestre : le catalogue UE hérite du semestre des épreuves
+// déjà programmées (les bases existantes restent cohérentes).
+db.exec(`
+  UPDATE ues
+  SET semestre = (
+    SELECT q.semestre FROM quizzes q
+    WHERE UPPER(TRIM(q.ue)) = UPPER(TRIM(COALESCE(ues.code, ues.id)))
+      AND q.semestre IS NOT NULL AND TRIM(q.semestre) <> ''
+    ORDER BY COALESCE(q.launchTime, 0) DESC, q.id DESC
+    LIMIT 1
+  )
+  WHERE (semestre IS NULL OR TRIM(semestre) = '')
+    AND EXISTS (
+      SELECT 1 FROM quizzes q
+      WHERE UPPER(TRIM(q.ue)) = UPPER(TRIM(COALESCE(ues.code, ues.id)))
+        AND q.semestre IS NOT NULL AND TRIM(q.semestre) <> ''
+    );
 `);
 // Parrainage (migration douce)
 ensureColumn('users', 'referralCode', "TEXT DEFAULT ''");

@@ -68,11 +68,6 @@ export default function Navbar() {
     setShowProfile(true);
   };
 
-  const openAi = () => {
-    setMobileOpen(false);
-    window.dispatchEvent(new CustomEvent('qcm:open-ai'));
-  };
-
   // Liens principaux (Contact et Mon espace n'ont de sens que connecté)
   const mathFiliere = String(user?.filiere || '')
     .normalize('NFD')
@@ -98,7 +93,6 @@ export default function Navbar() {
     ? [
         { to: '/', label: 'Accueil', icon: 'home', end: true },
         { to: '/schedule', label: 'Planning', icon: 'calendar' },
-        { action: 'ai', label: 'Tuteur IA', icon: 'sparkles' },
         { to: '/resources', label: 'Ressources', icon: 'book' },
         { to: '/dashboard', label: 'Espace', icon: 'graduation' }
       ]
@@ -229,14 +223,6 @@ export default function Navbar() {
                           Générateur d'exercices
                         </NavLink>
                       )}
-                      <button
-                        type="button"
-                        onClick={() => { setUserMenuOpen(false); openAi(); }}
-                        className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-slate-200 hover:bg-slate-700 hover:text-white transition"
-                      >
-                        <Icon name="sparkles" size={15} />
-                        Tuteur IA
-                      </button>
                       <button
                         type="button"
                         onClick={openProfile}
@@ -409,21 +395,6 @@ export default function Navbar() {
       >
         <div className="grid grid-cols-5">
           {bottomLinks.map((item) => {
-            if (item.action === 'ai') {
-              return (
-                <button
-                  key="ai"
-                  type="button"
-                  onClick={openAi}
-                  className="flex flex-col items-center justify-center gap-1 py-2.5 text-[10px] font-bold text-blue-300 active:bg-slate-800 transition"
-                >
-                  <span className="w-9 h-9 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center">
-                    <Icon name="sparkles" size={18} />
-                  </span>
-                  {item.label}
-                </button>
-              );
-            }
             return (
               <NavLink
                 key={item.to}

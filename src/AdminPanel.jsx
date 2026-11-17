@@ -52,6 +52,14 @@ const btnPrimary =
 
 const formatDate = (ts) => (ts ? new Date(ts).toLocaleString('fr-FR') : '-');
 
+/** Convertit un timestamp en valeur d'un champ <input type="datetime-local">. */
+const toDatetimeLocal = (ts) => {
+  const date = new Date(Number(ts));
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
+
 const formatNumber = (value) => new Intl.NumberFormat('fr-FR').format(Number(value) || 0);
 
 const formatTokens = (value) => {
@@ -70,6 +78,7 @@ const AI_STATUS_LABELS = {
 
 const formatContextKey = (key) => {
   if (!key) return '—';
+  if (key === 'general') return 'Questions générales (mutualisées)';
   const [kind, quizId, detail] = String(key).split(':');
   if (kind === 'general') return `Conseils généraux · ${quizId || 'QCM'}`;
   if (kind === 'question') {
@@ -92,6 +101,24 @@ const formatSize = (bytes) => {
   return `${Math.max(1, Math.round(value / 1024))} Ko`;
 };
 
+/**
+ * Miroir client de l'identifiant de test calculé par le serveur.
+ * « INF232 » + « Test 1 » → « INF232-TEST-1 ».
+ */
+const quizIdFor = (ue, title) => {
+  const code = String(ue || '').trim().toUpperCase();
+  if (!code) return '';
+  const cleanTitle = String(title || '').trim();
+  if (!cleanTitle || cleanTitle.toUpperCase() === code) return code;
+  const slug = cleanTitle
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return slug ? `${code}-${slug}` : code;
+};
+
 export default function AdminPanel() {
   usePageTitle('Administration');
   const [activeSection, setActiveSection] = useState('overview');
@@ -107,7 +134,16 @@ export default function AdminPanel() {
   const [semestre, setSemestre] = useState('1');
   const [ue, setUe] = useState('');
   const [quizTitle, setQuizTitle] = useState('');
+  const [editingQuizId, setEditingQuizId] = useState('');
+  const [duplicatingId, setDuplicatingId] = useState('');
   const [manualUe, setManualUe] = useState(false);
+  // Filtres de la liste des évaluations (recherche, UE, semestre, faculté/filière)
+  const [quizFilters, setQuizFilters] = useState({
+    search: '',
+    semestre: '',
+    faculte: '',
+    filiere: ''
+  });
   const [launchTime, setLaunchTime] = useState('');
   const [endTime, setEndTime] = useState('');
   const [timePerQuestion, setTimePerQuestion] = useState('60');
@@ -131,6 +167,7 @@ export default function AdminPanel() {
   const [newUeFaculte, setNewUeFaculte] = useState('');
   const [newUeFiliere, setNewUeFiliere] = useState('');
   const [newUeNiveau, setNewUeNiveau] = useState('L1');
+  const [newUeSemestre, setNewUeSemestre] = useState('1');
   const [allUes, setAllUes] = useState([]);
 
   // ── Gestion du catalogue (facultés & filières) ─────────────────────────
@@ -649,12 +686,82 @@ export default function AdminPanel() {
     };
     if (endTime) data.endTime = new Date(endTime).getTime();
 
-    await api('/quizzes', { method: 'POST', auth: 'admin', body: data });
-    alert(`Épreuve « ${testTitle} » (${targetUe}) programmée avec succès !`);
+    if (editingQuizId) {
+      await api(`/quizzes/${encodeURIComponent(editingQuizId)}`, {
+        method: 'POST',
+        auth: 'admin',
+        body: data
+      });
+      alert(`Test « ${testTitle} » (${targetUe}) mis à jour.`);
+    } else {
+      await api('/quizzes', { method: 'POST', auth: 'admin', body: data });
+      alert(`Épreuve « ${testTitle} » (${targetUe}) programmée avec succès !`);
+    }
+    setEditingQuizId('');
     fetchHistory();
     fetchUpcoming();
     fetchUes();
-  }, [ue, quizTitle, faculte, filiere, niveau, semestre, timePerQuestion, drawCount, launchTime, endTime, allUes, fetchHistory, fetchUpcoming, fetchUes]);
+  }, [ue, quizTitle, faculte, filiere, niveau, semestre, timePerQuestion, drawCount, launchTime, endTime, allUes, editingQuizId, fetchHistory, fetchUpcoming, fetchUes]);
+
+  /** Pré-remplit le formulaire avec un test existant pour le modifier. */
+  const loadQuizForEdit = useCallback((quiz) => {
+    if (!quiz) return;
+    setEditingQuizId(quiz.id);
+    setUe(quiz.ue || quiz.id);
+    setQuizTitle(quiz.title || quiz.ue || quiz.id);
+    setManualUe(false);
+    if (quiz.faculte) setFaculte(quiz.faculte);
+    if (quiz.filiere) setFiliere(quiz.filiere);
+    if (quiz.niveau) setNiveau(quiz.niveau);
+    if (quiz.semestre) setSemestre(String(quiz.semestre));
+    setTimePerQuestion(String(quiz.timePerQuestion || 60));
+    setDrawCount(quiz.drawCount ? String(quiz.drawCount) : '');
+    setLaunchTime(quiz.launchTime ? toDatetimeLocal(quiz.launchTime) : '');
+    setEndTime(quiz.endTime ? toDatetimeLocal(quiz.endTime) : '');
+  }, []);
+
+  const resetQuizForm = useCallback(() => {
+    setEditingQuizId('');
+    setUe('');
+    setQuizTitle('');
+    setManualUe(false);
+    setLaunchTime('');
+    setEndTime('');
+    setTimePerQuestion('60');
+    setDrawCount('');
+  }, []);
+
+  /**
+   * Duplique un test (métadonnées + questions). Les dates sont décalées d'une
+   * semaine côté serveur, laissant le temps d'ajuster la programmation.
+   */
+  const duplicateQuiz = useCallback(async (quiz) => {
+    if (!quiz?.id || duplicatingId) return;
+    setDuplicatingId(quiz.id);
+    try {
+      const res = await api(`/quizzes/${encodeURIComponent(quiz.id)}/duplicate`, {
+        method: 'POST',
+        auth: 'admin',
+        body: {}
+      });
+      const created = res?.quiz;
+      if (created) {
+        await fetchHistory();
+        await fetchUpcoming();
+        setActiveSection('quizzes');
+        loadQuizForEdit(created);
+        alert(
+          `Copie créée : « ${created.title} » (${created.id}) · ` +
+          `${res.copiedQuestions || created.questionCount || 0} question(s). ` +
+          'Vérifiez la date proposée puis enregistrez.'
+        );
+      }
+    } catch (err) {
+      alert(`Duplication impossible : ${err.message}`);
+    } finally {
+      setDuplicatingId('');
+    }
+  }, [duplicatingId, fetchHistory, fetchUpcoming, loadQuizForEdit]);
 
   const deleteSingleQuestion = useCallback(
     async (qId) => {
@@ -676,16 +783,47 @@ export default function AdminPanel() {
   const deleteQuiz = useCallback(
     async (quizId) => {
       if (!quizId) return;
+      const quiz = history.find(q => q.id === quizId);
+      const label = quiz?.title ? `${quiz.title} (${quiz.ue || quizId})` : quizId;
+
+      // Le serveur refuse la première suppression si des copies existent :
+      // on récupère leur nombre pour demander une confirmation explicite.
+      let resultsCount = 0;
+      try {
+        const probe = await api(`/admin/results?quizId=${encodeURIComponent(quizId)}`, { auth: 'admin' });
+        resultsCount = Array.isArray(probe?.results) ? probe.results.length : 0;
+      } catch {
+        // En cas d'échec, on conserve 0 : le serveur redemandera confirmation.
+      }
+
+      const warning = resultsCount > 0
+        ? `\n\n⚠ ${resultsCount} copie(s) d'étudiant(s) seront définitivement perdues.\n` +
+          'Cette action est irréversible.'
+        : '\n\nAucune copie enregistrée pour ce test.';
+
       if (
         !confirm(
-          `Supprimer définitivement l'évaluation "${quizId}" ?\n\n` +
-            'Les questions et les sessions actives seront supprimées.\n' +
-            'Les résultats déjà enregistrés (notes des étudiants) seront conservés.'
+          `Supprimer définitivement le test « ${label} » ?\n\n` +
+            'Les questions et les sessions actives seront supprimées.' +
+            warning
         )
       ) {
         return;
       }
-      await api(`/quizzes/${encodeURIComponent(quizId)}`, { method: 'DELETE', auth: 'admin' });
+
+      try {
+        await api(`/quizzes/${encodeURIComponent(quizId)}?force=1`, { method: 'DELETE', auth: 'admin' });
+      } catch (err) {
+        const count = err?.data?.resultsCount;
+        if (err?.status === 409 && count) {
+          if (!confirm(`Confirmer la suppression de ${count} copie(s) pour « ${label} » ?`)) return;
+          await api(`/quizzes/${encodeURIComponent(quizId)}?force=1`, { method: 'DELETE', auth: 'admin' });
+        } else {
+          alert(`Suppression impossible : ${err.message}`);
+          return;
+        }
+      }
+
       if (inspectQuizId === quizId) {
         setInspectQuizId('');
         setInspectQuestions([]);
@@ -694,10 +832,11 @@ export default function AdminPanel() {
         setResultsQuizId('');
         setResultsList([]);
       }
+      if (editingQuizId === quizId) resetQuizForm();
       fetchHistory();
       fetchUpcoming();
     },
-    [inspectQuizId, resultsQuizId, fetchHistory, fetchUpcoming]
+    [history, inspectQuizId, resultsQuizId, editingQuizId, resetQuizForm, fetchHistory, fetchUpcoming]
   );
 
   // ─── Résultats par évaluation ─────────────────────────────────────────
@@ -814,14 +953,15 @@ export default function AdminPanel() {
         label: newUeLabel.trim() || code,
         faculte: newUeFaculte,
         filiere: newUeFiliere,
-        niveau: newUeNiveau
+        niveau: newUeNiveau,
+        semestre: newUeSemestre
       }
     });
     alert(`UE "${code}" ajoutée avec succès !`);
     setNewUeCode('');
     setNewUeLabel('');
     fetchUes();
-  }, [newUeCode, newUeLabel, newUeFaculte, newUeFiliere, newUeNiveau, fetchUes]);
+  }, [newUeCode, newUeLabel, newUeFaculte, newUeFiliere, newUeNiveau, newUeSemestre, fetchUes]);
 
   // ─── Demandes de filière ──────────────────────────────────────────────
   const approveFiliereRequest = useCallback(async (request) => {
@@ -1501,7 +1641,36 @@ export default function AdminPanel() {
     return matchText && matchFaculte && matchFiliere && matchNiveau;
   });
 
-  const filteredHistory = [...history].sort((a, b) => (b.launchTime || 0) - (a.launchTime || 0));
+  const filteredHistory = useMemo(() => {
+    const term = quizFilters.search.trim().toLowerCase();
+    return [...history]
+      .filter(q => {
+        const matchesTerm = !term ||
+          String(q.title || '').toLowerCase().includes(term) ||
+          String(q.ue || '').toLowerCase().includes(term) ||
+          String(q.id || '').toLowerCase().includes(term) ||
+          String(q.filiere || '').toLowerCase().includes(term);
+        const matchesSemestre = !quizFilters.semestre ||
+          String(q.semestre || '') === quizFilters.semestre;
+        const matchesFaculte = !quizFilters.faculte ||
+          String(q.faculte || '').toUpperCase() === quizFilters.faculte.toUpperCase();
+        const matchesFiliere = !quizFilters.filiere ||
+          String(q.filiere || '').toLowerCase() === quizFilters.filiere.toLowerCase();
+        return matchesTerm && matchesSemestre && matchesFaculte && matchesFiliere;
+      })
+      .sort((a, b) => (b.launchTime || 0) - (a.launchTime || 0));
+  }, [history, quizFilters]);
+
+  // Cible de l'import CSV (même calcul que le serveur) et questions remplacées.
+  const importTargetTitle = quizTitle.trim() || ue.trim().toUpperCase();
+  const importTargetId = quizIdFor(ue.trim().toUpperCase(), importTargetTitle);
+  const importExisting = history.find(q => q.id === importTargetId) || null;
+  const importReplacedCount = importExisting?.questionCount || 0;
+
+  const quizFilterFacultes = useMemo(
+    () => [...new Set(history.map(q => q.faculte).filter(Boolean))],
+    [history]
+  );
 
   // ══════════════════════════════════════════════════════════════════════
   return (
@@ -1870,11 +2039,49 @@ export default function AdminPanel() {
                   <div className="border-b border-slate-800 pb-3">
                     <h3 className="text-sm font-black text-white flex items-center gap-2">
                       <Icon name="calendar" size={15} className="text-blue-400" />
-                      Programmer une évaluation
+                      {editingQuizId ? 'Modifier une évaluation' : 'Programmer une évaluation'}
                     </h3>
                     <p className="text-[11px] text-slate-500 mt-0.5">
                       Configurez la matière, la minuterie et les dates d'ouverture
                     </p>
+                  </div>
+
+                  {/* Sélecteur de test existant : modification ou nouvelle programmation */}
+                  <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3">
+                    <label className={label}>Modifier un test existant</label>
+                    <div className="flex gap-2 flex-wrap">
+                      <select
+                        className={selectCls + ' flex-1 min-w-48'}
+                        value={editingQuizId}
+                        onChange={e => {
+                          const value = e.target.value;
+                          if (!value) {
+                            resetQuizForm();
+                            return;
+                          }
+                          const quiz = history.find(q => q.id === value);
+                          if (quiz) loadQuizForEdit(quiz);
+                        }}
+                      >
+                        <option value="">➕ Nouveau test…</option>
+                        {history.map(q => (
+                          <option key={q.id} value={q.id}>
+                            {q.title || q.ue || q.id} · {q.ue || q.id} · {q.filiere || '?'} {q.niveau || ''}
+                          </option>
+                        ))}
+                      </select>
+                      {editingQuizId && (
+                        <button onClick={resetQuizForm} className={btnSecondary} type="button">
+                          <Icon name="close" size={13} />
+                          Nouveau
+                        </button>
+                      )}
+                    </div>
+                    {editingQuizId && (
+                      <p className="text-[11px] text-amber-300 mt-2">
+                        Modification du test <strong>{editingQuizId}</strong> : l'enregistrement met à jour ce test sans créer de doublon.
+                      </p>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -2080,8 +2287,14 @@ export default function AdminPanel() {
 
                   <button onClick={handleSaveQuiz} className={btnPrimary}>
                     <Icon name="check" size={14} strokeWidth={3} />
-                    Enregistrer la programmation
+                    {editingQuizId ? 'Mettre à jour ce test' : 'Enregistrer la programmation'}
                   </button>
+                  {editingQuizId && (
+                    <button onClick={resetQuizForm} className={btnSecondary + ' w-full justify-center'}>
+                      <Icon name="close" size={13} />
+                      Annuler la modification
+                    </button>
+                  )}
                 </div>
 
                 {/* Import CSV */}
@@ -2125,9 +2338,31 @@ export default function AdminPanel() {
                     </div>
                   </div>
 
-                  <div className="bg-blue-950/40 border border-blue-900/50 rounded-xl p-3 text-[11px] text-blue-200 leading-relaxed">
-                    L'import remplace les questions existantes du test sélectionné (UE + nom du test)
-                    et fusionne les métadonnées (filière, niveau, minuterie) définies ci-contre.
+                  <div className="bg-blue-950/40 border border-blue-900/50 rounded-xl p-3 text-[11px] text-blue-200 leading-relaxed space-y-1.5">
+                    <p className="font-black uppercase tracking-wider text-[10px] text-blue-300">
+                      Destination de l'import
+                    </p>
+                    {importTargetId ? (
+                      <>
+                        <p>
+                          Test ciblé : <strong className="text-white">{importTargetTitle || importTargetId}</strong>
+                          {' '}(<span className="font-mono">{importTargetId}</span>)
+                        </p>
+                        <p>
+                          {importReplacedCount > 0
+                            ? `⚠ ${importReplacedCount} question(s) existante(s) seront remplacées.`
+                            : 'Aucune question existante : le test sera créé avec ces questions.'}
+                        </p>
+                        {importExisting && (
+                          <p className="text-blue-300/80">
+                            Test existant · {importExisting.filiere || '?'} {importExisting.niveau || ''}
+                            {importExisting.semestre ? ` · S${importExisting.semestre}` : ''}
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <p>Sélectionnez une UE (et éventuellement un nom de test) ci-contre.</p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -2138,10 +2373,10 @@ export default function AdminPanel() {
                   <div>
                     <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
                       <Icon name="list" size={15} className="text-blue-400" />
-                      Toutes les évaluations ({history.length})
+                      Tous les tests ({filteredHistory.length}/{history.length})
                     </h3>
                     <p className="text-[11px] text-slate-500 mt-0.5">
-                      Inspectez les questions, consultez les résultats ou supprimez une évaluation
+                      Inspectez, modifiez, dupliquez ou supprimez un test · plusieurs tests par UE sont possibles
                     </p>
                   </div>
                   <button onClick={fetchHistory} className={btnSecondary}>
@@ -2150,9 +2385,63 @@ export default function AdminPanel() {
                   </button>
                 </div>
 
+                {/* Filtres de la liste */}
+                <div className="px-6 py-3 border-b border-slate-800 bg-slate-950/40 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">
+                      <Icon name="search" size={13} />
+                    </span>
+                    <input
+                      type="text"
+                      placeholder="Rechercher un test, une UE…"
+                      className={input + ' pl-9'}
+                      value={quizFilters.search}
+                      onChange={e => setQuizFilters(f => ({ ...f, search: e.target.value }))}
+                    />
+                  </div>
+                  <select
+                    className={selectCls}
+                    value={quizFilters.semestre}
+                    onChange={e => setQuizFilters(f => ({ ...f, semestre: e.target.value }))}
+                  >
+                    <option value="">Tous les semestres</option>
+                    <option value="1">Semestre 1</option>
+                    <option value="2">Semestre 2</option>
+                  </select>
+                  <select
+                    className={selectCls}
+                    value={quizFilters.faculte}
+                    onChange={e => setQuizFilters(f => ({ ...f, faculte: e.target.value, filiere: '' }))}
+                  >
+                    <option value="">Toutes les facultés</option>
+                    {quizFilterFacultes.map(fac => (
+                      <option key={fac} value={fac}>{fac}</option>
+                    ))}
+                  </select>
+                  <select
+                    className={selectCls}
+                    value={quizFilters.filiere}
+                    onChange={e => setQuizFilters(f => ({ ...f, filiere: e.target.value }))}
+                  >
+                    <option value="">Toutes les filières</option>
+                    {[...new Set(
+                      history
+                        .filter(q => !quizFilters.faculte || String(q.faculte || '').toUpperCase() === quizFilters.faculte.toUpperCase())
+                        .map(q => q.filiere)
+                        .filter(Boolean)
+                    )].map(fil => (
+                      <option key={fil} value={fil}>{fil}</option>
+                    ))}
+                  </select>
+                </div>
+
                 {history.length === 0 ? (
                   <p className="text-xs text-slate-500 text-center py-10">
                     Aucune évaluation enregistrée. Programmez la première ci-dessus.
+                  </p>
+                ) : filteredHistory.length === 0 ? (
+                  <p className="text-xs text-slate-500 text-center py-10">
+                    Aucun test ne correspond à ces filtres.
                   </p>
                 ) : (
                   <div className="divide-y divide-slate-800">
@@ -2181,7 +2470,14 @@ export default function AdminPanel() {
                                 {isUpcoming ? 'À venir' : 'Terminée'}
                               </span>
                             </div>
-                            <h4 className="font-black text-white text-base mt-1">{q.title || q.ue || q.id}</h4>
+                            <h4 className="font-black text-white text-base mt-1">
+                              {q.title || q.ue || q.id}
+                              {editingQuizId === q.id && (
+                                <span className="ml-2 text-[10px] font-black text-amber-300 bg-amber-500/15 border border-amber-600/30 px-2 py-0.5 rounded-full align-middle">
+                                  en cours d'édition
+                                </span>
+                              )}
+                            </h4>
                             <p className="text-[11px] text-slate-500">
                               UE {q.ue || q.id} · {q.questionCount || 0} questions{q.drawCount ? ` • ${q.drawCount} tirées/étudiant` : ''} • {q.timePerQuestion || 60}s/question •
                               Ouverture : {formatDate(q.launchTime)}
@@ -2189,6 +2485,23 @@ export default function AdminPanel() {
                             </p>
                           </div>
                           <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+                            <button
+                              onClick={() => loadQuizForEdit(q)}
+                              title="Modifier la programmation de ce test"
+                              className={btnSecondary}
+                            >
+                              <Icon name="edit" size={13} />
+                              Modifier
+                            </button>
+                            <button
+                              onClick={() => duplicateQuiz(q)}
+                              disabled={duplicatingId === q.id}
+                              title="Créer une copie de ce test (questions incluses)"
+                              className={btnSecondary}
+                            >
+                              <Icon name="copy" size={13} />
+                              {duplicatingId === q.id ? 'Copie…' : 'Dupliquer'}
+                            </button>
                             <button
                               onClick={() => loadInspectQuestions(q.id)}
                               title="Inspecter les questions"
@@ -2901,6 +3214,17 @@ export default function AdminPanel() {
                         ))}
                       </select>
                     </div>
+                    <div>
+                      <label className={label}>Semestre</label>
+                      <select
+                        className={selectCls}
+                        value={newUeSemestre}
+                        onChange={e => setNewUeSemestre(e.target.value)}
+                      >
+                        <option value="1">Semestre 1</option>
+                        <option value="2">Semestre 2</option>
+                      </select>
+                    </div>
                   </div>
                   <button onClick={addUe} className={btnPrimary}>
                     <Icon name="plus" size={14} strokeWidth={3} />
@@ -3027,6 +3351,13 @@ export default function AdminPanel() {
                               </span>
                               <span className="text-[10px] font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded-full">
                                 {u.niveau}
+                              </span>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                u.semestre
+                                  ? 'text-emerald-300 bg-emerald-600/15'
+                                  : 'text-slate-500 bg-slate-800'
+                              }`}>
+                                {u.semestre ? `S${u.semestre}` : 'Tous semestres'}
                               </span>
                             </div>
                             <p className="text-[11px] text-slate-500 mt-0.5 truncate">{u.label || u.code}</p>

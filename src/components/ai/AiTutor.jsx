@@ -33,9 +33,11 @@ const QUICK_PROMPTS_QUESTION = [
 ];
 
 const QUICK_PROMPTS_GENERAL = [
-  'Quelles méthodes pour mieux réussir mes QCM ?',
+  'Explique-moi une notion de mon cours avec un exemple.',
+  'Donne-moi un exercice corrigé pour mieux comprendre.',
   'Comment organiser mes révisions efficacement ?',
-  'Comment comprendre mes erreurs récurrentes ?'
+  'Aide-moi à comprendre une question que j\'ai ratée.',
+  'Quelles méthodes pour mieux réussir mes QCM ?'
 ];
 
 // Identifiant de message · crypto.randomUUID n'existe qu'en contexte sécurisé
@@ -131,7 +133,12 @@ export default function AiTutor({ open, onClose, context, status }) {
       .then((next) => {
         if (!active) return;
         setAiStatus(next);
-        const nextLimit = Number.isFinite(next.maxPerError) ? next.maxPerError : 2;
+        const fallbackLimit = context?.kind === 'question'
+          ? next.maxPerError
+          : next.generalLimit;
+        const nextLimit = Number.isFinite(next.contextLimit)
+          ? next.contextLimit
+          : (Number.isFinite(fallbackLimit) ? fallbackLimit : 2);
         const nextRemaining = Number.isFinite(next.remainingForContext)
           ? next.remainingForContext
           : nextLimit;
@@ -201,7 +208,9 @@ export default function AiTutor({ open, onClose, context, status }) {
 
   const quickPrompts =
     context?.kind === 'question' ? QUICK_PROMPTS_QUESTION : QUICK_PROMPTS_GENERAL;
-  const quotaLabel = context?.kind === 'question' ? 'cette erreur' : 'ce QCM';
+  const quotaLabel = context?.kind === 'question'
+    ? 'cette erreur'
+    : "aujourd'hui, toutes matières";
   const resetLabel = resetAt && Number.isFinite(Date.parse(resetAt))
     ? new Date(resetAt).toLocaleString('fr-FR', {
         day: '2-digit',
@@ -227,7 +236,7 @@ export default function AiTutor({ open, onClose, context, status }) {
       {/* Panneau */}
       <aside
         role="dialog"
-        aria-label="Tuteur IA"
+        aria-label="Aide à la révision"
         className={`absolute right-0 top-0 h-full w-full max-w-md bg-slate-900 border-l border-slate-800 shadow-2xl flex flex-col transition-transform duration-300 ${
           open ? 'translate-x-0' : 'translate-x-full'
         }`}
@@ -238,7 +247,7 @@ export default function AiTutor({ open, onClose, context, status }) {
             <Icon name="sparkles" size={18} />
           </span>
           <div className="flex-1 min-w-0">
-            <h2 className="text-sm font-bold text-white leading-tight">Tuteur IA</h2>
+            <h2 className="text-sm font-bold text-white leading-tight">Aide à la révision</h2>
             <p className="text-[11px] text-slate-400">Assistant pédagogique QCM App</p>
           </div>
           {!unavailable && remaining !== null && (
@@ -255,7 +264,7 @@ export default function AiTutor({ open, onClose, context, status }) {
           )}
           <button
             onClick={onClose}
-            aria-label="Fermer le tuteur IA"
+            aria-label="Fermer l'aide à la révision"
             className="w-8 h-8 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 flex items-center justify-center transition"
           >
             <Icon name="close" size={18} />
@@ -294,7 +303,7 @@ export default function AiTutor({ open, onClose, context, status }) {
           {unavailable && (
             <div className="flex items-start gap-2 bg-slate-800/60 border border-slate-700 text-slate-300 text-xs rounded-xl px-3.5 py-3">
               <Icon name="info" size={15} className="mt-0.5" />
-              <p>L'assistant IA n'est pas encore activé sur cette plateforme.</p>
+              <p>L'aide à la révision n'est pas encore activée sur cette plateforme.</p>
             </div>
           )}
 
@@ -304,8 +313,9 @@ export default function AiTutor({ open, onClose, context, status }) {
                 <Icon name="lightbulb" size={22} />
               </div>
               <p className="text-xs text-slate-400 max-w-[16rem] mx-auto leading-relaxed">
-                Posez vos questions sur la question ci-dessus, ou choisissez une suggestion
-                pour démarrer la discussion.
+                {context?.kind === 'question'
+                  ? 'Posez vos questions sur cette erreur, ou choisissez une suggestion pour démarrer.'
+                  : 'Posez jusqu\'à 5 questions par jour sur n\'importe quelle matière scolaire, avec des exemples et des explications détaillées.'}
               </p>
               <div className="flex flex-col gap-2 items-center">
                 {quickPrompts.map((p) => (

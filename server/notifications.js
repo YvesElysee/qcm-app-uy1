@@ -87,7 +87,8 @@ export function notifyQuizAvailable(quiz) {
       message: launch
         ? `Le QCM ${title} de ${filiere} (${niveau}) est programmé pour le ${launch}.`
         : `Le QCM ${title} de ${filiere} (${niveau}) est disponible dans votre espace.`,
-      link: '/dashboard',
+      // Lien profond : le tableau de bord met en évidence le test concerné.
+      link: `/dashboard?quiz=${encodeURIComponent(quiz.id)}`,
       entityKey
     });
     if (ok) created += 1;

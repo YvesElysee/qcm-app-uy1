@@ -12,7 +12,8 @@ import {
   canStudentAccessQuiz,
   normalizeFaculte,
   facultyOfFiliere,
-  studentFaculte
+  studentFaculte,
+  quizFaculte
 } from '../access.js';
 import { notifyQuizAvailable } from '../notifications.js';
 import { approveRequestsForQuiz } from './quizRequests.js';
@@ -42,7 +43,7 @@ function publicQuestion(q) {
  * Sans cette ligne, l'étudiant ne voit pas la matière sur son tableau de bord
  * et l'épreuve reste introuvable même lorsqu'elle est programmée.
  */
-function ensureUeFromQuiz({ code, label, filiere, niveau, faculte }) {
+function ensureUeFromQuiz({ code, label, filiere, niveau, faculte, semestre }) {
   const cleanCode = String(code || '').trim().toUpperCase();
   if (!cleanCode) return;
   const existing = db.prepare('SELECT * FROM ues WHERE id = ?').get(cleanCode);
@@ -50,17 +51,20 @@ function ensureUeFromQuiz({ code, label, filiere, niveau, faculte }) {
   const cleanFiliere = filiere || existing?.filiere || null;
   const cleanNiveau = niveau || existing?.niveau || null;
   const cleanFaculte = normalizeFaculte(faculte || existing?.faculte || facultyOfFiliere(cleanFiliere));
+  const cleanSemestre = ['1', '2'].includes(String(semestre || '').trim())
+    ? String(semestre).trim()
+    : (existing?.semestre || '');
   // Filière et niveau sont indispensables au filtrage côté étudiant
   if (!cleanFiliere || !cleanNiveau) return;
 
   db.prepare(`
-    INSERT INTO ues (id, code, label, filiere, niveau, faculte)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO ues (id, code, label, filiere, niveau, faculte, semestre)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       code = excluded.code, label = excluded.label,
       filiere = excluded.filiere, niveau = excluded.niveau,
-      faculte = excluded.faculte
-  `).run(cleanCode, cleanCode, cleanLabel, cleanFiliere, cleanNiveau, cleanFaculte);
+      faculte = excluded.faculte, semestre = excluded.semestre
+  `).run(cleanCode, cleanCode, cleanLabel, cleanFiliere, cleanNiveau, cleanFaculte, cleanSemestre);
 }
 
 /**
@@ -255,7 +259,8 @@ function upsertQuiz(id, body = {}) {
     label: body.ueLabel ?? body.label,
     filiere: merged.filiere,
     niveau: merged.niveau,
-    faculte: merged.faculte
+    faculte: merged.faculte,
+    semestre: merged.semestre
   });
 
   const quiz = db.prepare('SELECT * FROM quizzes WHERE id = ?').get(id);
@@ -299,9 +304,121 @@ router.post('/:id', requireAdmin, (req, res) => {
 });
 
 /**
+ * Duplique un test complet (métadonnées + questions).
+ *
+ * Le nouveau test reçoit un intitulé distinct (« … (copie) ») et donc un
+ * identifiant propre, ce qui permet de préparer un second sujet sans
+ * toucher au test d'origine ni aux copies déjà déposées.
+ */
+router.post('/:id/duplicate', requireAdmin, (req, res) => {
+  const sourceId = req.params.id;
+  const source = db.prepare('SELECT * FROM quizzes WHERE id = ?').get(sourceId);
+  if (!source) {
+    return res.status(404).json({ error: 'Quiz introuvable.' });
+  }
+
+  const ue = String(source.ue || source.id).trim().toUpperCase();
+  const requestedTitle = String(req.body?.title || '').trim();
+  // Si le test source n'a pas de nom propre (titre = code UE), la copie
+  // s'appelle simplement « Copie » : l'identifiant reste lisible
+  // (INF232-COPIE) au lieu de répéter le code (INF232-INF232-COPIE).
+  const sourceTitle = String(source.title || '').trim();
+  const baseTitle = requestedTitle
+    || (sourceTitle && sourceTitle.toUpperCase() !== ue
+      ? `${sourceTitle} (copie)`
+      : 'Copie');
+
+  // On cherche un identifiant libre : « … (copie) », puis « … (copie 2) »…
+  const quizIdExists = db.prepare('SELECT 1 FROM quizzes WHERE id = ?');
+  let title = baseTitle;
+  let newId = quizIdFor(ue, title);
+  let suffix = 2;
+  while (quizIdExists.get(newId)) {
+    title = `${baseTitle} ${suffix}`;
+    newId = quizIdFor(ue, title);
+    suffix += 1;
+    if (suffix > 100) {
+      return res.status(409).json({ error: 'Impossible de générer un identifiant unique pour la copie.' });
+    }
+  }
+
+  const now = Date.now();
+  const launchTime = req.body?.launchTime != null
+    ? Number(req.body.launchTime)
+    : (source.launchTime ? source.launchTime + 7 * 24 * 60 * 60 * 1000 : null);
+  const endTime = req.body?.endTime != null
+    ? Number(req.body.endTime)
+    : (source.endTime ? source.endTime + 7 * 24 * 60 * 60 * 1000 : null);
+
+  const copy = db.transaction(() => {
+    db.prepare(`
+      INSERT INTO quizzes
+        (id, ue, title, filiere, niveau, faculte, semestre, questionCount,
+         timePerQuestion, drawCount, launchTime, endTime, updatedAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      newId,
+      ue,
+      title,
+      source.filiere || null,
+      source.niveau || null,
+      normalizeFaculte(quizFaculte(source)),
+      source.semestre || null,
+      source.questionCount || 0,
+      source.timePerQuestion || 60,
+      source.drawCount || 0,
+      launchTime,
+      endTime,
+      new Date(now).toISOString()
+    );
+
+    const questions = db.prepare(
+      'SELECT * FROM questions WHERE quizId = ? ORDER BY position ASC, id ASC'
+    ).all(sourceId);
+    const insert = db.prepare(`
+      INSERT INTO questions
+        (quizId, Question, OptA, OptB, OptC, OptD, ReponseCorrecte,
+         explication, tags, difficulte, position)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    questions.forEach((q, i) => {
+      insert.run(
+        newId,
+        q.Question,
+        q.OptA || '',
+        q.OptB || '',
+        q.OptC || '',
+        q.OptD || '',
+        q.ReponseCorrecte,
+        q.explication || '',
+        q.tags || '',
+        q.difficulte || 'moyenne',
+        i
+      );
+    });
+
+    return db.prepare('SELECT * FROM quizzes WHERE id = ?').get(newId);
+  })();
+
+  ensureUeFromQuiz({
+    code: ue,
+    label: source.title,
+    filiere: copy.filiere,
+    niveau: copy.niveau,
+    faculte: copy.faculte,
+    semestre: copy.semestre
+  });
+
+  res.status(201).json({ success: true, quiz: copy, copiedQuestions: copy.questionCount || 0 });
+});
+
+/**
  * Suppression d'un QCM.
- * Les questions sont supprimées en cascade (FK) et les sessions actives nettoyées.
- * Les résultats déjà enregistrés sont conservés (historique des notes).
+ *
+ * Les questions et sessions actives sont supprimées ; les copies déjà
+ * enregistrées sont conservées (historique des notes). Pour éviter une
+ * suppression accidentelle, la route refuse d'abord la suppression si des
+ * copies existent : le client doit confirmer avec `?force=1`.
  */
 router.delete('/:id', requireAdmin, (req, res) => {
   const id = req.params.id;
@@ -309,10 +426,23 @@ router.delete('/:id', requireAdmin, (req, res) => {
   if (!quiz) {
     return res.status(404).json({ error: 'Quiz introuvable.' });
   }
+
+  const resultsCount = db.prepare(
+    'SELECT COUNT(*) AS c FROM results WHERE quizId = ?'
+  ).get(id).c;
+
+  if (resultsCount > 0 && req.query.force !== '1') {
+    return res.status(409).json({
+      error: `Ce test possède ${resultsCount} copie(s) enregistrée(s). Confirmez la suppression.`,
+      resultsCount,
+      requiresConfirmation: true
+    });
+  }
+
   db.prepare('DELETE FROM questions WHERE quizId = ?').run(id);   // cascade si FK active
   db.prepare('DELETE FROM quiz_sessions WHERE quizId = ?').run(id);
   db.prepare('DELETE FROM quizzes WHERE id = ?').run(id);
-  res.json({ success: true });
+  res.json({ success: true, resultsCount });
 });
 
 /**
@@ -398,7 +528,8 @@ router.post('/:id/questions', requireAdmin, (req, res) => {
     label: ueLabel ?? label,
     filiere: merged.filiere,
     niveau: merged.niveau,
-    faculte: merged.faculte
+    faculte: merged.faculte,
+    semestre: merged.semestre
   });
 
   const quiz = db.prepare('SELECT * FROM quizzes WHERE id = ?').get(id);

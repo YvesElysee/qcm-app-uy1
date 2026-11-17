@@ -195,6 +195,93 @@ router.post('/', requireStudent, (req, res) => {
 });
 
 /**
+ * Entraînement libre : corrige une série de questions sans enregistrer de
+ * copie (utilisé par « Refaire mes erreurs » depuis la correction).
+ * Le quota, le classement et l'historique ne sont jamais impactés.
+ */
+router.post('/training', requireStudent, (req, res) => {
+  const { ue, quizId, answers, questionIds } = req.body || {};
+
+  if ((!ue && !quizId) || !Array.isArray(answers)) {
+    return res.status(400).json({ error: 'Données d\u2019entraînement incomplètes.' });
+  }
+
+  const reference = String(quizId || ue);
+  let quiz = db.prepare('SELECT * FROM quizzes WHERE id = ?').get(reference);
+  if (!quiz && ue) {
+    quiz = db.prepare(`
+      SELECT * FROM quizzes WHERE ue = ?
+      ORDER BY COALESCE(endTime, launchTime, 0) DESC, id DESC LIMIT 1
+    `).get(String(ue).trim().toUpperCase());
+  }
+  if (!quiz) {
+    return res.status(404).json({ error: 'Épreuve introuvable.' });
+  }
+
+  if (!canStudentAccessQuiz(req.user, quiz)) {
+    return res.status(403).json({
+      error: "Vous ne pouvez pas vous entraîner sur une épreuve d'une autre filière ou d'un autre niveau."
+    });
+  }
+
+  let quizQuestions = db.prepare(
+    'SELECT * FROM questions WHERE quizId = ? ORDER BY position ASC, id ASC'
+  ).all(quiz.id);
+
+  if (Array.isArray(questionIds) && questionIds.length > 0) {
+    const wanted = new Set(questionIds.map(Number).filter(Number.isFinite));
+    quizQuestions = quizQuestions.filter(q => wanted.has(Number(q.id)));
+  }
+
+  if (quizQuestions.length === 0) {
+    return res.status(400).json({ error: 'Aucune question pour cet entraînement.' });
+  }
+
+  const answerByQuestion = new Map();
+  answers.forEach((a) => {
+    const id = Number(a?.questionId);
+    if (Number.isFinite(id)) answerByQuestion.set(id, a);
+  });
+
+  const corrected = quizQuestions.map((q, index) => {
+    const submitted = answerByQuestion.get(Number(q.id));
+    const fallback = answers[index];
+    const rawSelected = typeof submitted === 'string'
+      ? submitted
+      : (submitted?.selected ?? (typeof fallback === 'string' ? fallback : fallback?.selected) ?? '');
+    const selected = String(rawSelected || '').trim();
+    const correct = normalizeCorrect(q);
+    const isOk = answerMatches(selected, q, correct);
+
+    return {
+      questionId: q.id,
+      question: q.Question,
+      options: optionsOf(q),
+      selected: selected || null,
+      correct,
+      isOk,
+      explication: q.explication || '',
+      tags: q.tags || '',
+      difficulte: q.difficulte || 'moyenne'
+    };
+  });
+
+  const score = corrected.reduce((acc, a) => acc + (a.isOk ? 1 : 0), 0);
+  const total = corrected.length;
+
+  res.json({
+    success: true,
+    training: true,
+    quizId: quiz.id,
+    quizTitle: quiz.title || quiz.ue || quiz.id,
+    score,
+    total,
+    note: total ? Number(((score / total) * 20).toFixed(2)) : 0,
+    answers: corrected
+  });
+});
+
+/**
  * Classement d'une session de QCM, limité à la salle de l'étudiant connecté
  * (faculté + filière + niveau). Les réponses détaillées ne sont jamais
  * exposées ici.

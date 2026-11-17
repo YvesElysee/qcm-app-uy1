@@ -11,7 +11,6 @@ import StudentResources from './components/StudentResources';
 import ExerciseGenerator from './components/ExerciseGenerator';
 import Navbar from './components/layout/Navbar';
 import Footer from './components/layout/Footer';
-import AiLauncher from './components/ai/AiLauncher';
 import ScrollToTop from './components/ScrollToTop';
 import Home from './components/pages/Home';
 import NotFound from './components/pages/NotFound';
@@ -60,7 +59,6 @@ function Layout({ children }) {
       <Navbar />
       <div className="flex-1 flex flex-col">{children}</div>
       <Footer />
-      <AiLauncher />
     </div>
   );
 }

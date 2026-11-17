@@ -262,6 +262,12 @@ const ICONS = {
     </>
   ),
   play: <polygon points="5 3 19 12 5 21 5 3" />,
+  copy: (
+    <>
+      <rect x="9" y="9" width="13" height="13" rx="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </>
+  ),
   trophy: (
     <>
       <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" />
