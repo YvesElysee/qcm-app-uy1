@@ -199,7 +199,10 @@ function resolveCorrectValue(raw, options) {
     return options[label] || '';
   }
 
-  const labeled = value.toLowerCase().match(/^(option|choix|opt|reponse|answer)\s+([a-d]|[1-4])$/);
+  // « OptD », « Option D », « choix2 », « RéponseC », « Answer 4 »…
+  // Les fichiers générés par IA utilisent souvent le nom de colonne (OptD)
+  // au lieu de la simple lettre : accepter les deux écritures.
+  const labeled = value.toLowerCase().match(/^(option|choix|opt|reponse|answer)\s*([a-d]|[1-4])$/);
   if (labeled) {
     const token = labeled[2];
     const label = /[a-d]/.test(token) ? token.toUpperCase() : LABELS[Number(token) - 1];
