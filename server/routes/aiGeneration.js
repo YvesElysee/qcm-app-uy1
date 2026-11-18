@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { db, DATA_DIR } from '../db.js';
 import { requireAdmin } from '../auth.js';
-import { getConfig, generateReply, logAiRequest } from './ai.js';
+import { getConfig, generateReply, logAiRequest, configuredKeyCount } from './ai.js';
 import {
   normalizeFaculte,
   facultyOfFiliere
@@ -211,7 +211,7 @@ router.delete('/documents/:id', requireAdmin, (req, res) => {
 // ── Génération de questions ──────────────────────────────────────────
 router.post('/generate', requireAdmin, async (req, res) => {
   const cfg = getConfig();
-  if (cfg.groqKeys.length + cfg.geminiKeys.length === 0) {
+  if (configuredKeyCount(cfg) === 0) {
     return res.status(503).json({
       error: "Aucune clé IA n'est configurée sur le serveur. Ajoutez GROQ_API_KEYS ou GEMINI_API_KEYS."
     });

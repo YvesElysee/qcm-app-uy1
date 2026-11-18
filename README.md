@@ -69,12 +69,13 @@ Conçue avec **React 19 + Vite 8 + Tailwind CSS** et un **backend Node.js / Expr
 - Côté Administrateur : section *Messages* permettant de filtrer par catégorie/filière/statut, **répondre depuis l'application** (la réponse est enregistrée, notifiée à l'étudiant et envoyée par email si SMTP est configuré), modifier une réponse, mettre à jour le statut, répondre par email externe (`mailto:`) ou supprimer.
 
 ### 6. Panneau Administrateur Réorganisé & Complet
-- **Interface repensée** : barre latérale sur desktop et onglets défilants sur mobile, **seize sections** claires · *Vue d'ensemble, Évaluations, Analytique, Tuteur IA, Génération QCM IA, Unités d'enseignement, Facultés & filières, Demandes de filière, Demandes de QCM, Étudiants, Résultats, Classements, Ressources, Messages, Sauvegardes, Paramètres SMTP*.
+- **Interface repensée** : barre latérale sur desktop et onglets défilants sur mobile, **dix-sept sections** claires · *Vue d'ensemble, Évaluations, Mode test, Analytique, Tuteur IA, Génération QCM IA, Unités d'enseignement, Facultés & filières, Demandes de filière, Demandes de QCM, Étudiants, Résultats, Classements, Ressources, Messages, Sauvegardes, Paramètres SMTP*.
 - **Portée faculté / filière / niveau** : chaque écran de données (étudiants, résultats, analytique, classements, ressources, évaluations) peut être filtré par faculté, filière et niveau. Les listes de filières sont toujours dérivées de la faculté sélectionnée.
 - **Vue d'ensemble** : statistiques clés (évaluations, à venir, étudiants inscrits, messages en attente) et listes des prochaines et dernières évaluations.
 - **Évaluations** :
   - Programmation (faculté héritée de l'UE, filière, niveau, semestre, minuterie, **nombre de questions tirées par étudiant**, ouverture/clôture) et import CSV regroupés côte à côte.
   - Liste complète **répartie par filière + niveau**, chaque espace contenant ses UE et les tests programmés pour chacune d'elles, avec filtre par niveau. Actions conservées : inspecter les questions, consulter les résultats, exporter CSV / procès-verbal PDF, supprimer l'évaluation (**les résultats déjà enregistrés sont conservés**).
+- **Mode test** : une section dédiée permet de parcourir **toutes les facultés, filières, niveaux, UE et tests** et de jouer n'importe quelle épreuve comme un étudiant (tirage et minuteur réels, questions servies **sans correction**). La correction s'affiche à la fin, mais **aucune copie, note, classement ou carte de révision n'est enregistré** : les routes `/api/admin/preview/*` ne touchent pas à la base de résultats. Un bouton *Tester* est aussi disponible dans chaque ligne d'évaluation.
 - **Analytique** : tableau de bord pédagogique avec les questions les plus ratées, la réussite moyenne par UE, l'évolution des notes dans le temps et les taux d'erreur globaux, filtrable par parcours.
 - **Résultats** : consultation des notes par évaluation (participants, moyenne, meilleure note) avec exports CSV / PDF, plus un **export complet** de toutes les copies avec le détail de chaque réponse.
 - **Sauvegardes** : création, téléchargement et suppression des copies de sécurité SQLite (sauvegarde automatique planifiée côté serveur).
@@ -99,7 +100,8 @@ Conçue avec **React 19 + Vite 8 + Tailwind CSS** et un **backend Node.js / Expr
   - Bouton *Comprendre cette erreur avec l'IA* sur chaque question ratée (la question, les options, la réponse choisie et la bonne réponse alimentent le contexte).
   - Conversations guidées : le tuteur explique **pourquoi** la réponse est incorrecte au lieu de donner la lettre de la solution.
 - **Historique persistant** : la conversation est conservée dans le navigateur par étudiant et par contexte (question ou QCM). Un rafraîchissement du site ne la fait plus disparaître.
-- **Aucune clé côté navigateur** : les appels passent par le proxy serveur `/api/ai/tutor`. Les clés `GROQ_API_KEYS` / `GEMINI_API_KEYS` restent dans le `.env` du serveur, avec **rotation automatique** et **repli d'un fournisseur à l'autre** en cas d'erreur ou de quota atteint.
+- **Aucune clé côté navigateur** : les appels passent par le proxy serveur `/api/ai/tutor`. Les clés `GROQ_API_KEYS` (ou `GROQ_API_KEYS_EXTRA`), `GROK_API_KEYS` / `XAI_API_KEYS` et `GEMINI_API_KEYS` restent dans le `.env` du serveur, avec **rotation automatique** et **repli d'un fournisseur à l'autre** en cas d'erreur ou de quota atteint. Trois clés Grok supplémentaires peuvent donc être ajoutées sans bloquer le site.
+- **Réponses complètes et erreurs actionnables** : le serveur vérifie `finish_reason` / `finishReason`, poursuit le texte tronqué ou relance la génération JSON avec un budget plus large, et borne chaque tentative (`AI_REQUEST_TIMEOUT_MS`) ainsi que le total (`AI_TOTAL_TIMEOUT_MS`). Si le délai est dépassé, l'étudiant voit « Veuillez reformuler votre prompt et réessayer » ; si tous les fournisseurs échouent, « Revenez plus tard ». Le quota n'est pas consommé quand tous les essais échouent, et un bouton **Réessayer** relance exactement la dernière question.
 - L'assistant s'identifie uniquement comme **QCM App** : il ne révèle jamais le fournisseur, le modèle ou la technologie sous-jacente.
 - **Réponse lisible** : le tuteur rend le Markdown (gras, listes, tableaux) et les formules mathématiques LaTeX (`\(...\)`, `\[...\]`) avec **KaTeX**. L'étudiant ne voit jamais les astérisques ni les délimiteurs bruts.
 - **Réponse réellement cochée** : le contexte transmis contient le **texte exact de la case cochée** par l'étudiant (y compris pour les anciennes copies qui ne stockaient que la lettre A/B/C/D). Le tuteur ne prétend plus qu'aucune réponse n'a été donnée. Un message explicite « aucune case cochée » s'affiche uniquement lorsque c'est vrai.
@@ -121,12 +123,19 @@ Conçue avec **React 19 + Vite 8 + Tailwind CSS** et un **backend Node.js / Expr
 - **Téléchargement contrôlé** : les fichiers sont stockés hors du dossier public et servis par `GET /api/resources/:id/download`, qui vérifie la portée avant d'envoyer le fichier.
 - **Modération admin** : publication de ressources officielles pour n'importe quel parcours, filtrage par faculté / filière / niveau / type, téléchargement et suppression.
 
-### 9 bis. Générateur d'exercices de Mathématiques (L1 → M1)
-- **Accès ciblé** : fonctionnalité réservée aux étudiants de la filière **Mathématiques**, niveaux **L1, L2, L3 et M1**. Le contrôle est appliqué côté serveur (`/api/exercises/*`) et l'interface affiche un message explicite aux autres parcours.
+### 9 bis. Parcours Tuteur IA & générateur d'épreuves (maths, physique, L3+)
+- **Parcours clarifiés** : le guide de première utilisation, la navbar et le tableau de bord affichent le message adapté à chaque étudiant :
+  - *Mathématiques* : les évaluations ne se passent pas en QCM ; le Tuteur IA aide à préparer les sujets, et l'administration peut aussi programmer des QCM.
+  - *Physique* : même logique, avec des sujets et exercices produits à partir des documents de l'étudiant.
+  - *L3, M1 et M2 (toutes filières)* : les QCM restent un **mode d'entraînement** ; les épreuves sont à rédiger avec l'aide du Tuteur IA.
+  - Dans tous les cas, **l'espace QCM existant reste accessible** pour s'entraîner.
+- **Accès élargi** : générateur ouvert aux filières **Mathématiques** et **Physique** de L1 à M2, et à **toutes les filières à partir de la L3**. Le contrôle est appliqué côté serveur (`/api/exercises/*`).
+- **Épreuves types** : l'IA produit une épreuve structurée en parties progressives, **strictement fondée sur les documents déposés**, avec un corrigé détaillé. Deux documents maximum par jour peuvent servir à une épreuve (quota affiché dans l'interface et vérifié côté serveur).
+- **Dix invites de révision** : après la génération (en physique, en L3+ ou pour une épreuve type), le serveur produit et persiste 10 invites courtes sur le sujet. Elles sont affichées dans le générateur et dans l'historique ; un clic ouvre le Tuteur IA avec l'invite déjà écrite, prête à envoyer.
 - **Documents personnels** : l'étudiant dépose ses propres cours, TD ou annales (PDF, Word, PowerPoint, Excel, OpenDocument, texte, archive… 25 Mo max). Chaque document est rattaché à son compte et invisible des autres étudiants.
-- **Formats d'exercices variés** : QCM à 4 options, QRO (question à réponse ouverte), exercice de calcul avec étapes, vrai/faux justifié, série mixte ou exercice libre (démonstration, modélisation).
+- **Formats variés** : QCM à 4 options, QRO, exercice de calcul avec étapes, vrai/faux justifié, série mixte, épreuve type corrigée ou exercice libre (démonstration, modélisation).
 - **Correction pédagogique** : chaque exercice généré comporte une réponse ou un corrigé modèle, les étapes clés et une explication. L'étudiant peut masquer ou afficher la correction.
-- **Historique personnel** : les générations récentes sont conservées et peuvent être rouvertes ou supprimées. Le budget mensuel de tokens IA est partagé avec le générateur de QCM de l'administration.
+- **Historique personnel** : les générations récentes et leurs invites de révision sont conservées et peuvent être rouvertes ou supprimées. Le budget mensuel de tokens IA est partagé avec le générateur de QCM de l'administration.
 
 ### 10. Évaluations sécurisées & apprentissage adaptatif
 - **Correction 100 % côté serveur** : l'API publique ne renvoie jamais `ReponseCorrecte`. L'étudiant n'envoie que ses choix ; le serveur calcule le score, la note et la correction détaillée, puis les restitue après soumission. L'inspecteur admin conserve l'accès complet via son jeton.
@@ -343,7 +352,7 @@ npm start
 │   │   ├── Login.jsx           # Accès sécurisé Administrateur
 │   │   ├── NotificationBell.jsx # Cloche de notifications (compteur non-lues, liste, lecture)
 │   │   ├── ReviewSession.jsx   # Relecture détaillée d'une copie d'examen (+ Tuteur IA)
-│   │   ├── ExerciseGenerator.jsx # Générateur d'exercices Mathématiques (L1 → M1)
+│   │   ├── ExerciseGenerator.jsx # Générateur d'épreuves (maths, physique, L3+)
 │   │   ├── Schedule.jsx        # Emploi du temps public & étudiant (portée verrouillée si connecté)
 │   │   ├── StudentAuth.jsx     # Connexion, Inscription catalogue & Récupération MDP
 │   │   ├── StudentDashboard.jsx # Tableau de bord étudiant (parcours verrouillé, alertes, rattrapages)

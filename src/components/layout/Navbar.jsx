@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { getCurrentUser, logoutStudent } from '../../services/authService';
 import StudentProfile from '../StudentProfile';
@@ -6,6 +6,7 @@ import NotificationBell from '../NotificationBell';
 import OnboardingGuide from '../OnboardingGuide';
 import AiTutor from '../ai/AiTutor';
 import Icon from '../ui/icons.jsx';
+import { pathwayFor } from '../../utils/studentProfile.js';
 
 const WHATSAPP_CHANNEL = 'https://whatsapp.com/channel/0029Vb96OnjLCoXA4RDPES2n';
 
@@ -13,7 +14,7 @@ const WHATSAPP_CHANNEL = 'https://whatsapp.com/channel/0029Vb96OnjLCoXA4RDPES2n'
  * Clé de suivi du mode d'emploi : le guide ne s'ouvre automatiquement qu'une
  * seule fois par étudiant (et par navigateur).
  */
-const guideSeenKey = (identity) => `qcm_guide_seen_v1:${identity}`;
+const guideSeenKey = (identity) => `qcm_guide_seen_v2:${identity}`;
 
 /**
  * Barre de navigation partagée par toutes les pages publiques/étudiantes.
@@ -30,6 +31,7 @@ export default function Navbar() {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
+  const [aiInitialMessage, setAiInitialMessage] = useState('');
   const [guideOpen, setGuideOpen] = useState(false);
   const userMenuRef = useRef(null);
   const identity = user?.id || user?.email || '';
@@ -93,17 +95,29 @@ export default function Navbar() {
     setShowProfile(true);
   };
 
-  const openAi = () => {
+  const openAi = useCallback((message = '') => {
     setUserMenuOpen(false);
     setMobileOpen(false);
+    setAiInitialMessage(String(message || ''));
     setAiOpen(true);
-  };
+  }, [setUserMenuOpen, setMobileOpen, setAiInitialMessage, setAiOpen]);
 
   const openGuide = () => {
     setUserMenuOpen(false);
     setMobileOpen(false);
     setGuideOpen(true);
   };
+
+  // Les pages (tableau de bord, générateur) peuvent ouvrir le tuteur global.
+  // Une page peut pré-remplir le champ avec une invite de révision.
+  useEffect(() => {
+    const onOpenAi = (event) => openAi(event?.detail?.message || '');
+    window.addEventListener('qcm:open-ai', onOpenAi);
+    return () => window.removeEventListener('qcm:open-ai', onOpenAi);
+  }, [openAi]);
+
+  // Objet stable : évite de reinterroger le quota à chaque rendu de la navbar.
+  const aiContext = useMemo(() => ({ key: 'general_navbar', kind: 'general', quizId: '' }), []);
 
   const closeGuide = () => {
     setGuideOpen(false);
@@ -116,12 +130,10 @@ export default function Navbar() {
   };
 
   // Liens principaux (Contact et Mon espace n'ont de sens que connecté)
-  const mathFiliere = String(user?.filiere || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
-  const canGenerateExercises = !!user
-    && /math/i.test(mathFiliere)
-    && ['L1', 'L2', 'L3', 'M1'].includes(String(user?.niveau || '').trim().toUpperCase());
+  const pathway = pathwayFor(user);
+  const canGenerateExercises = !!user && (
+    pathway.maths || pathway.physics || pathway.l3plus
+  );
 
   const links = [
     { to: '/', label: 'Accueil', end: true },
@@ -266,6 +278,11 @@ export default function Navbar() {
                       <p className="text-[11px] text-blue-300 mt-1 font-bold">
                         {user.filiere} • {user.niveau}
                       </p>
+                      {pathway.highlighted && (
+                        <p className="text-[10px] text-indigo-300 mt-1.5 leading-relaxed">
+                          {pathway.title} · utilisez le Tuteur IA pour produire vos sujets.
+                        </p>
+                      )}
                     </div>
                     <div className="p-1.5">
                       <NavLink
@@ -415,6 +432,11 @@ export default function Navbar() {
                 <p className="text-[11px] text-blue-300 mt-2 font-bold">
                   {user.filiere} • {user.niveau}
                 </p>
+                {pathway.highlighted && (
+                  <p className="text-[10px] text-indigo-300 mt-1.5 leading-relaxed">
+                    {pathway.messages[0]}
+                  </p>
+                )}
               </div>
             )}
 
@@ -546,9 +568,11 @@ export default function Navbar() {
       {/* ── Tuteur IA global (accès depuis la navbar) ── */}
       {user && (
         <AiTutor
+          key={`general:${aiInitialMessage}`}
           open={aiOpen}
           onClose={() => setAiOpen(false)}
-          context={{ key: 'general_navbar', kind: 'general', quizId: '' }}
+          context={aiContext}
+          initialMessage={aiInitialMessage}
         />
       )}
 

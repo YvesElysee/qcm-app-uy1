@@ -5,6 +5,7 @@ import { getCurrentUser } from '../services/authService';
 import ContactAdmin from './ContactAdmin';
 import usePageTitle from '../hooks/usePageTitle';
 import Icon from './ui/icons.jsx';
+import { pathwayFor } from '../utils/studentProfile.js';
 
 const textCollator = new Intl.Collator('fr', { numeric: true, sensitivity: 'base' });
 const compareText = (a, b) => textCollator.compare(String(a || ''), String(b || ''));
@@ -44,11 +45,8 @@ export default function StudentDashboard() {
   const registeredNiveau = currentUser?.niveau || 'L1';
   const faculte = currentUser?.faculte || '';
   const selectedNiveau = registeredNiveau;
-  const isMathsFiliere = /math/i.test(
-    String(filiere).normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-  );
-  const canGenerateExercises =
-    isMathsFiliere && ['L1', 'L2', 'L3', 'M1'].includes(String(registeredNiveau || '').trim().toUpperCase());
+  const pathway = pathwayFor(currentUser);
+  const canGenerateExercises = pathway.maths || pathway.physics || pathway.l3plus;
 
   // Données
   const [availableUes, setAvailableUes] = useState([]);
@@ -417,6 +415,48 @@ export default function StudentDashboard() {
           </div>
         </div>
 
+        {/* ── Parcours Tuteur IA (maths, physique, L3 et au-delà) ── */}
+        {pathway.highlighted && (
+          <div className="rounded-3xl border border-indigo-700/50 bg-gradient-to-r from-indigo-950/70 via-slate-900 to-blue-950/60 p-5 sm:p-6 shadow-lg">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap mb-2">
+                  <span className="w-9 h-9 rounded-xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-300 flex items-center justify-center">
+                    <Icon name="sparkles" size={18} />
+                  </span>
+                  <h3 className="text-sm font-black text-white">{pathway.title}</h3>
+                </div>
+                <div className="space-y-1.5">
+                  {pathway.messages.map((message) => (
+                    <p key={message} className="text-xs text-slate-300 leading-relaxed">{message}</p>
+                  ))}
+                </div>
+                <p className="text-[11px] text-slate-400 mt-2">
+                  Vos QCM restent disponibles ci-dessous pour vous entraîner. Le Tuteur IA et le
+                  générateur d'épreuves vous aident à produire vos sujets.
+                </p>
+              </div>
+              <div className="flex flex-col sm:flex-row lg:flex-col gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => window.dispatchEvent(new CustomEvent('qcm:open-ai'))}
+                  className="inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-black px-4 py-3 rounded-xl transition shadow-md shadow-blue-600/25"
+                >
+                  <Icon name="sparkles" size={15} />
+                  Ouvrir le Tuteur IA
+                </button>
+                <Link
+                  to="/exercises"
+                  className="inline-flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-black px-4 py-3 rounded-xl border border-slate-700 transition"
+                >
+                  <Icon name="document" size={15} />
+                  Générer une épreuve type
+                </Link>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ── Division par semestre ── */}
         <div className="bg-slate-800/50 border border-slate-700/60 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
@@ -521,14 +561,14 @@ export default function StudentDashboard() {
               </span>
               <div className="min-w-0 flex-1">
                 <h3 className="text-sm font-black text-white flex items-center gap-2 flex-wrap">
-                  Générateur d'exercices de Mathématiques
+                  Générateur d'épreuves et d'exercices
                   <span className="text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2 py-0.5 rounded-full">
-                    Nouveau
+                    {pathway.physics ? 'Physique' : pathway.l3plus && !pathway.maths ? 'L3 et +' : 'Mathématiques'}
                   </span>
                 </h3>
                 <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                  Déposez vos cours et générez des QCM, QRO ou exercices de calcul corrigés,
-                  adaptés à votre niveau. Réservé aux étudiants de Mathématiques (L1 → M1).
+                  Déposez vos cours et générez une épreuve type corrigée, des QCM, QRO ou exercices
+                  de calcul, adaptés à votre filière et à votre niveau (maths, physique, L3 et au-delà).
                 </p>
               </div>
               <Icon

@@ -3,6 +3,7 @@ import Icon from '../ui/icons.jsx';
 import AiMarkdown from './AiMarkdown.jsx';
 import { askTutor, fetchAiStatus } from '../../services/aiService.js';
 import { getCurrentUser } from '../../services/authService';
+import { pathwayFor } from '../../utils/studentProfile.js';
 
 /**
  * Drawer « Tuteur IA » · aide les étudiants à comprendre leurs mauvaises
@@ -38,6 +39,13 @@ const QUICK_PROMPTS_GENERAL = [
   'Comment organiser mes révisions efficacement ?',
   'Aide-moi à comprendre une question que j\'ai ratée.',
   'Quelles méthodes pour mieux réussir mes QCM ?'
+];
+
+const QUICK_PROMPTS_PATHWAY = [
+  'Propose-moi un sujet type d’épreuve avec son corrigé.',
+  'Génère un QCM d’entraînement sur mon chapitre avec les réponses.',
+  'Rédige un exercice de rédaction comme au partiel.',
+  'Explique-moi la méthode pour résoudre ce type de problème.'
 ];
 
 // Identifiant de message · crypto.randomUUID n'existe qu'en contexte sécurisé
@@ -84,9 +92,9 @@ function persistHistory(key, messages) {
   }
 }
 
-export default function AiTutor({ open, onClose, context, status }) {
+export default function AiTutor({ open, onClose, context, status, initialMessage = '' }) {
   const [history, setHistory] = useState([]);
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState(initialMessage || '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [aiStatus, setAiStatus] = useState(status || null);
@@ -95,7 +103,9 @@ export default function AiTutor({ open, onClose, context, status }) {
   const [quotaReached, setQuotaReached] = useState(false);
   const [resetAt, setResetAt] = useState(null);
   const scrollRef = useRef(null);
+  const [lastAttempt, setLastAttempt] = useState(null);
   const storageKey = storageKeyFor(context);
+  const pathway = pathwayFor(getCurrentUser());
 
   const unavailable = aiStatus ? aiStatus.available === false : false;
   const blocked = unavailable || quotaReached || remaining === 0;
@@ -121,6 +131,10 @@ export default function AiTutor({ open, onClose, context, status }) {
     });
     return () => { active = false; };
   }, [open, storageKey]);
+
+  // L'invite préparée par une autre page est consommée à l'initialisation du
+  // composant (la navbar le remonte quand le message change). Elle reste
+  // modifiable : rien n'est envoyé automatiquement.
 
   // Le quota est propre à la question ouverte : on interroge le serveur à
   // chaque ouverture (et à chaque changement de contexte) pour afficher le
@@ -174,6 +188,7 @@ export default function AiTutor({ open, onClose, context, status }) {
       const previous = history.map(({ role, content: c }) => ({ role, content: c }));
       const userMessage = { role: 'user', content, id: newId() };
       const withUser = [...history, userMessage];
+      setLastAttempt({ content, previous });
       setHistory(withUser);
       persistHistory(storageKey, withUser);
       setInput('');
@@ -206,8 +221,50 @@ export default function AiTutor({ open, onClose, context, status }) {
     [input, loading, blocked, history, context, storageKey]
   );
 
-  const quickPrompts =
-    context?.kind === 'question' ? QUICK_PROMPTS_QUESTION : QUICK_PROMPTS_GENERAL;
+  // Relance exactement la dernière question en conservant l'historique qui la
+  // précédait : l'étudiant ne perd pas sa place dans la conversation.
+  const retry = useCallback(() => {
+    const attempt = lastAttempt;
+    if (!attempt || loading || blocked) return;
+    setError(null);
+    setHistory(attempt.previous);
+    persistHistory(storageKey, attempt.previous);
+    // La mise à jour de `history` est asynchrone : on renvoie la question avec
+    // l'historique capturé plutôt que d'attendre le prochain rendu.
+    const content = attempt.content;
+    const previous = attempt.previous;
+    setLoading(true);
+    askTutor({ context, message: content, history: previous })
+      .then((data) => {
+        const next = [
+          ...previous,
+          { role: 'user', content, id: newId() },
+          { role: 'assistant', content: data.reply, id: newId() }
+        ];
+        setHistory(next);
+        persistHistory(storageKey, next);
+        setLastAttempt(null);
+        if (Number.isFinite(data.limit)) setLimit(data.limit);
+        if (Number.isFinite(data.remaining)) setRemaining(data.remaining);
+        if (data.resetAt) setResetAt(data.resetAt);
+        if (data.remaining === 0) setQuotaReached(true);
+      })
+      .catch((e) => {
+        if (e?.status === 429) {
+          setQuotaReached(true);
+          setRemaining(0);
+          if (e?.data?.resetAt) setResetAt(e.data.resetAt);
+        }
+        setError(e.message || 'Une erreur inattendue est survenue.');
+      })
+      .finally(() => setLoading(false));
+  }, [lastAttempt, loading, blocked, storageKey, context, setLastAttempt]);
+
+  const quickPrompts = context?.kind === 'question'
+    ? QUICK_PROMPTS_QUESTION
+    : pathway.highlighted
+      ? QUICK_PROMPTS_PATHWAY
+      : QUICK_PROMPTS_GENERAL;
   const quotaLabel = context?.kind === 'question'
     ? 'cette erreur'
     : "aujourd'hui, toutes matières";
@@ -307,6 +364,19 @@ export default function AiTutor({ open, onClose, context, status }) {
             </div>
           )}
 
+          {pathway.highlighted && (
+            <div className="bg-indigo-950/50 border border-indigo-800/60 rounded-xl px-3.5 py-3">
+              <p className="text-[10px] font-black uppercase tracking-wider text-indigo-300 mb-1.5">
+                {pathway.title}
+              </p>
+              <div className="space-y-1.5">
+                {pathway.messages.map((message) => (
+                  <p key={message} className="text-[11px] text-slate-300 leading-relaxed">{message}</p>
+                ))}
+              </div>
+            </div>
+          )}
+
           {history.length === 0 && !loading && !unavailable && (
             <div className="text-center py-8 space-y-4">
               <div className="w-12 h-12 mx-auto rounded-2xl bg-blue-600/10 border border-blue-600/30 text-blue-400 flex items-center justify-center">
@@ -376,12 +446,24 @@ export default function AiTutor({ open, onClose, context, status }) {
               <Icon name="alert" size={15} className="mt-0.5" />
               <div className="flex-1">
                 <p>{error}</p>
-                <button
-                  onClick={() => setError(null)}
-                  className="mt-1.5 text-[11px] font-semibold underline underline-offset-2 hover:text-red-200"
-                >
-                  Fermer
-                </button>
+                <div className="mt-2 flex items-center gap-3 flex-wrap">
+                  {lastAttempt && !blocked && (
+                    <button
+                      onClick={retry}
+                      disabled={loading}
+                      className="inline-flex items-center gap-1.5 bg-red-900/50 hover:bg-red-800 border border-red-700 text-red-100 text-[11px] font-black px-3 py-1.5 rounded-lg transition disabled:opacity-50"
+                    >
+                      <Icon name="refresh" size={12} />
+                      Réessayer
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setError(null)}
+                    className="text-[11px] font-semibold underline underline-offset-2 hover:text-red-200"
+                  >
+                    Fermer
+                  </button>
+                </div>
               </div>
             </div>
           )}

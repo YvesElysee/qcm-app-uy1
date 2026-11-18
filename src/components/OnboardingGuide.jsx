@@ -1,5 +1,7 @@
 import { useEffect } from 'react';
 import Icon from './ui/icons.jsx';
+import { getCurrentUser } from '../services/authService';
+import { pathwayFor } from '../utils/studentProfile.js';
 
 /**
  * Mode d'emploi de première utilisation.
@@ -18,10 +20,10 @@ const SECTIONS = [
       { icon: 'home', label: 'Accueil', role: "Présentation de la plateforme et prochaines évaluations publiques." },
       { icon: 'calendar', label: 'Planning', role: "Calendrier des épreuves à venir, des épreuves terminées et des rattrapages." },
       { icon: 'book', label: 'Ressources', role: "Documents classés par type (cours, TD, TP, examens, corrigés, fiches) pour votre filière." },
-      { icon: 'sparkles', label: 'Exercices', role: "Générateur d'exercices corrigés (filières mathématiques)." },
+      { icon: 'sparkles', label: 'Exercices', role: "Générateur d'exercices et d'épreuves types corrigées à partir de vos documents (mathématiques, physique, L3 et au-delà)." },
       { icon: 'mail', label: 'Contact', role: "Écrire à l'administration et lire ses réponses dans « Mes Messages Envoyés »." },
       { icon: 'graduation', label: 'Mon espace', role: "Votre tableau de bord : matières, tests, notes, demandes et parrainage." },
-      { icon: 'sparkles', label: 'Tuteur IA', role: "Aide à la révision : notions, exemples et explications de vos erreurs (5 questions / 24 h)." },
+      { icon: 'sparkles', label: 'Tuteur IA', role: "Au cœur de votre parcours : rédaction de sujets, épreuves types, explications et 10 invites de révision sur le sujet généré." },
       { icon: 'bell', label: 'Cloche de notifications', role: "Vous prévient d'un nouveau test, d'une programmation ou d'une demande validée." },
       { icon: 'user', label: 'Mon profil', role: "Modifier votre nom, votre date de naissance et votre mot de passe." },
       { icon: 'chat', label: 'Chaîne WhatsApp', role: "Annonces, rappels et informations importantes de la plateforme." },
@@ -80,6 +82,8 @@ const SECTIONS = [
 ];
 
 export default function OnboardingGuide({ open, onClose }) {
+  const pathway = pathwayFor(getCurrentUser());
+
   // Fermeture au clavier et blocage du défilement de la page en arrière-plan.
   useEffect(() => {
     if (!open) return undefined;
@@ -133,6 +137,24 @@ export default function OnboardingGuide({ open, onClose }) {
 
         {/* Contenu défilant */}
         <div className="flex-1 overflow-y-auto px-5 sm:px-7 py-5 space-y-6">
+          {pathway.highlighted && (
+            <section className="rounded-2xl border border-indigo-700/60 bg-indigo-950/40 p-4">
+              <h3 className="text-[11px] font-black uppercase tracking-wider text-indigo-300 flex items-center gap-2 mb-2.5">
+                <Icon name="sparkles" size={14} />
+                {pathway.title}
+              </h3>
+              <div className="space-y-1.5">
+                {pathway.messages.map((message) => (
+                  <p key={message} className="text-[11px] text-slate-200 leading-relaxed">{message}</p>
+                ))}
+              </div>
+              <p className="text-[10px] text-indigo-200/80 mt-2.5">
+                Vos QCM restent accessibles dans « Mon espace » pour vous entraîner : utilisez le
+                Tuteur IA et le générateur d'épreuves pour produire vos sujets.
+              </p>
+            </section>
+          )}
+
           {SECTIONS.map((section) => (
             <section key={section.id}>
               <h3 className="text-[11px] font-black uppercase tracking-wider text-blue-300 flex items-center gap-2 mb-2.5">

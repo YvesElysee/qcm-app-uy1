@@ -405,6 +405,8 @@ ensureColumn('resources', 'type', "TEXT DEFAULT 'autre'");
 ensureColumn('feedback', 'reply', "TEXT DEFAULT ''");
 ensureColumn('feedback', 'repliedAt', 'TEXT');
 ensureColumn('feedback', 'repliedBy', "TEXT DEFAULT 'admin'");
+// Dix invites de révision générées pour chaque épreuve d'un étudiant.
+ensureColumn('student_exercises', 'revisionPrompts', "TEXT DEFAULT '[]'");
 
 db.exec(`
   CREATE INDEX IF NOT EXISTS idx_results_quiz ON results(quizId);

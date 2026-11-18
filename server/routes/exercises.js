@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { db, DATA_DIR } from '../db.js';
 import { requireStudent } from '../auth.js';
-import { getConfig, generateReply, logAiRequest } from './ai.js';
+import { getConfig, generateReply, logAiRequest, configuredKeyCount } from './ai.js';
 import { extractText } from '../textExtract.js';
 
 const router = Router();
@@ -31,16 +31,21 @@ const MAX_DOC_BYTES = 25 * 1024 * 1024;
 const MAX_EXERCISES = 12;
 const MAX_CONTEXT_CHARS = 60000;
 
-const ALLOWED_LEVELS = new Set(['L1', 'L2', 'L3', 'M1']);
-const EXERCISE_TYPES = new Set(['qcm', 'qro', 'calcul', 'vrai_faux', 'mixte', 'autre']);
+const ALLOWED_LEVELS = new Set(['L1', 'L2', 'L3', 'M1', 'M2']);
+const EXERCISE_TYPES = new Set(['qcm', 'qro', 'calcul', 'vrai_faux', 'mixte', 'epreuve', 'autre']);
 const TYPE_LABELS = {
   qcm: 'QCM (question à choix multiple)',
   qro: 'QRO (question à réponse ouverte rédigée)',
   calcul: 'exercice de calcul avec étapes',
   vrai_faux: 'vrai ou faux justifié',
   mixte: 'série mixte (QCM, QRO et calcul)',
+  epreuve: 'épreuve type d’examen avec corrigé',
   autre: 'exercice libre (démonstration, modélisation, problème)'
 };
+
+// Deux documents maximum par jour pour produire une épreuve type.
+const EXAM_DOCUMENT_LIMIT = 2;
+const REVISION_PROMPT_COUNT = 10;
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -73,26 +78,95 @@ function normalizeLevel(value) {
   return String(value || '').trim().toUpperCase().replace(/\s+/g, '');
 }
 
-function isMathematics(filiere) {
-  const normalized = String(filiere || '')
+function normalizedFiliere(filiere) {
+  return String(filiere || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase();
-  return /math/.test(normalized);
+}
+
+function isMathematics(filiere) {
+  return /math/.test(normalizedFiliere(filiere));
+}
+
+function isPhysics(filiere) {
+  return /phys/.test(normalizedFiliere(filiere));
+}
+
+function isAdvanced(level) {
+  return ['L3', 'M1', 'M2'].includes(normalizeLevel(level));
+}
+
+function disciplineOf(user) {
+  if (isMathematics(user?.filiere)) return 'mathématiques';
+  if (isPhysics(user?.filiere)) return 'physique';
+  return user?.filiere || 'votre matière';
 }
 
 /**
  * Motif d'indisponibilité (ou null si la fonctionnalité est ouverte).
+ *
+ * Ouverte aux filières Mathématiques et Physique de L1 à M2, et à TOUTES les
+ * filières à partir de la L3 : les QCM restent un entraînement, les épreuves
+ * sont rédigées avec l'aide du Tuteur IA.
  */
 function accessError(user) {
   if (!user) return 'Connexion requise.';
-  if (!isMathematics(user.filiere)) {
-    return "Le générateur d'exercices est réservé à la filière Mathématiques.";
+  const targetedFiliere = isMathematics(user.filiere) || isPhysics(user.filiere);
+  if (!targetedFiliere && !isAdvanced(user.niveau)) {
+    return "Le générateur d'épreuves est ouvert aux filières Mathématiques et Physique (L1 à M2), et à toutes les filières à partir de la L3.";
   }
   if (!ALLOWED_LEVELS.has(normalizeLevel(user.niveau))) {
-    return "Le générateur d'exercices est ouvert aux niveaux L1, L2, L3 et M1 de Mathématiques.";
+    return "Le générateur d'épreuves est ouvert aux niveaux L1, L2, L3, M1 et M2.";
   }
   return null;
+}
+
+// ── Quota quotidien de documents pour les épreuves ───────────────────
+function todayKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function examDocQuotaKey(userId) {
+  return `student-exam-docs:${userId}:${todayKey()}`;
+}
+
+function examDocQuota(userId) {
+  const row = db.prepare(
+    'SELECT count FROM ai_usage WHERE userId = ? AND contextKey = ?'
+  ).get(userId, examDocQuotaKey(userId));
+  const used = Math.max(0, Number(row?.count) || 0);
+  return {
+    limit: EXAM_DOCUMENT_LIMIT,
+    used,
+    remaining: Math.max(0, EXAM_DOCUMENT_LIMIT - used)
+  };
+}
+
+function reserveExamDocs(userId, count) {
+  const quota = examDocQuota(userId);
+  if (quota.remaining < count) {
+    return { ok: false, ...quota };
+  }
+  const value = quota.used + count;
+  db.prepare(`
+    INSERT INTO ai_usage (userId, contextKey, count, updatedAt)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(userId, contextKey) DO UPDATE SET
+      count = excluded.count,
+      updatedAt = excluded.updatedAt
+  `).run(userId, examDocQuotaKey(userId), value, new Date().toISOString());
+  return { ok: true, limit: EXAM_DOCUMENT_LIMIT, used: value, remaining: Math.max(0, EXAM_DOCUMENT_LIMIT - value) };
+}
+
+function releaseExamDocs(userId, count) {
+  try {
+    db.prepare(
+      'UPDATE ai_usage SET count = MAX(0, count - ?) WHERE userId = ? AND contextKey = ?'
+    ).run(count, userId, examDocQuotaKey(userId));
+  } catch (err) {
+    console.warn('[exercises] Quota documents non libéré :', err.message);
+  }
 }
 
 function extractJson(text) {
@@ -163,6 +237,7 @@ function normalizeType(raw, fallback) {
   if (normalized === 'qcm' || normalized === 'qro' || normalized === 'calcul') return normalized;
   if (normalized === 'vrai_faux' || normalized === 'vraifaux') return 'vrai_faux';
   if (normalized === 'mixte' || normalized === 'mix') return 'mixte';
+  if (normalized === 'epreuve' || normalized === 'epreuve_type' || normalized === 'examen') return 'epreuve';
   return 'autre';
 }
 
@@ -211,8 +286,11 @@ router.get('/access', requireStudent, (req, res) => {
     reason,
     filiere: req.user.filiere || '',
     niveau: normalizeLevel(req.user.niveau),
+    discipline: disciplineOf(req.user),
     levels: [...ALLOWED_LEVELS],
-    types: Object.entries(TYPE_LABELS).map(([value, label]) => ({ value, label }))
+    types: Object.entries(TYPE_LABELS).map(([value, label]) => ({ value, label })),
+    documentQuota: examDocQuota(req.user.id),
+    revisionPromptCount: REVISION_PROMPT_COUNT
   });
 });
 
@@ -313,9 +391,9 @@ router.post('/generate', requireStudent, async (req, res) => {
   if (reason) return res.status(403).json({ error: reason });
 
   const cfg = getConfig();
-  if (cfg.groqKeys.length + cfg.geminiKeys.length === 0) {
+  if (configuredKeyCount(cfg) === 0) {
     return res.status(503).json({
-      error: "L'IA n'est pas encore configurée sur le serveur. Réessayez plus tard."
+      error: "L'IA n'est pas encore activée sur le serveur. Revenez plus tard."
     });
   }
 
@@ -326,17 +404,20 @@ router.post('/generate', requireStudent, async (req, res) => {
     });
   }
 
-  const requestedType = String(req.body?.type || 'mixte').trim().toLowerCase();
-  const type = EXERCISE_TYPES.has(requestedType) ? requestedType : 'mixte';
+  const requestedType = String(req.body?.type || 'mixte').trim().toLowerCase().replace(/[-\s]+/g, '_');
+  const type = EXERCISE_TYPES.has(requestedType) ? requestedType : normalizeType({ type: requestedType });
   const count = Math.min(MAX_EXERCISES, Math.max(1, Number.parseInt(req.body?.count, 10) || 5));
   const prompt = cleanText(req.body?.prompt, 4000);
   const difficulte = ['facile', 'moyenne', 'difficile'].includes(req.body?.difficulte)
     ? req.body.difficulte
     : 'moyenne';
 
-  const ids = Array.isArray(req.body?.documentIds)
+  // Une épreuve type utilise au maximum deux documents par jour.
+  const maxDocuments = type === 'epreuve' ? EXAM_DOCUMENT_LIMIT : 5;
+  let ids = Array.isArray(req.body?.documentIds)
     ? req.body.documentIds.map((id) => Number(id)).filter(Number.isFinite)
     : [];
+  if (type === 'epreuve') ids = ids.slice(0, maxDocuments);
 
   let documents;
   if (ids.length) {
@@ -346,6 +427,7 @@ router.post('/generate', requireStudent, async (req, res) => {
       FROM student_documents
       WHERE userId = ? AND id IN (${placeholders})
       ORDER BY id ASC
+      LIMIT ${maxDocuments}
     `).all(req.user.id, ...ids);
   } else {
     documents = db.prepare(`
@@ -353,7 +435,7 @@ router.post('/generate', requireStudent, async (req, res) => {
       FROM student_documents
       WHERE userId = ?
       ORDER BY createdAt DESC, id DESC
-      LIMIT 5
+      LIMIT ${maxDocuments}
     `).all(req.user.id);
   }
 
@@ -361,6 +443,19 @@ router.post('/generate', requireStudent, async (req, res) => {
     return res.status(400).json({
       error: 'Déposez au moins un document de cours pour générer des exercices.'
     });
+  }
+
+  let reservedDocs = 0;
+  if (type === 'epreuve') {
+    const reservation = reserveExamDocs(req.user.id, documents.length);
+    if (!reservation.ok) {
+      return res.status(429).json({
+        error: `Vous avez utilisé vos ${EXAM_DOCUMENT_LIMIT} documents quotidiens pour générer une épreuve. Réessayez demain.`,
+        code: 'document_quota',
+        documentQuota: reservation
+      });
+    }
+    reservedDocs = documents.length;
   }
 
   let remaining = MAX_CONTEXT_CHARS;
@@ -375,33 +470,36 @@ router.post('/generate', requireStudent, async (req, res) => {
 
   const typeInstruction = type === 'mixte'
     ? 'Alterne les formats : au moins un QCM, un QRO et un exercice de calcul.'
-    : `Tous les exercices doivent être du type : ${TYPE_LABELS[type]}.`;
+    : type === 'epreuve'
+      ? 'Rédige une épreuve type d’examen complète, structurée en parties progressives, avec un corrigé détaillé pour chaque question.'
+      : `Tous les exercices doivent être du type : ${TYPE_LABELS[type]}.`;
 
+  const discipline = disciplineOf(req.user);
   const system = [
-    'Tu es un professeur de mathématiques expérimenté qui prépare des exercices pour ses étudiants.',
-    'Tu rédiges en français, avec une rigueur mathématique irréprochable et sans aucune ambiguïté.',
+    `Tu es un professeur de ${discipline} expérimenté qui prépare des épreuves et des exercices pour ses étudiants.`,
+    'Tu rédiges en français, avec une rigueur irréprochable et sans aucune ambiguïté.',
     'Tu t’appuies STRICTEMENT sur les documents de référence fournis : n’invente aucune notion, aucune donnée et aucun résultat absent du cours.',
     '',
     'Règles de fond :',
     `1. ${typeInstruction}`,
-    '2. Énoncés clairs, autonomes et progressifs ; les notations mathématiques sont en texte simple (pas de LaTeX brut illisible).',
+    '2. Énoncés clairs, autonomes et progressifs ; les notations scientifiques sont en texte simple lisible.',
     '3. Chaque exercice DOIT comporter une réponse ou correction exacte, puis une explication pédagogique.',
     '4. Pour un QCM : exactement 4 options A, B, C, D, une seule bonne réponse, distracteurs crédibles.',
     '5. Pour un calcul : indique les étapes clés du raisonnement et le résultat final.',
-    '6. Pour un QRO ou un exercice libre : fournis un corrigé modèle détaillé.',
+    '6. Pour un QRO, une épreuve type ou un exercice libre : fournis un corrigé modèle détaillé.',
     '7. Aucun doublon, aucun exercice hors sujet, aucune question piège sans intérêt pédagogique.',
     `8. Difficulté demandée : ${difficulte}.`,
     '9. Réponds UNIQUEMENT avec un objet JSON valide, sans texte autour ni balises Markdown.',
     '',
     'Schéma attendu :',
-    '{"exercises":[{"type":"qcm|qro|calcul|vrai_faux|autre","enonce":"...","options":[{"label":"A","text":"..."}],"reponse":"...","explication":"...","etapes":["..."],"difficulte":"facile|moyenne|difficile"}]}',
+    '{"exercises":[{"type":"qcm|qro|calcul|vrai_faux|epreuve|autre","enonce":"...","options":[{"label":"A","text":"..."}],"reponse":"...","explication":"...","etapes":["..."],"difficulte":"facile|moyenne|difficile"}]}',
     'Le champ "options" n’est rempli que pour les QCM et vrai/faux. Pour les autres types, laisse-le vide.',
     'Pour un QCM, "reponse" contient la lettre de la bonne réponse (A, B, C ou D).'
   ].join('\n');
 
   const userMessage = [
-    `Génère ${count} exercice(s) de mathématiques.`,
-    `Filière : ${req.user.filiere || 'Mathématiques'} · Niveau : ${normalizeLevel(req.user.niveau)}.`,
+    `Génère ${count} exercice(s) de ${discipline}${type === 'epreuve' ? ' sous forme d’épreuve type d’examen corrigée' : ''}.`,
+    `Filière : ${req.user.filiere || discipline} · Niveau : ${normalizeLevel(req.user.niveau)}.`,
     prompt ? `Consignes de l'étudiant : ${prompt}` : '',
     `Documents de référence :${context}`
   ].filter(Boolean).join('\n\n');
@@ -447,6 +545,7 @@ router.post('/generate', requireStudent, async (req, res) => {
     });
 
     if (exercises.length === 0) {
+      if (reservedDocs) releaseExamDocs(req.user.id, reservedDocs);
       return res.status(502).json({
         error: "L'IA n'a pas renvoyé d'exercices exploitables. Reformulez la demande ou vérifiez vos documents."
       });
@@ -475,6 +574,7 @@ router.post('/generate', requireStudent, async (req, res) => {
       id: Number(info.lastInsertRowid),
       exercises: finalExercises,
       type,
+      documentQuota: examDocQuota(req.user.id),
       providerUsed: result.provider || '',
       tokens: {
         usedThisMonth: monthlyTokens(),
@@ -482,10 +582,116 @@ router.post('/generate', requireStudent, async (req, res) => {
       }
     });
   } catch (err) {
+    if (reservedDocs) releaseExamDocs(req.user.id, reservedDocs);
     logAiRequest({ userId: req.user.id, contextKey: 'student-exercises', status: 'error' });
     console.warn('[exercises] Génération impossible :', String(err?.message || err).slice(0, 200));
     res.status(502).json({
       error: err?.message || "La génération a échoué. Réessayez dans un instant."
+    });
+  }
+});
+
+/**
+ * Dix invites de révision sur le sujet de l'épreuve générée.
+ * Réservé aux générations de l'étudiant ; en physique, ces invites sont
+ * proposées automatiquement après la génération.
+ */
+router.post('/revision-prompts', requireStudent, async (req, res) => {
+  const reason = accessError(req.user);
+  if (reason) return res.status(403).json({ error: reason });
+
+  const generationId = Number(req.body?.generationId);
+  const row = db.prepare(
+    'SELECT id, filiere, niveau, type, prompt, documentIds, content, revisionPrompts FROM student_exercises WHERE id = ? AND userId = ?'
+  ).get(generationId, req.user.id);
+  if (!row) return res.status(404).json({ error: 'Génération introuvable.' });
+
+  let stored;
+  try {
+    stored = JSON.parse(row.revisionPrompts || '[]');
+  } catch {
+    stored = [];
+  }
+  if (Array.isArray(stored) && stored.length === REVISION_PROMPT_COUNT) {
+    return res.json({ success: true, generationId: row.id, prompts: stored, cached: true });
+  }
+
+  const cfg = getConfig();
+  if (configuredKeyCount(cfg) === 0) {
+    return res.status(503).json({ error: "L'assistant IA n'est pas encore activé. Revenez plus tard." });
+  }
+
+  let exercises = [];
+  try {
+    const parsedContent = JSON.parse(row.content || '[]');
+    if (Array.isArray(parsedContent)) exercises = parsedContent;
+  } catch { /* contenu illisible : on utilisera le prompt */ }
+
+  const subject = exercises
+    .slice(0, 6)
+    .map((ex, i) => `${i + 1}. ${String(ex.enonce || '').slice(0, 400)}`)
+    .join('\n');
+  const discipline = disciplineOf(req.user);
+  const system = [
+    `Tu es un professeur de ${discipline} qui prépare le plan de révision d'un étudiant.`,
+    'À partir du sujet généré, tu proposes exactement 10 invites courtes que l’étudiant pourra envoyer au Tuteur IA.',
+    'Chaque invite commence par un verbe d’action, porte sur une notion précise du sujet et tient en une phrase.','',
+    'Réponds UNIQUEMENT avec un objet JSON valide : {"prompts":["invite 1", ... "invite 10"]}.',
+    'Aucun texte autour, aucune balise Markdown.'
+  ].join('\n');
+  const userMessage = [
+    `Sujet étudié (${discipline}, ${normalizeLevel(row.niveau)}) :`,
+    subject || "Sujet basé sur les documents de l'étudiant.",
+    row.prompt ? `Consigne initiale : ${row.prompt}` : '',
+    `Génère exactement ${REVISION_PROMPT_COUNT} invites de révision distinctes.`
+  ].filter(Boolean).join('\n\n');
+
+  try {
+    const result = await generateReply({
+      system,
+      messages: [{ role: 'user', content: userMessage }],
+      cfg,
+      maxTokens: 1200,
+      temperature: 0.4,
+      json: true
+    });
+    const parsed = extractJson(result.text);
+    const rawPrompts = Array.isArray(parsed?.prompts) ? parsed.prompts : [];
+    const seen = new Set();
+    const prompts = rawPrompts
+      .map((p) => cleanText(p, 300))
+      .filter((p) => {
+        const key = p.toLowerCase();
+        if (!p || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(0, REVISION_PROMPT_COUNT);
+
+    while (prompts.length < REVISION_PROMPT_COUNT) {
+      const fallback = exercises[prompts.length % Math.max(1, exercises.length)];
+      const topic = String(fallback?.enonce || row.prompt || 'la notion principale du sujet')
+        .replace(/\s+/g, ' ')
+        .slice(0, 120);
+      prompts.push(`Explique-moi la méthode pour traiter : ${topic}`);
+    }
+
+    db.prepare('UPDATE student_exercises SET revisionPrompts = ? WHERE id = ?')
+      .run(JSON.stringify(prompts), row.id);
+    logAiRequest({
+      userId: req.user.id,
+      contextKey: 'student-revision-prompts',
+      status: 'ok',
+      provider: result.provider,
+      model: result.model,
+      usage: result.usage
+    });
+    res.json({ success: true, generationId: row.id, prompts, cached: false });
+  } catch (err) {
+    logAiRequest({ userId: req.user.id, contextKey: 'student-revision-prompts', status: 'error' });
+    console.warn('[exercises] Invites de révision indisponibles :', String(err?.message || err).slice(0, 200));
+    res.status(502).json({
+      error: "Les invites de révision sont momentanément indisponibles. Revenez plus tard."
     });
   }
 });
@@ -496,7 +702,7 @@ router.get('/history', requireStudent, (req, res) => {
   if (reason) return res.status(403).json({ error: reason });
 
   const rows = db.prepare(`
-    SELECT id, type, prompt, documentIds, content, createdAt
+    SELECT id, type, prompt, documentIds, content, revisionPrompts, createdAt
     FROM student_exercises
     WHERE userId = ?
     ORDER BY createdAt DESC, id DESC
@@ -515,6 +721,12 @@ router.get('/history', requireStudent, (req, res) => {
       prompt: row.prompt || '',
       documentIds: String(row.documentIds || '').split(',').filter(Boolean).map(Number),
       exercises,
+      revisionPrompts: (() => {
+        try {
+          const parsed = JSON.parse(row.revisionPrompts || '[]');
+          return Array.isArray(parsed) ? parsed : [];
+        } catch { return []; }
+      })(),
       createdAt: row.createdAt
     };
   });

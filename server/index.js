@@ -29,6 +29,7 @@ import notificationsRoutes from './routes/notifications.js';
 import resourcesRoutes from './routes/resources.js';
 import quizRequestsRoutes, { adminRouter as quizRequestsAdminRoutes } from './routes/quizRequests.js';
 import exercisesRoutes from './routes/exercises.js';
+import adminPreviewRoutes from './routes/adminPreview.js';
 import { scheduleBackups } from './backup.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -45,6 +46,7 @@ app.use('/api/results', resultsRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/ues', uesRoutes);
 app.use('/api/admin/quiz-requests', quizRequestsAdminRoutes);
+app.use('/api/admin/preview', adminPreviewRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/ai', aiRoutes);
@@ -127,7 +129,9 @@ setInterval(() => {
 if (!process.env.ADMIN_PASSWORD) {
   console.warn('[api] ⚠️  ADMIN_PASSWORD non défini dans .env · la connexion administrateur sera refusée.');
 }
-if (!process.env.GROQ_API_KEYS && !process.env.GROQ_API_KEY
+if (!process.env.GROQ_API_KEYS && !process.env.GROQ_API_KEY && !process.env.GROQ_API_KEYS_EXTRA
+  && !process.env.GROK_API_KEYS && !process.env.GROK_API_KEY
+  && !process.env.XAI_API_KEYS && !process.env.XAI_API_KEY
   && !process.env.GEMINI_API_KEYS && !process.env.GEMINI_API_KEY) {
   console.warn('[api] ⚠️  Aucune clé IA configurée · le tuteur IA reste masqué dans l\'interface.');
 }

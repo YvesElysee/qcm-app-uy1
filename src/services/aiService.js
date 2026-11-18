@@ -67,7 +67,9 @@ export async function fetchAiStatus({ context, signal } = {}) {
  */
 export async function askTutor({ context, message, history = [], signal } = {}) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 60000);
+  // Le serveur enchaîne plusieurs clés en repli : on laisse le temps à la rotation
+  // de se terminer, tout en gardant un plafond clair pour l'utilisateur.
+  const timeout = setTimeout(() => controller.abort(), 75000);
   const onExternalAbort = () => controller.abort();
   if (signal) {
     if (signal.aborted) controller.abort();
@@ -87,7 +89,33 @@ export async function askTutor({ context, message, history = [], signal } = {}) 
     });
   } catch (err) {
     if (err?.name === 'AbortError') {
-      throw new Error("L'assistant IA met trop de temps à répondre. Réessayez.", { cause: err });
+      const error = new Error(
+        'Votre question a mis trop de temps à être traitée. Veuillez reformuler votre prompt et réessayer.',
+        { cause: err }
+      );
+      error.code = 'timeout';
+      throw error;
+    }
+    const code = err?.data?.code;
+    if (code === 'timeout') {
+      const error = new Error(
+        'Votre question a mis trop de temps à être traitée. Veuillez reformuler votre prompt et réessayer.',
+        { cause: err }
+      );
+      error.code = 'timeout';
+      error.status = err.status;
+      error.data = err.data;
+      throw error;
+    }
+    if (code === 'upstream' || code === 'unavailable') {
+      const error = new Error(
+        "L'assistant IA est momentanément indisponible. Revenez plus tard.",
+        { cause: err }
+      );
+      error.code = code;
+      error.status = err.status;
+      error.data = err.data;
+      throw error;
     }
     throw err;
   } finally {

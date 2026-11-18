@@ -9,10 +9,12 @@ import usePageTitle from './hooks/usePageTitle';
 import Icon from './components/ui/icons.jsx';
 import { RESOURCE_TYPES, resourceTypeLabel } from './constants/resourceTypes.js';
 import { ADMIN_LOGIN_PATH } from './config';
+import AdminQuizPreview from './components/AdminQuizPreview.jsx';
 
 const SECTIONS = [
   { id: 'overview', label: "Vue d'ensemble", icon: 'chart', desc: 'Statistiques clés et prochaines évaluations' },
   { id: 'quizzes', label: 'Évaluations', icon: 'list', desc: 'Programmer, importer et gérer les QCM' },
+  { id: 'preview', label: 'Mode test', icon: 'play', desc: 'Parcourir toutes les filières et tester les QCM sans enregistrer de résultat' },
   { id: 'analytics', label: 'Analytique', icon: 'chart', desc: 'Questions ratées, réussite par UE et évolution des notes' },
   { id: 'ai', label: 'Tuteur IA', icon: 'sparkles', desc: 'Requêtes, tokens consommés et budget mensuel' },
   { id: 'ai-generator', label: 'Génération QCM IA', icon: 'lightbulb', desc: 'Générer des questions à partir de documents de référence' },
@@ -263,6 +265,8 @@ export default function AdminPanel() {
 
   // ── Historique / planning / résultats ──────────────────────────────────
   const [history, setHistory] = useState([]);
+  const [previewQuiz, setPreviewQuiz] = useState(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [upcoming, setUpcoming] = useState([]);
   const [resultsQuizId, setResultsQuizId] = useState('');
   const [resultsList, setResultsList] = useState([]);
@@ -1848,6 +1852,14 @@ export default function AdminPanel() {
         </div>
         <div className="flex items-center gap-1.5 flex-wrap shrink-0">
           <button
+            onClick={() => { setPreviewQuiz(q); setPreviewOpen(true); }}
+            title="Tester ce QCM en mode aperçu (résultat non enregistré)"
+            className="inline-flex items-center gap-1.5 bg-amber-600/20 hover:bg-amber-600/30 border border-amber-600/40 text-amber-300 font-bold text-xs px-3 py-2 rounded-xl transition"
+          >
+            <Icon name="play" size={13} />
+            Tester
+          </button>
+          <button
             onClick={() => loadQuizForEdit(q)}
             title="Modifier la programmation de ce test"
             className={btnSecondary}
@@ -2792,6 +2804,159 @@ export default function AdminPanel() {
                             </div>
                             <div className="divide-y divide-slate-800">
                               {ueGroup.tests.map(renderQuizRow)}
+                            </div>
+                          </div>
+                        ))}
+                      </section>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ════════════ MODE TEST (APERÇU NON ENREGISTRÉ) ════════════ */}
+          {activeSection === 'preview' && (
+            <div className="space-y-6">
+              <div className="rounded-2xl border border-amber-700/50 bg-amber-950/30 p-5 flex items-start gap-3">
+                <span className="w-10 h-10 shrink-0 rounded-xl bg-amber-500/15 text-amber-300 flex items-center justify-center">
+                  <Icon name="play" size={19} />
+                </span>
+                <div>
+                  <h2 className="text-sm font-black text-white">Tester les épreuves de toutes les filières</h2>
+                  <p className="text-[11px] text-slate-300 mt-1 leading-relaxed">
+                    Parcourez les facultés, filières, niveaux, UE et tests, puis cliquez sur <strong>Tester</strong> :
+                    l'épreuve se joue comme pour un étudiant (questions sans correction, minuteur, tirage), mais
+                    <strong className="text-amber-200"> aucun résultat, classement ou carte de révision n'est enregistré</strong>.
+                  </p>
+                </div>
+              </div>
+
+              <div className={`${card} overflow-hidden`}>
+                <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                      <Icon name="list" size={15} className="text-blue-400" />
+                      Épreuves disponibles ({filteredHistory.length}/{history.length})
+                    </h3>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Les mêmes filtres que la section Évaluations s'appliquent ici.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setActiveSection('quizzes')}
+                    className={btnSecondary}
+                  >
+                    <Icon name="edit" size={13} />
+                    Gérer les évaluations
+                  </button>
+                </div>
+
+                <div className="px-6 py-3 border-b border-slate-800 bg-slate-950/40 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
+                  <input
+                    type="text"
+                    placeholder="Rechercher…"
+                    className={input}
+                    value={quizFilters.search}
+                    onChange={e => setQuizFilters(f => ({ ...f, search: e.target.value }))}
+                  />
+                  <select
+                    className={selectCls}
+                    value={quizFilters.semestre}
+                    onChange={e => setQuizFilters(f => ({ ...f, semestre: e.target.value }))}
+                  >
+                    <option value="">Tous les semestres</option>
+                    <option value="1">Semestre 1</option>
+                    <option value="2">Semestre 2</option>
+                  </select>
+                  <select
+                    className={selectCls}
+                    value={quizFilters.faculte}
+                    onChange={e => setQuizFilters(f => ({ ...f, faculte: e.target.value, filiere: '' }))}
+                  >
+                    <option value="">Toutes les facultés</option>
+                    {quizFilterFacultes.map(fac => (
+                      <option key={fac} value={fac}>{fac}</option>
+                    ))}
+                  </select>
+                  <select
+                    className={selectCls}
+                    value={quizFilters.filiere}
+                    onChange={e => setQuizFilters(f => ({ ...f, filiere: e.target.value }))}
+                  >
+                    <option value="">Toutes les filières</option>
+                    {[...new Set(history.map(q => q.filiere).filter(Boolean))].map(fil => (
+                      <option key={fil} value={fil}>{fil}</option>
+                    ))}
+                  </select>
+                  <select
+                    className={selectCls}
+                    value={quizFilters.niveau}
+                    onChange={e => setQuizFilters(f => ({ ...f, niveau: e.target.value }))}
+                  >
+                    <option value="">Tous les niveaux</option>
+                    {niveaux.map(n => (
+                      <option key={n} value={n}>{n}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {groupedQuizHistory.length === 0 ? (
+                  <p className="text-xs text-slate-500 text-center py-10">
+                    Aucune épreuve ne correspond à ces filtres.
+                  </p>
+                ) : (
+                  <div className="divide-y divide-slate-800">
+                    {groupedQuizHistory.map((section) => (
+                      <section key={`preview-${section.key}`}>
+                        <div className="px-6 py-2.5 bg-slate-950/70 border-b border-slate-800 flex items-center justify-between gap-2 flex-wrap">
+                          <h4 className="text-xs font-black text-white uppercase tracking-wider flex items-center gap-2">
+                            <Icon name="graduation" size={13} className="text-blue-400" />
+                            {section.filiere} · {section.niveau}
+                          </h4>
+                          <span className="text-[10px] font-bold text-slate-500">
+                            {section.faculte} · {section.count} test(s) · {section.ues.size} UE
+                          </span>
+                        </div>
+                        {section.ues.map((ueGroup) => (
+                          <div key={`preview-${section.key}-${ueGroup.key}`}>
+                            <div className="px-6 py-2 bg-slate-900/60 border-b border-slate-800 flex items-center justify-between gap-2 flex-wrap">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-[11px] font-black text-blue-300">UE {ueGroup.ue}</span>
+                                {ueGroup.label && ueGroup.label !== ueGroup.ue && (
+                                  <span className="text-[10px] text-slate-400">{ueGroup.label}</span>
+                                )}
+                                {ueGroup.semestre && (
+                                  <span className="text-[9px] font-bold text-emerald-300 bg-emerald-600/15 px-1.5 py-0.5 rounded-full">
+                                    S{ueGroup.semestre}
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-[10px] font-bold text-slate-500">
+                                {ueGroup.tests.length} test(s)
+                              </span>
+                            </div>
+                            <div className="divide-y divide-slate-800">
+                              {ueGroup.tests.map((q) => (
+                                <div key={`preview-${q.id}`} className="px-6 py-3 flex items-center justify-between gap-3 flex-wrap">
+                                  <div className="min-w-0">
+                                    <p className="text-xs font-black text-white truncate">
+                                      {q.title || q.ue || q.id}
+                                    </p>
+                                    <p className="text-[10px] text-slate-500 mt-0.5">
+                                      {q.questionCount || 0} questions · {q.timePerQuestion || 60}s/question
+                                      {q.drawCount ? ` · ${q.drawCount} tirées` : ''}
+                                    </p>
+                                  </div>
+                                  <button
+                                    onClick={() => { setPreviewQuiz(q); setPreviewOpen(true); }}
+                                    className="inline-flex items-center gap-1.5 bg-amber-600/20 hover:bg-amber-600/30 border border-amber-600/40 text-amber-300 font-bold text-xs px-3 py-2 rounded-xl transition"
+                                  >
+                                    <Icon name="play" size={13} />
+                                    Tester
+                                  </button>
+                                </div>
+                              ))}
                             </div>
                           </div>
                         ))}
@@ -5669,6 +5834,14 @@ export default function AdminPanel() {
           </div>
         </div>
       )}
+
+      {/* Mode test : lecture seule, aucune copie enregistrée */}
+      <AdminQuizPreview
+        key={`${previewQuiz?.id || 'none'}:${previewOpen ? 'open' : 'closed'}`}
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        quiz={previewQuiz}
+      />
     </div>
   );
 }

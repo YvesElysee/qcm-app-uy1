@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, getSession } from '../services/api';
 import usePageTitle from '../hooks/usePageTitle';
+import { pathwayFor } from '../utils/studentProfile.js';
 import Icon from './ui/icons.jsx';
 
 const MAX_FILE_MB = 25;
@@ -12,6 +13,7 @@ const TYPE_STYLES = {
   calcul: 'bg-emerald-600/15 text-emerald-300 border-emerald-600/30',
   vrai_faux: 'bg-amber-600/15 text-amber-300 border-amber-600/30',
   mixte: 'bg-indigo-600/15 text-indigo-300 border-indigo-600/30',
+  epreuve: 'bg-amber-600/15 text-amber-300 border-amber-600/30',
   autre: 'bg-slate-600/15 text-slate-300 border-slate-600/30'
 };
 
@@ -21,6 +23,7 @@ const TYPE_SHORT = {
   calcul: 'Calcul',
   vrai_faux: 'Vrai / Faux',
   mixte: 'Mixte',
+  epreuve: 'Épreuve type',
   autre: 'Exercice'
 };
 
@@ -171,11 +174,22 @@ export default function ExerciseGenerator() {
   const [notice, setNotice] = useState('');
 
   const [exercises, setExercises] = useState([]);
+  const [generationId, setGenerationId] = useState(null);
+  const [revisionPrompts, setRevisionPrompts] = useState([]);
+  const [loadingPrompts, setLoadingPrompts] = useState(false);
+  const [revisionError, setRevisionError] = useState('');
+  const [documentQuota, setDocumentQuota] = useState(null);
   const [revealed, setRevealed] = useState({});
   const [history, setHistory] = useState([]);
   const [openHistory, setOpenHistory] = useState(null);
 
   const allowed = access?.allowed === true;
+  const pathway = pathwayFor(user);
+  const discipline = access?.discipline || user?.filiere || 'votre discipline';
+  const examQuota = documentQuota || access?.documentQuota || null;
+  // En physique et en L3+, les invites font partie du parcours ; une épreuve
+  // type les propose aussi, quelle que soit la filière.
+  const wantsRevisionPrompts = type === 'epreuve' || pathway.physics || pathway.l3plus;
 
   const loadDocuments = useCallback(async () => {
     setLoadingDocs(true);
@@ -204,6 +218,7 @@ export default function ExerciseGenerator() {
       .then((data) => {
         if (!active) return;
         setAccess(data);
+        if (data?.documentQuota) setDocumentQuota(data.documentQuota);
         if (data?.allowed) {
           loadDocuments();
           loadHistory();
@@ -219,9 +234,11 @@ export default function ExerciseGenerator() {
   }, [loadDocuments, loadHistory]);
 
   const toggleDocument = (id) => {
-    setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((value) => value !== id) : [...prev, id]
-    );
+    setSelectedIds((prev) => {
+      if (prev.includes(id)) return prev.filter((value) => value !== id);
+      if (type === 'epreuve' && prev.length >= 2) return [prev[1], id];
+      return [...prev, id];
+    });
   };
 
   const handleUpload = async (e) => {
@@ -260,7 +277,13 @@ export default function ExerciseGenerator() {
           doc.warning ? ` ${doc.warning}` : ''
         ].filter(Boolean).join(' ')
       );
-      if (doc.id) setSelectedIds((prev) => [...new Set([...prev, doc.id])]);
+      if (doc.id) {
+        setSelectedIds((prev) => {
+          const next = [...new Set([...prev, doc.id])];
+          // Une épreuve type n'utilise que les deux derniers documents choisis.
+          return type === 'epreuve' ? next.slice(-2) : next;
+        });
+      }
       await loadDocuments();
     } catch (err) {
       setError(err.message || 'Le dépôt a échoué.');
@@ -282,10 +305,43 @@ export default function ExerciseGenerator() {
     }
   };
 
+  /** Ouvre le tuteur global avec une invite déjà écrite dans le champ. */
+  const openTutorWith = useCallback((message) => {
+    window.dispatchEvent(new CustomEvent('qcm:open-ai', { detail: { message } }));
+  }, []);
+
+  /** Charge les 10 invites et, si demandé, ouvre le tuteur avec la première. */
+  const loadRevisionPrompts = useCallback(async (id, { openTutor = false } = {}) => {
+    if (!id) return [];
+    setLoadingPrompts(true);
+    setRevisionError('');
+    try {
+      const data = await api('/exercises/revision-prompts', {
+        method: 'POST',
+        auth: 'student',
+        body: { generationId: id }
+      });
+      const prompts = Array.isArray(data.prompts) ? data.prompts : [];
+      setRevisionPrompts(prompts);
+      if (openTutor && prompts.length) openTutorWith(prompts[0]);
+      return prompts;
+    } catch (err) {
+      setRevisionError(
+        err.message || 'Les invites de révision sont momentanément indisponibles. Revenez plus tard.'
+      );
+      return [];
+    } finally {
+      setLoadingPrompts(false);
+    }
+  }, [openTutorWith]);
+
   const handleGenerate = async (e) => {
     e.preventDefault();
     setError('');
     setNotice('');
+    setRevisionError('');
+    setRevisionPrompts([]);
+    setGenerationId(null);
     if (documents.length === 0) {
       setError('Déposez d’abord au moins un document de cours.');
       return;
@@ -306,10 +362,16 @@ export default function ExerciseGenerator() {
       });
       setExercises(Array.isArray(data.exercises) ? data.exercises : []);
       setRevealed({});
+      const createdId = Number(data.id) || null;
+      setGenerationId(createdId);
+      if (data.documentQuota) setDocumentQuota(data.documentQuota);
       setNotice(
         `${(data.exercises || []).length} exercice(s) généré(s) à partir de vos documents.`
       );
       await loadHistory();
+      if (createdId && wantsRevisionPrompts) {
+        await loadRevisionPrompts(createdId, { openTutor: true });
+      }
     } catch (err) {
       setError(err.message || 'La génération a échoué.');
     } finally {
@@ -355,8 +417,9 @@ export default function ExerciseGenerator() {
             {access?.reason || "Cette fonctionnalité n'est pas disponible pour votre parcours."}
           </p>
           <p className="text-xs text-slate-500 mt-3">
-            Elle est réservée aux étudiants de <strong className="text-slate-300">Mathématiques</strong> en
-            <strong className="text-slate-300"> L1, L2, L3 et M1</strong>, à partir de leurs propres documents de cours.
+            Elle est ouverte aux étudiants de <strong className="text-slate-300">Mathématiques</strong> et de
+            <strong className="text-slate-300"> Physique</strong> de L1 à M2, et à <strong className="text-slate-300">toutes les filières à partir de la L3</strong>,
+            à partir de leurs propres documents de cours.
           </p>
           <Link
             to="/dashboard"
@@ -385,12 +448,12 @@ export default function ExerciseGenerator() {
             </Link>
             <h1 className="text-2xl font-black text-white flex items-center gap-2">
               <Icon name="sparkles" size={22} className="text-blue-400" />
-              Générateur d'exercices
+              Générateur d'épreuves et d'exercices
             </h1>
             <p className="text-xs text-slate-400 mt-1">
-              Mathématiques · {user?.niveau || access?.niveau}
+              {discipline} · {user?.niveau || access?.niveau}
               <span className="ml-1 text-slate-500">
-                — l'IA compose des exercices corrigés à partir de vos propres documents.
+                — l'IA compose une épreuve type corrigée ou des exercices à partir de vos documents.
               </span>
             </p>
           </div>
@@ -399,15 +462,15 @@ export default function ExerciseGenerator() {
           </span>
         </div>
 
-        {(error || notice) && (
+        {(error || notice || revisionError) && (
           <div
             className={`text-xs rounded-2xl p-3.5 border ${
-              error
+              error || revisionError
                 ? 'bg-red-950/50 border-red-800 text-red-300'
                 : 'bg-emerald-950/50 border-emerald-800 text-emerald-300'
             }`}
           >
-            {error || notice}
+            {error || revisionError || notice}
           </div>
         )}
 
@@ -487,7 +550,16 @@ export default function ExerciseGenerator() {
               )}
             </div>
             <p className="text-[10px] text-slate-500 mt-2">
-              Sans sélection, les 5 documents les plus récents sont utilisés.
+              {type === 'epreuve' ? (
+                <>
+                  <strong className="text-amber-300">Épreuve type :</strong> 2 documents maximum par jour
+                  {examQuota
+                    ? ` (${examQuota.used}/${examQuota.limit} utilisés aujourd'hui, ${examQuota.remaining} restant(s)).`
+                    : '.'}
+                </>
+              ) : (
+                'Sans sélection, les 5 documents les plus récents sont utilisés.'
+              )}
             </p>
           </section>
 
@@ -496,7 +568,7 @@ export default function ExerciseGenerator() {
             <form onSubmit={handleGenerate} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
               <h2 className="text-sm font-black text-white flex items-center gap-2">
                 <Icon name="sparkles" size={16} className="text-blue-400" />
-                Générer des exercices
+                {type === 'epreuve' ? 'Générer une épreuve type corrigée' : 'Générer des exercices'}
               </h2>
 
               <div className="grid grid-cols-2 gap-2.5">
@@ -504,7 +576,12 @@ export default function ExerciseGenerator() {
                   Type
                   <select
                     value={type}
-                    onChange={(e) => setType(e.target.value)}
+                    onChange={(e) => {
+                      const nextType = e.target.value;
+                      setType(nextType);
+                      // Garde la sélection cohérente avec la limite serveur.
+                      if (nextType === 'epreuve') setSelectedIds((prev) => prev.slice(0, 2));
+                    }}
                     className="mt-1 w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 text-xs text-slate-200 outline-none focus:border-blue-600"
                   >
                     {(access?.types || []).map((item) => (
@@ -545,7 +622,9 @@ export default function ExerciseGenerator() {
                   onChange={(e) => setPrompt(e.target.value)}
                   rows={3}
                   maxLength={4000}
-                  placeholder="Ex. : exercices sur les intégrales du chapitre 3, avec un niveau proche des partiels."
+                  placeholder={type === 'epreuve'
+                    ? `Ex. : une épreuve de ${discipline} sur le chapitre 3, avec un corrigé détaillé.`
+                    : `Ex. : exercices de ${discipline} sur les intégrales du chapitre 3, avec un niveau proche des partiels.`}
                   className="mt-1 w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200 placeholder:text-slate-600 outline-none focus:border-blue-600 resize-none"
                 />
               </label>
@@ -556,7 +635,9 @@ export default function ExerciseGenerator() {
                 className="w-full inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-black py-3 rounded-xl transition shadow-md shadow-indigo-600/25"
               >
                 <Icon name={generating ? 'refresh' : 'sparkles'} size={15} />
-                {generating ? 'Génération en cours…' : 'Générer les exercices'}
+                {generating
+                  ? 'Génération en cours…'
+                  : (type === 'epreuve' ? 'Générer l’épreuve type' : 'Générer les exercices')}
               </button>
             </form>
 
@@ -587,6 +668,77 @@ export default function ExerciseGenerator() {
             )}
           </section>
         </div>
+
+        {/* Dix invites de révision sur le sujet généré */}
+        {generationId && (
+          <section className="bg-slate-900 border border-indigo-800/50 rounded-2xl p-5">
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <div>
+                <h2 className="text-sm font-black text-white flex items-center gap-2">
+                  <Icon name="lightbulb" size={16} className="text-indigo-400" />
+                  10 invites de révision sur votre sujet
+                </h2>
+                <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                  Cliquez sur une invite : elle est écrite dans le Tuteur IA, prête à être envoyée.
+                  Elles sont conservées avec votre génération.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => loadRevisionPrompts(generationId)}
+                  disabled={loadingPrompts}
+                  className="inline-flex items-center gap-1.5 text-[11px] font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-2 rounded-xl transition disabled:opacity-50"
+                >
+                  <Icon name="refresh" size={12} />
+                  {loadingPrompts ? 'Génération…' : 'Actualiser les invites'}
+                </button>
+                {revisionPrompts.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => openTutorWith(revisionPrompts[0])}
+                    className="inline-flex items-center gap-1.5 text-[11px] font-black text-white bg-blue-600 hover:bg-blue-500 px-3 py-2 rounded-xl transition"
+                  >
+                    <Icon name="sparkles" size={12} />
+                    Ouvrir dans le Tuteur IA
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {loadingPrompts ? (
+              <div className="py-8 text-center text-xs text-slate-400">
+                <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                Le Tuteur IA prépare vos invites…
+              </div>
+            ) : revisionPrompts.length === 0 ? (
+              <button
+                type="button"
+                onClick={() => loadRevisionPrompts(generationId)}
+                className="mt-4 w-full text-xs font-bold text-indigo-300 hover:text-white border border-dashed border-indigo-800 rounded-xl py-4 transition"
+              >
+                Générer les 10 invites de révision
+              </button>
+            ) : (
+              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {revisionPrompts.map((prompt, index) => (
+                  <button
+                    key={`${index}-${prompt}`}
+                    type="button"
+                    onClick={() => openTutorWith(prompt)}
+                    className="w-full text-left flex items-start gap-2.5 bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-indigo-700 rounded-xl px-3 py-2.5 transition"
+                  >
+                    <span className="shrink-0 w-6 h-6 rounded-lg bg-indigo-600/20 text-indigo-300 flex items-center justify-center text-[10px] font-black">
+                      {String(index + 1).padStart(2, '0')}
+                    </span>
+                    <span className="flex-1 text-xs text-slate-200 leading-relaxed">{prompt}</span>
+                    <Icon name="arrow-right" size={12} className="text-slate-500 mt-1 shrink-0" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
 
         {/* Historique */}
         {history.length > 0 && (
@@ -634,6 +786,25 @@ export default function ExerciseGenerator() {
                             onToggle={() => toggleReveal(`h${entry.id}:${index}`)}
                           />
                         ))}
+                        {entry.revisionPrompts?.length > 0 && (
+                          <div className="border-t border-slate-800 pt-3">
+                            <p className="text-[10px] font-black uppercase tracking-wider text-indigo-300 mb-2">
+                              Invites de révision ({entry.revisionPrompts.length})
+                            </p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              {entry.revisionPrompts.map((prompt, index) => (
+                                <button
+                                  key={`${entry.id}-${index}-${prompt}`}
+                                  type="button"
+                                  onClick={() => openTutorWith(prompt)}
+                                  className="w-full text-left text-[11px] text-slate-300 hover:text-white bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-indigo-700 rounded-lg px-2.5 py-2 leading-relaxed transition"
+                                >
+                                  {index + 1}. {prompt}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

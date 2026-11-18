@@ -36,17 +36,41 @@ function intEnv(name, fallback, min, max) {
 
 export function getConfig() {
   return {
-    groqKeys: splitKeys(process.env.GROQ_API_KEYS, process.env.GROQ_API_KEY),
+    // Plusieurs noms sont acceptés : l'administrateur peut ajouter ses 3 clés
+    // Groq supplémentaires dans GROQ_API_KEYS (séparées par des virgules) ou
+    // dans GROQ_API_KEYS_EXTRA. Les clés xAI/Grok réelles sont aussi prises en
+    // charge, sans casser les configurations Groq existantes.
+    groqKeys: splitKeys(
+      process.env.GROQ_API_KEYS,
+      process.env.GROQ_API_KEY,
+      process.env.GROQ_API_KEYS_EXTRA
+    ),
+    grokKeys: splitKeys(
+      process.env.GROK_API_KEYS,
+      process.env.GROK_API_KEY,
+      process.env.XAI_API_KEYS,
+      process.env.XAI_API_KEY
+    ),
     geminiKeys: splitKeys(process.env.GEMINI_API_KEYS, process.env.GEMINI_API_KEY),
     groqModel: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+    grokModel: process.env.GROK_MODEL || process.env.XAI_MODEL || 'grok-3-mini',
     geminiModel: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
     maxPerError: intEnv('AI_MAX_QUESTIONS_PER_ERROR', 2, 1, 10),
     // Mode « question générale » : 5 questions par jour, toutes matières
     // confondues, quelle que soit la filière de l'étudiant.
     generalLimit: intEnv('AI_GENERAL_LIMIT', 5, 1, 20),
     dailyLimit: intEnv('AI_DAILY_LIMIT', 30, 1, 500),
-    tokenBudget: intEnv('AI_TOKEN_BUDGET', 1000000, 0, 1e12)
+    tokenBudget: intEnv('AI_TOKEN_BUDGET', 1000000, 0, 1e12),
+    // Un essai ne doit jamais bloquer le navigateur : on essaie plusieurs
+    // clés, mais chaque appel reste court et le total reste borné.
+    requestTimeoutMs: intEnv('AI_REQUEST_TIMEOUT_MS', 15000, 3000, 60000),
+    totalTimeoutMs: intEnv('AI_TOTAL_TIMEOUT_MS', 65000, 10000, 180000),
+    cooldownMs: intEnv('AI_KEY_COOLDOWN_MS', 45000, 5000, 600000)
   };
+}
+
+export function configuredKeyCount(cfg) {
+  return (cfg.groqKeys?.length || 0) + (cfg.grokKeys?.length || 0) + (cfg.geminiKeys?.length || 0);
 }
 
 // ── Quota persisté en base ────────────────────────────────────────────
@@ -277,7 +301,7 @@ function sanitizeHistory(history) {
 }
 
 // ── Appels fournisseurs (détails conservés côté serveur uniquement) ───
-async function fetchJson(url, options, timeoutMs = 20000) {
+async function fetchJson(url, options, timeoutMs = 15000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -301,13 +325,22 @@ async function fetchJson(url, options, timeoutMs = 20000) {
   }
 }
 
-async function callGroq({
+/**
+ * Fournisseurs au format OpenAI (Groq et xAI/Grok). `finish_reason = length`
+ * signale une réponse tronquée : on la remonte au moteur de rotation pour qu'il
+ * poursuive ou réessaie avec un budget plus large, au lieu de la présenter
+ * comme une réponse complète.
+ */
+async function callOpenAiCompatible({
+  endpoint,
+  provider,
   key,
   model,
   messages,
   maxTokens = 700,
   temperature = 0.35,
-  json = false
+  json = false,
+  timeoutMs = 15000
 }) {
   const payload = {
     model,
@@ -317,21 +350,26 @@ async function callGroq({
   };
   if (json) payload.response_format = { type: 'json_object' };
 
-  const data = await fetchJson('https://api.groq.com/openai/v1/chat/completions', {
+  const data = await fetchJson(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${key}`
     },
     body: JSON.stringify(payload)
-  });
-  const text = data?.choices?.[0]?.message?.content;
-  if (typeof text !== 'string' || !text.trim()) throw new Error('Réponse vide');
+  }, timeoutMs);
+
+  const choice = data?.choices?.[0];
+  const finish = String(choice?.finish_reason || '').toLowerCase();
+  if (finish === 'content_filter') throw new Error('Réponse bloquée par le filtre du fournisseur');
+  const content = choice?.message?.content;
+  if (typeof content !== 'string' || !content.trim()) throw new Error('Réponse vide');
 
   const usage = data?.usage;
   return {
-    text: text.trim(),
-    provider: 'groq',
+    text: content.trim(),
+    incomplete: finish === 'length',
+    provider,
     model,
     usage: usage
       ? {
@@ -343,6 +381,22 @@ async function callGroq({
   };
 }
 
+async function callGroq(options) {
+  return callOpenAiCompatible({
+    ...options,
+    endpoint: 'https://api.groq.com/openai/v1/chat/completions',
+    provider: 'groq'
+  });
+}
+
+async function callGrok(options) {
+  return callOpenAiCompatible({
+    ...options,
+    endpoint: 'https://api.x.ai/v1/chat/completions',
+    provider: 'grok'
+  });
+}
+
 async function callGemini({
   key,
   model,
@@ -350,7 +404,8 @@ async function callGemini({
   messages,
   maxTokens = 700,
   temperature = 0.35,
-  json = false
+  json = false,
+  timeoutMs = 15000
 }) {
   const contents = messages
     .filter((m) => m.role !== 'system')
@@ -376,10 +431,16 @@ async function callGemini({
           ...(json ? { responseMimeType: 'application/json' } : {})
         }
       })
-    }
+    },
+    timeoutMs
   );
 
-  const parts = data?.candidates?.[0]?.content?.parts;
+  const candidate = data?.candidates?.[0];
+  const finish = String(candidate?.finishReason || '').toUpperCase();
+  if (finish === 'SAFETY' || finish === 'RECITATION') {
+    throw new Error('Réponse bloquée par le filtre du fournisseur');
+  }
+  const parts = candidate?.content?.parts;
   const text = Array.isArray(parts)
     ? parts.map((p) => (typeof p?.text === 'string' ? p.text : '')).join('').trim()
     : '';
@@ -388,6 +449,7 @@ async function callGemini({
   const usage = data?.usageMetadata;
   return {
     text,
+    incomplete: finish === 'MAX_TOKENS' || finish === 'LENGTH',
     provider: 'gemini',
     model,
     usage: usage
@@ -400,13 +462,39 @@ async function callGemini({
   };
 }
 
-// Rotation simple : chaque requête démarre sur une clé différente.
+// Rotation équitable : chaque requête démarre sur une clé différente. Les clés
+// en échec sont mises en pauses courtes pour ne pas gaspiller les quotas.
 let keyCursor = 0;
+const keyHealth = new Map();
+
+function fingerprint(candidate) {
+  return crypto.createHash('sha256').update(`${candidate.provider}:${candidate.key}`)
+    .digest('hex').slice(0, 16);
+}
+
+function isCoolingDown(candidate) {
+  const state = keyHealth.get(fingerprint(candidate));
+  return !!state && state.until > Date.now();
+}
+
+function markFailure(candidate, cfg, hard = false) {
+  const id = fingerprint(candidate);
+  const state = keyHealth.get(id) || { failures: 0, until: 0 };
+  state.failures += 1;
+  const base = Number(cfg.cooldownMs) || 45000;
+  state.until = Date.now() + Math.min(10 * base, base * (hard ? 1 : state.failures));
+  keyHealth.set(id, state);
+}
+
+function markSuccess(candidate) {
+  keyHealth.delete(fingerprint(candidate));
+}
 
 function orderedCandidates(cfg) {
   const all = [
-    ...cfg.groqKeys.map((key) => ({ provider: 'groq', key })),
-    ...cfg.geminiKeys.map((key) => ({ provider: 'gemini', key }))
+    ...cfg.groqKeys.map((key) => ({ provider: 'groq', key, model: cfg.groqModel })),
+    ...cfg.grokKeys.map((key) => ({ provider: 'grok', key, model: cfg.grokModel })),
+    ...cfg.geminiKeys.map((key) => ({ provider: 'gemini', key, model: cfg.geminiModel }))
   ];
   if (all.length === 0) return [];
   const start = keyCursor % all.length;
@@ -414,6 +502,26 @@ function orderedCandidates(cfg) {
   return [...all.slice(start), ...all.slice(0, start)];
 }
 
+async function callCandidate(candidate, { system, messages, maxTokens, temperature, json, cfg }) {
+  const common = {
+    key: candidate.key,
+    model: candidate.model,
+    messages: [{ role: 'system', content: system }, ...messages],
+    maxTokens,
+    temperature,
+    json,
+    timeoutMs: cfg.requestTimeoutMs
+  };
+  if (candidate.provider === 'groq') return callGroq(common);
+  if (candidate.provider === 'grok') return callGrok(common);
+  return callGemini({ ...common, system });
+}
+
+/**
+ * Appelle le premier fournisseur disponible. Chaque clé est essayée au plus
+ * deux fois ; une réponse coupée est soit poursuivie (texte), soit relancée
+ * avec un budget plus large (JSON), puis on passe à la clé suivante.
+ */
 export async function generateReply({
   system,
   messages,
@@ -423,42 +531,81 @@ export async function generateReply({
   json = false
 }) {
   const candidates = orderedCandidates(cfg);
-  const deadline = Date.now() + 60000;
+  if (!candidates.length) throw new Error('Aucun fournisseur configuré');
+  const deadline = Date.now() + (Number(cfg.totalTimeoutMs) || 65000);
   let lastError = null;
 
-  for (let i = 0; i < candidates.length; i += 1) {
-    if (Date.now() > deadline) break;
-    const candidate = candidates[i];
-    try {
-      if (candidate.provider === 'groq') {
-        return await callGroq({
-          key: candidate.key,
-          model: cfg.groqModel,
-          messages: [{ role: 'system', content: system }, ...messages],
-          maxTokens,
-          temperature,
-          json
+  for (const candidate of candidates) {
+    if (Date.now() >= deadline) break;
+    if (isCoolingDown(candidate)) continue;
+
+    let budget = maxTokens;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      if (Date.now() >= deadline) break;
+      try {
+        const result = await callCandidate(candidate, {
+          system, messages, maxTokens: budget, temperature, json, cfg
         });
+
+        if (result.incomplete) {
+          // Le texte est coupé par max_tokens : on demande la suite plutôt que
+          // de renvoyer une réponse incomplète à l'étudiant.
+          if (!json && result.text) {
+            const followup = [
+              ...messages,
+              { role: 'assistant', content: result.text },
+              {
+                role: 'user',
+                content: 'Continue exactement là où tu t’es arrêté, sans répéter ni conclure à nouveau. Termine la réponse.'
+              }
+            ];
+            const continued = await callCandidate(candidate, {
+              system,
+              messages: followup,
+              maxTokens: Math.min(4000, Math.max(600, Math.round(budget / 2))),
+              temperature,
+              json: false,
+              cfg
+            });
+            if (!continued.incomplete || continued.text) {
+              markSuccess(candidate);
+              return {
+                ...continued,
+                text: `${result.text}${continued.text || ''}`.trim(),
+                usage: {
+                  promptTokens: (result.usage?.promptTokens || 0) + (continued.usage?.promptTokens || 0),
+                  completionTokens: (result.usage?.completionTokens || 0) + (continued.usage?.completionTokens || 0),
+                  totalTokens: (result.usage?.totalTokens || 0) + (continued.usage?.totalTokens || 0)
+                }
+              };
+            }
+          }
+          lastError = new Error('Réponse incomplète');
+          markFailure(candidate, cfg);
+          budget = Math.min(8000, Math.max(budget, 800) + Math.round(budget * 0.6));
+          continue;
+        }
+
+        markSuccess(candidate);
+        return result;
+      } catch (err) {
+        lastError = err;
+        const hard = [400, 401, 403, 429].includes(Number(err?.status));
+        markFailure(candidate, cfg, hard);
+        if (hard) break;
       }
-      return await callGemini({
-        key: candidate.key,
-        model: cfg.geminiModel,
-        system,
-        messages: [{ role: 'system', content: system }, ...messages],
-        maxTokens,
-        temperature,
-        json
-      });
-    } catch (err) {
-      lastError = err;
-      console.warn(
-        `[ai] Fournisseur indisponible (${i + 1}/${candidates.length}) :`,
-        String(err?.message || err).slice(0, 180)
-      );
     }
   }
 
-  throw lastError || new Error('Aucun fournisseur configuré');
+  if (Date.now() >= deadline || lastError?.name === 'AbortError' ||
+      /abort|timeout/i.test(String(lastError?.message))) {
+    const timeout = new Error('Les fournisseurs IA mettent trop de temps à répondre.');
+    timeout.code = 'timeout';
+    throw timeout;
+  }
+  const error = lastError || new Error('Aucun fournisseur disponible');
+  error.code = error.code || 'upstream';
+  throw error;
 }
 
 // ── Routes ────────────────────────────────────────────────────────────
@@ -485,7 +632,7 @@ router.get('/status', requireStudent, (req, res) => {
   const contextLimit = kind === 'general' ? cfg.generalLimit : cfg.maxPerError;
 
   res.json({
-    available: cfg.groqKeys.length + cfg.geminiKeys.length > 0,
+    available: configuredKeyCount(cfg) > 0,
     maxPerError: cfg.maxPerError,
     generalLimit: cfg.generalLimit,
     dailyLimit: cfg.dailyLimit,
@@ -506,9 +653,10 @@ router.get('/status', requireStudent, (req, res) => {
  */
 router.post('/tutor', requireStudent, async (req, res) => {
   const cfg = getConfig();
-  if (cfg.groqKeys.length + cfg.geminiKeys.length === 0) {
+  if (configuredKeyCount(cfg) === 0) {
     return res.status(503).json({
-      error: "L'assistant IA n'est pas encore configuré. Réessayez plus tard."
+      error: "L'assistant IA n'est pas encore activé. Revenez plus tard.",
+      code: 'unavailable'
     });
   }
 
@@ -572,8 +720,12 @@ router.post('/tutor', requireStudent, async (req, res) => {
     releaseQuota(req.user.id, contextKey);
     logAiRequest({ userId: req.user.id, contextKey, status: 'error' });
     console.error('[ai] Tous les fournisseurs ont échoué :', String(err?.message || err).slice(0, 200));
+    const isTimeout = err?.code === 'timeout';
     res.status(502).json({
-      error: "L'assistant IA est momentanément indisponible. Réessayez dans quelques instants."
+      error: isTimeout
+        ? 'Votre question a mis trop de temps à être traitée. Veuillez reformuler votre prompt et réessayer.'
+        : "L'assistant IA est momentanément indisponible. Revenez plus tard.",
+      code: isTimeout ? 'timeout' : 'upstream'
     });
   }
 });
