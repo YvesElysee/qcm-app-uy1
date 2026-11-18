@@ -65,7 +65,12 @@ export function getConfig() {
     // clés, mais chaque appel reste court et le total reste borné.
     requestTimeoutMs: intEnv('AI_REQUEST_TIMEOUT_MS', 15000, 3000, 60000),
     totalTimeoutMs: intEnv('AI_TOTAL_TIMEOUT_MS', 65000, 10000, 180000),
-    cooldownMs: intEnv('AI_KEY_COOLDOWN_MS', 45000, 5000, 600000)
+    cooldownMs: intEnv('AI_KEY_COOLDOWN_MS', 45000, 5000, 600000),
+    // La taille d'une requête compte les tokens d'entrée ET le budget de
+    // sortie. Les offres gratuites (ex. Groq gpt-oss à 8 000 TPM) refusent
+    // sinon les générations à partir de longs documents avec un 413.
+    maxContextChars: intEnv('AI_MAX_CONTEXT_CHARS', 10000, 1000, 60000),
+    maxOutputTokens: intEnv('AI_MAX_OUTPUT_TOKENS', 3000, 500, 8000)
   };
 }
 
@@ -301,6 +306,18 @@ function sanitizeHistory(history) {
 }
 
 // ── Appels fournisseurs (détails conservés côté serveur uniquement) ───
+
+/**
+ * Vrai quand le fournisseur refuse la requête parce qu'elle dépasse son quota
+ * de tokens par minute (ou sa fenêtre de contexte). Dans ce cas, il faut
+ * réduire le contexte, pas changer de clé ni augmenter le budget de sortie.
+ */
+export function isRequestTooLarge(err) {
+  return Number(err?.status) === 413 ||
+    /request too large|tokens per minute|\btpm\b|context length|context window|maximum context/i
+      .test(String(err?.message || ''));
+}
+
 async function fetchJson(url, options, timeoutMs = 15000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -590,8 +607,11 @@ export async function generateReply({
         return result;
       } catch (err) {
         lastError = err;
-        const hard = [400, 401, 403, 429].includes(Number(err?.status));
-        markFailure(candidate, cfg, hard);
+        // Un 413 signale une requête trop volumineuse, pas une clé défectueuse :
+        // on ne la met pas en pause pour pouvoir réessayer avec moins de contexte.
+        const tooLarge = isRequestTooLarge(err);
+        const hard = [400, 401, 403, 413, 429].includes(Number(err?.status)) || tooLarge;
+        if (!tooLarge) markFailure(candidate, cfg, hard);
         if (hard) break;
       }
     }
@@ -605,6 +625,72 @@ export async function generateReply({
   }
   const error = lastError || new Error('Aucun fournisseur disponible');
   error.code = error.code || 'upstream';
+  throw error;
+}
+
+/**
+ * Extrait des documents dans la limite de `maxChars` caractères. Les documents
+ * sont parcourus dans l'ordre et le dernier est tronqué si nécessaire.
+ */
+export function documentContext(documents, maxChars, label = 'Document') {
+  let remaining = Math.max(0, Math.floor(Number(maxChars) || 0));
+  return (Array.isArray(documents) ? documents : []).map((doc) => {
+    if (remaining <= 0) return '';
+    const text = String(doc?.textContent || '');
+    if (!text) return '';
+    const excerpt = text.slice(0, remaining);
+    remaining -= excerpt.length;
+    return `\n\n=== ${label} : ${doc.originalName || 'Document'} ===\n${excerpt}`;
+  }).join('');
+}
+
+/**
+ * Génère une réponse en réduisant automatiquement le contexte documentaire et
+ * le budget de sortie quand le fournisseur refuse la taille de la requête
+ * (HTTP 413 · quota TPM). On conserve toujours un extrait des documents pour
+ * ne pas produire un contenu déconnecté du cours de l'étudiant.
+ */
+export async function generateWithDocumentBudget({
+  documents = [],
+  system,
+  buildMessage,
+  cfg,
+  maxTokens,
+  temperature = 0.3,
+  json = true,
+  documentLabel = 'Document'
+}) {
+  const ceiling = Number(cfg.maxContextChars) || 10000;
+  const levels = [ceiling, Math.round(ceiling * 0.6), Math.round(ceiling * 0.3)];
+  let lastError = null;
+
+  for (const maxChars of levels) {
+    const context = documentContext(documents, maxChars, documentLabel);
+    const budget = maxChars === ceiling
+      ? maxTokens
+      : Math.max(500, Math.round(maxTokens * (maxChars / ceiling)));
+
+    try {
+      const result = await generateReply({
+        system,
+        messages: [{ role: 'user', content: buildMessage(context) }],
+        cfg,
+        maxTokens: budget,
+        temperature,
+        json
+      });
+      return { ...result, contextChars: maxChars };
+    } catch (err) {
+      lastError = err;
+      if (!isRequestTooLarge(err)) throw err;
+    }
+  }
+
+  const error = new Error(
+    'Les documents sont trop volumineux pour le fournisseur IA. Sélectionnez moins de documents ou des extraits plus courts, puis réessayez.'
+  );
+  error.code = 'request_too_large';
+  error.cause = lastError;
   throw error;
 }
 

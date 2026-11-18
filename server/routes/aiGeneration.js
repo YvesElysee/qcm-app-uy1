@@ -16,7 +16,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { db, DATA_DIR } from '../db.js';
 import { requireAdmin } from '../auth.js';
-import { getConfig, generateReply, logAiRequest, configuredKeyCount } from './ai.js';
+import {
+  getConfig, generateWithDocumentBudget, logAiRequest, configuredKeyCount
+} from './ai.js';
 import {
   normalizeFaculte,
   facultyOfFiliere
@@ -256,15 +258,6 @@ router.post('/generate', requireAdmin, async (req, res) => {
     });
   }
 
-  let context = '';
-  const maxContext = 18000;
-  documents.forEach((doc) => {
-    if (context.length >= maxContext) return;
-    const remaining = maxContext - context.length;
-    const text = String(doc.textContent || '').slice(0, Math.min(6000, remaining));
-    context += `\n\n--- Document : ${doc.originalName} ---\n${text}`;
-  });
-
   const system = [
     "Tu es un concepteur pédagogique expert de la plateforme QCM App, spécialisé dans l'évaluation universitaire.",
     'Tu rédiges des QCM en français, rigoureux, sans ambiguïté et strictement fondés sur les documents de référence fournis.',
@@ -317,7 +310,7 @@ router.post('/generate', requireAdmin, async (req, res) => {
     attempts += 1;
     const batch = Math.min(GENERATION_BATCH_SIZE, count - collected.length);
     const avoid = collected.slice(-30).map((q, i) => `${i + 1}. ${q.Question}`);
-    const userMessage = [
+    const buildMessage = (context) => [
       `Génère ${batch} nouvelles questions QCM distinctes.`,
       filiere ? `Filière : ${filiere}.` : '',
       niveau ? `Niveau : ${niveau}.` : '',
@@ -328,11 +321,12 @@ router.post('/generate', requireAdmin, async (req, res) => {
     ].filter(Boolean).join('\n\n');
 
     try {
-      const result = await generateReply({
+      const result = await generateWithDocumentBudget({
+        documents,
         system,
-        messages: [{ role: 'user', content: userMessage }],
+        buildMessage,
         cfg,
-        maxTokens: Math.min(8000, 1200 + batch * 320),
+        maxTokens: Math.min(cfg.maxOutputTokens, 1000 + batch * 260),
         temperature: 0.3,
         json: true
       });
@@ -464,6 +458,15 @@ router.post('/generate', requireAdmin, async (req, res) => {
   } catch (err) {
     logAiRequest({ userId: 'admin', contextKey: 'qcm-generation', status: 'error' });
     console.error('[ai-generation] Échec de génération :', String(err?.message || err).slice(0, 200));
+    if (err?.code === 'request_too_large') {
+      return res.status(413).json({ code: 'request_too_large', error: err.message });
+    }
+    if (Number(err?.status) === 429) {
+      return res.status(429).json({
+        code: 'ai_rate_limit',
+        error: 'Le service IA est momentanément saturé. Réessayez dans un instant.'
+      });
+    }
     res.status(502).json({
       error: "La génération IA a échoué. Vérifiez votre configuration ou réessayez dans un instant."
     });

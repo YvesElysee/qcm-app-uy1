@@ -19,7 +19,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { db, DATA_DIR } from '../db.js';
 import { requireStudent } from '../auth.js';
-import { getConfig, generateReply, logAiRequest, configuredKeyCount } from './ai.js';
+import {
+  getConfig, generateReply, generateWithDocumentBudget, logAiRequest, configuredKeyCount
+} from './ai.js';
 import { extractText } from '../textExtract.js';
 
 const router = Router();
@@ -29,7 +31,6 @@ fs.mkdirSync(EXERCISE_DIR, { recursive: true });
 
 const MAX_DOC_BYTES = 25 * 1024 * 1024;
 const MAX_EXERCISES = 12;
-const MAX_CONTEXT_CHARS = 60000;
 
 const ALLOWED_LEVELS = new Set(['L1', 'L2', 'L3', 'M1', 'M2']);
 const EXERCISE_TYPES = new Set(['qcm', 'qro', 'calcul', 'vrai_faux', 'mixte', 'epreuve', 'autre']);
@@ -458,16 +459,6 @@ router.post('/generate', requireStudent, async (req, res) => {
     reservedDocs = documents.length;
   }
 
-  let remaining = MAX_CONTEXT_CHARS;
-  const context = documents.map((doc) => {
-    const available = Math.max(0, remaining);
-    const excerpt = String(doc.textContent || '').slice(0, available);
-    remaining -= excerpt.length;
-    return excerpt
-      ? `\n\n=== Document : ${doc.originalName} ===\n${excerpt}`
-      : '';
-  }).join('');
-
   const typeInstruction = type === 'mixte'
     ? 'Alterne les formats : au moins un QCM, un QRO et un exercice de calcul.'
     : type === 'epreuve'
@@ -497,7 +488,7 @@ router.post('/generate', requireStudent, async (req, res) => {
     'Pour un QCM, "reponse" contient la lettre de la bonne réponse (A, B, C ou D).'
   ].join('\n');
 
-  const userMessage = [
+  const buildMessage = (context) => [
     `Génère ${count} exercice(s) de ${discipline}${type === 'epreuve' ? ' sous forme d’épreuve type d’examen corrigée' : ''}.`,
     `Filière : ${req.user.filiere || discipline} · Niveau : ${normalizeLevel(req.user.niveau)}.`,
     prompt ? `Consignes de l'étudiant : ${prompt}` : '',
@@ -505,11 +496,12 @@ router.post('/generate', requireStudent, async (req, res) => {
   ].filter(Boolean).join('\n\n');
 
   try {
-    const result = await generateReply({
+    const result = await generateWithDocumentBudget({
+      documents,
       system,
-      messages: [{ role: 'user', content: userMessage }],
+      buildMessage,
       cfg,
-      maxTokens: Math.min(9000, 1400 + count * 420),
+      maxTokens: Math.min(cfg.maxOutputTokens, 900 + count * 220),
       temperature: 0.3,
       json: true
     });
@@ -585,8 +577,17 @@ router.post('/generate', requireStudent, async (req, res) => {
     if (reservedDocs) releaseExamDocs(req.user.id, reservedDocs);
     logAiRequest({ userId: req.user.id, contextKey: 'student-exercises', status: 'error' });
     console.warn('[exercises] Génération impossible :', String(err?.message || err).slice(0, 200));
+    if (err?.code === 'request_too_large') {
+      return res.status(413).json({ code: 'request_too_large', error: err.message });
+    }
+    if (Number(err?.status) === 429) {
+      return res.status(429).json({
+        code: 'ai_rate_limit',
+        error: 'Le service IA est momentanément saturé. Réessayez dans un instant.'
+      });
+    }
     res.status(502).json({
-      error: err?.message || "La génération a échoué. Réessayez dans un instant."
+      error: "La génération a échoué. Vérifiez vos documents ou réessayez dans un instant."
     });
   }
 });
