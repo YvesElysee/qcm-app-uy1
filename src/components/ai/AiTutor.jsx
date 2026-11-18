@@ -3,7 +3,7 @@ import Icon from '../ui/icons.jsx';
 import AiMarkdown from './AiMarkdown.jsx';
 import { askTutor, fetchAiStatus } from '../../services/aiService.js';
 import { getCurrentUser } from '../../services/authService';
-import { pathwayFor } from '../../utils/studentProfile.js';
+import { pathwayFor, normalizeProfileText } from '../../utils/studentProfile.js';
 
 /**
  * Drawer « Tuteur IA » · aide les étudiants à comprendre leurs mauvaises
@@ -47,6 +47,16 @@ const QUICK_PROMPTS_PATHWAY = [
   'Rédige un exercice de rédaction comme au partiel.',
   'Explique-moi la méthode pour résoudre ce type de problème.'
 ];
+
+/** Libellé court de la matière, utilisé dans les invites rapides. */
+function disciplineLabelFor(user) {
+  const filiere = normalizeProfileText(user?.filiere);
+  if (/info|informat/.test(filiere)) return 'calcul scientifique / informatique';
+  if (/math/.test(filiere)) return 'mathématiques';
+  if (/phys/.test(filiere)) return 'physique';
+  if (/droit|jurid/.test(filiere)) return 'droit';
+  return user?.filiere || 'ta filière';
+}
 
 // Identifiant de message · crypto.randomUUID n'existe qu'en contexte sécurisé
 let idSeq = 0;
@@ -105,7 +115,9 @@ export default function AiTutor({ open, onClose, context, status, initialMessage
   const scrollRef = useRef(null);
   const [lastAttempt, setLastAttempt] = useState(null);
   const storageKey = storageKeyFor(context);
-  const pathway = pathwayFor(getCurrentUser());
+  const currentUser = getCurrentUser();
+  const pathway = pathwayFor(currentUser);
+  const disciplineLabel = disciplineLabelFor(currentUser);
 
   const unavailable = aiStatus ? aiStatus.available === false : false;
   const blocked = unavailable || quotaReached || remaining === 0;
@@ -263,7 +275,12 @@ export default function AiTutor({ open, onClose, context, status, initialMessage
   const quickPrompts = context?.kind === 'question'
     ? QUICK_PROMPTS_QUESTION
     : pathway.highlighted
-      ? QUICK_PROMPTS_PATHWAY
+      ? QUICK_PROMPTS_PATHWAY.map((p) =>
+        p.replace(
+          'un sujet type d’épreuve',
+          `un sujet type de ${disciplineLabel}${currentUser?.niveau ? ` ${currentUser.niveau}` : ''}`
+        )
+      )
       : QUICK_PROMPTS_GENERAL;
   const quotaLabel = context?.kind === 'question'
     ? 'cette erreur'

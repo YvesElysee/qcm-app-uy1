@@ -16,6 +16,10 @@ function normalizeMath(text) {
   if (!text) return '';
   let out = String(text);
 
+  // Certains fournisseurs renvoient des backslashes doublés une fois le JSON
+  // décodé : on les ramène à un seul pour retrouver les délimiteurs LaTeX.
+  out = out.replace(/\\\\/g, '\\');
+
   // Formules centrées : \[ ... \] → $$ ... $$
   out = out.replace(/\\\[([\s\S]+?)\\\]/g, (_match, expression) => {
     return `\n\n$$\n${String(expression).trim()}\n$$\n\n`;
@@ -26,7 +30,12 @@ function normalizeMath(text) {
     return `$${String(expression).trim()}$`;
   });
 
-  // Délimiteurs orphelins (réponse tronquée par le fournisseur)
+  // Restes d'environnements d'alignement mal refermés par le modèle
+  // (ex. `\ $ 4pt]` ou `\[4pt]`) : ils n'affichent aucune formule.
+  out = out.replace(/\\\s*\$\s*\d+pt\]/g, '');
+  out = out.replace(/\\\[\s*\d+pt\]/g, '');
+
+  // Délimiteurs orphelins (réponse tronquée par le fournisseur).
   out = out.replace(/\\\[/g, '\n$$\n').replace(/\\\]/g, '\n$$\n');
   out = out.replace(/\\\(/g, '$').replace(/\\\)/g, '$');
 
@@ -38,7 +47,13 @@ export default function AiMarkdown({ content }) {
     <div className="ai-markdown">
       <Markdown
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false }]]}
+        rehypePlugins={[[rehypeKatex, {
+          throwOnError: false,
+          strict: false,
+          // Pas de MathML invisible : copier une réponse ne duplique plus
+          // chaque formule (texte visuel + texte du lecteur d'écran).
+          output: 'html'
+        }]]}
         skipHtml
       >
         {normalizeMath(content)}
