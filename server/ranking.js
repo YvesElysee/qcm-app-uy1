@@ -25,6 +25,26 @@ function isSameStudent(row, viewer) {
   return (email && rowEmail === email) || (name && rowName === name);
 }
 
+const collator = new Intl.Collator('fr', { numeric: true, sensitivity: 'base' });
+const compareText = (a, b) => collator.compare(String(a || ''), String(b || ''));
+
+/**
+ * Ordre pédagogique attendu : faculté → filière → niveau → UE.
+ * À l'intérieur d'une UE, les sessions les plus récentes passent en premier.
+ */
+export function compareRankingGroups(a, b) {
+  return (
+    compareText(a.faculte, b.faculte) ||
+    compareText(a.filiere, b.filiere) ||
+    compareText(a.niveau, b.niveau) ||
+    compareText(a.ue, b.ue) ||
+    (b.sessionTimestamp || 0) - (a.sessionTimestamp || 0) ||
+    compareText(b.date, a.date) ||
+    compareText(a.quizTitle, b.quizTitle) ||
+    compareText(a.quizId, b.quizId)
+  );
+}
+
 /**
  * Construit les groupes de classement à partir des lignes `results`.
  *
@@ -38,11 +58,12 @@ export function buildRankingGroups(rows, viewer = null) {
   (rows || []).forEach((row) => {
     const filiere = String(row.filiere || 'Non renseignée').trim();
     const niveau = String(row.niveau || 'Non renseigné').trim();
+    const faculte = String(row.faculte || '').trim().toUpperCase() || 'FACSCIENCES';
     const sessionTimestamp = Number(row.sessionTimestamp) || 0;
     const ue = String(row.ue || '-');
     const quizId = String(row.quizId || ue);
     const quizTitle = String(row.quizTitle || ue);
-    const key = `${quizId}|${sessionTimestamp}|${filiere}|${niveau}`;
+    const key = `${quizId}|${sessionTimestamp}|${filiere}|${niveau}|${faculte}`;
 
     if (!groups.has(key)) {
       groups.set(key, {
@@ -51,6 +72,7 @@ export function buildRankingGroups(rows, viewer = null) {
         quizId,
         quizTitle,
         sessionTimestamp,
+        faculte,
         filiere,
         niveau,
         salle: `${filiere} · ${niveau}`,
@@ -118,6 +140,7 @@ export function buildRankingGroups(rows, viewer = null) {
         quizId: group.quizId,
         quizTitle: group.quizTitle,
         sessionTimestamp: group.sessionTimestamp,
+        faculte: group.faculte,
         filiere: group.filiere,
         niveau: group.niveau,
         salle: group.salle,
@@ -128,12 +151,7 @@ export function buildRankingGroups(rows, viewer = null) {
         participants
       };
     })
-    .sort(
-      (a, b) =>
-        (b.sessionTimestamp || 0) - (a.sessionTimestamp || 0) ||
-        String(b.date || '').localeCompare(String(a.date || '')) ||
-        a.ue.localeCompare(b.ue, 'fr')
-    );
+    .sort(compareRankingGroups);
 
   return { groups: result };
 }

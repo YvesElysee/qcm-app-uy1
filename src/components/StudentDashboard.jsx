@@ -6,6 +6,9 @@ import ContactAdmin from './ContactAdmin';
 import usePageTitle from '../hooks/usePageTitle';
 import Icon from './ui/icons.jsx';
 
+const textCollator = new Intl.Collator('fr', { numeric: true, sensitivity: 'base' });
+const compareText = (a, b) => textCollator.compare(String(a || ''), String(b || ''));
+
 export default function StudentDashboard() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -191,6 +194,27 @@ export default function StudentDashboard() {
       setLoadingRankings(false);
     }
   };
+
+  // Les classements de la salle sont rangés par UE, puis par session récente.
+  const rankingsByUe = (() => {
+    const byUe = new Map();
+    rankings.forEach((group) => {
+      const code = String(group.ue || '-').trim();
+      if (!byUe.has(code)) byUe.set(code, []);
+      byUe.get(code).push(group);
+    });
+    return [...byUe.entries()]
+      .sort((a, b) => compareText(a[0], b[0]))
+      .map(([code, groups]) => ({
+        code,
+        label: availableUes.find(u => String(u.code || u.id || '').toUpperCase() === code.toUpperCase())?.label || '',
+        groups: [...groups].sort(
+          (a, b) => (b.sessionTimestamp || 0) - (a.sessionTimestamp || 0) ||
+            compareText(b.date, a.date) ||
+            compareText(a.quizTitle, b.quizTitle)
+        )
+      }));
+  })();
 
   // ── Demandes de QCM & parrainage ──
   const requestByUe = new Map();
@@ -1091,7 +1115,7 @@ export default function StudentDashboard() {
               </h3>
               <p className="text-xs text-slate-400 mt-1">
                 Votre salle : <strong className="text-slate-200">{filiere} · {selectedNiveau}</strong>.
-                Chaque étudiant est classé sur sa meilleure tentative, par épreuve et par session.
+                Les classements sont rangés par UE, puis par session récente. Chaque étudiant est classé sur sa meilleure tentative.
               </p>
             </div>
             <button
@@ -1121,73 +1145,93 @@ export default function StudentDashboard() {
                 </p>
               ) : (
                 <div className="space-y-4">
-                  {rankings.map(group => (
-                    <div
-                      key={group.key}
-                      className="bg-slate-900/70 border border-slate-700/80 rounded-2xl overflow-hidden"
-                    >
-                      <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between gap-2 flex-wrap">
-                        <div>
-                          <p className="text-sm font-black text-white">{group.quizTitle || group.ue}</p>
-                          <p className="text-[11px] text-slate-500">
-                            UE {group.ue} · {group.salle} · {formatDate(group.sessionTimestamp)}
-                          </p>
-                        </div>
-                        <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-blue-600/15 text-blue-300 border border-blue-600/30">
-                          {group.count} étudiant(s) · moyenne {Number(group.averageNote).toFixed(2)}/20
+                  {rankingsByUe.map((ueGroup) => (
+                    <section key={ueGroup.code} className="space-y-3">
+                      <div className="px-4 py-2.5 border-l-4 border-blue-600 bg-slate-900/70 rounded-r-xl flex items-center justify-between gap-2 flex-wrap">
+                        <h4 className="text-xs font-black uppercase tracking-wider text-white flex items-center gap-2">
+                          <Icon name="book" size={13} className="text-blue-400" />
+                          UE {ueGroup.code}
+                          {ueGroup.label && ueGroup.label !== ueGroup.code && (
+                            <span className="text-[10px] font-medium text-slate-400 normal-case tracking-normal">
+                              {ueGroup.label}
+                            </span>
+                          )}
+                        </h4>
+                        <span className="text-[10px] font-bold text-slate-500">
+                          {ueGroup.groups.length} session(s)
                         </span>
                       </div>
+                      <div className="space-y-3 pl-1 md:pl-4">
+                        {ueGroup.groups.map(group => (
+                          <div
+                            key={group.key}
+                            className="bg-slate-900/70 border border-slate-700/80 rounded-2xl overflow-hidden"
+                          >
+                            <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between gap-2 flex-wrap">
+                              <div>
+                                <p className="text-sm font-black text-white">{group.quizTitle || group.ue}</p>
+                                <p className="text-[11px] text-slate-500">
+                                  {group.salle} · {formatDate(group.sessionTimestamp)}
+                                </p>
+                              </div>
+                              <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-blue-600/15 text-blue-300 border border-blue-600/30">
+                                {group.count} étudiant(s) · moyenne {Number(group.averageNote).toFixed(2)}/20
+                              </span>
+                            </div>
 
-                      <div className="overflow-x-auto">
-                        <table className="min-w-full text-xs">
-                          <thead>
-                            <tr className="bg-slate-950/80 border-b border-slate-800 text-slate-500 uppercase text-[10px] tracking-wider">
-                              <th className="py-2 px-4 text-left">Rang</th>
-                              <th className="py-2 px-4 text-left">Étudiant</th>
-                              <th className="py-2 px-4 text-right">Score</th>
-                              <th className="py-2 px-4 text-right">Note /20</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-800">
-                            {group.participants.map(p => {
-                              const rankCls = p.rank === 1
-                                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                                : p.rank === 2
-                                  ? 'bg-slate-400/20 text-slate-200 border-slate-400/40'
-                                  : p.rank === 3
-                                    ? 'bg-orange-600/20 text-orange-300 border-orange-600/40'
-                                    : 'bg-slate-800 text-slate-400 border-slate-700';
-                              return (
-                                <tr
-                                  key={`${group.key}-${p.rank}-${p.name}`}
-                                  className={p.isMe ? 'bg-blue-600/10' : ''}
-                                >
-                                  <td className="py-2.5 px-4">
-                                    <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg border text-[11px] font-black ${rankCls}`}>
-                                      {p.rank}
-                                    </span>
-                                  </td>
-                                  <td className="py-2.5 px-4">
-                                    <span className="font-bold text-slate-200">{p.name}</span>
-                                    {p.isMe && (
-                                      <span className="ml-2 text-[9px] font-black text-blue-300 bg-blue-600/20 border border-blue-600/40 px-1.5 py-0.5 rounded-full">
-                                        Moi
-                                      </span>
-                                    )}
-                                  </td>
-                                  <td className="py-2.5 px-4 text-right text-slate-400 font-bold">
-                                    {p.score}/{p.total}
-                                  </td>
-                                  <td className="py-2.5 px-4 text-right font-black text-white">
-                                    {Number(p.note).toFixed(2)}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
+                            <div className="overflow-x-auto">
+                              <table className="min-w-full text-xs">
+                                <thead>
+                                  <tr className="bg-slate-950/80 border-b border-slate-800 text-slate-500 uppercase text-[10px] tracking-wider">
+                                    <th className="py-2 px-4 text-left">Rang</th>
+                                    <th className="py-2 px-4 text-left">Étudiant</th>
+                                    <th className="py-2 px-4 text-right">Score</th>
+                                    <th className="py-2 px-4 text-right">Note /20</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-800">
+                                  {group.participants.map(p => {
+                                    const rankCls = p.rank === 1
+                                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                                      : p.rank === 2
+                                        ? 'bg-slate-400/20 text-slate-200 border-slate-400/40'
+                                        : p.rank === 3
+                                          ? 'bg-orange-600/20 text-orange-300 border-orange-600/40'
+                                          : 'bg-slate-800 text-slate-400 border-slate-700';
+                                    return (
+                                      <tr
+                                        key={`${group.key}-${p.rank}-${p.name}`}
+                                        className={p.isMe ? 'bg-blue-600/10' : ''}
+                                      >
+                                        <td className="py-2.5 px-4">
+                                          <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg border text-[11px] font-black ${rankCls}`}>
+                                            {p.rank}
+                                          </span>
+                                        </td>
+                                        <td className="py-2.5 px-4">
+                                          <span className="font-bold text-slate-200">{p.name}</span>
+                                          {p.isMe && (
+                                            <span className="ml-2 text-[9px] font-black text-blue-300 bg-blue-600/20 border border-blue-600/40 px-1.5 py-0.5 rounded-full">
+                                              Moi
+                                            </span>
+                                          )}
+                                        </td>
+                                        <td className="py-2.5 px-4 text-right text-slate-400 font-bold">
+                                          {p.score}/{p.total}
+                                        </td>
+                                        <td className="py-2.5 px-4 text-right font-black text-white">
+                                          {Number(p.note).toFixed(2)}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                    </div>
+                    </section>
                   ))}
                 </div>
               )}

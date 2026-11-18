@@ -53,6 +53,14 @@ const btnPrimary =
 
 const formatDate = (ts) => (ts ? new Date(ts).toLocaleString('fr-FR') : '-');
 
+// Tri pédagogique partagé : faculté → filière → niveau → UE (L1 avant L2, etc.)
+const textCollator = new Intl.Collator('fr', { numeric: true, sensitivity: 'base' });
+const compareText = (a, b) => textCollator.compare(String(a || ''), String(b || ''));
+const compareFaculte = (a, b) => compareText(a.faculte, b.faculte);
+const compareFiliere = (a, b) => compareText(a.filiere, b.filiere);
+const compareNiveau = (a, b) => compareText(a.niveau, b.niveau);
+const compareUe = (a, b) => compareText(a.ue, b.ue);
+
 /** Convertit un timestamp en valeur d'un champ <input type="datetime-local">. */
 const toDatetimeLocal = (ts) => {
   const date = new Date(Number(ts));
@@ -143,7 +151,8 @@ export default function AdminPanel() {
     search: '',
     semestre: '',
     faculte: '',
-    filiere: ''
+    filiere: '',
+    niveau: ''
   });
   const [launchTime, setLaunchTime] = useState('');
   const [endTime, setEndTime] = useState('');
@@ -1508,9 +1517,12 @@ export default function AdminPanel() {
 
   const rankingsFlatRows = () => {
     const rows = [];
-    rankings.forEach((group) => {
+    sortedRankings.forEach((group) => {
       group.participants.forEach((p) => {
         rows.push({
+          Faculte: group.faculte,
+          Filiere: group.filiere,
+          Niveau: group.niveau,
           Salle: group.salle,
           UE: group.ue,
           Session: sessionLabel(group.sessionTimestamp),
@@ -1557,10 +1569,10 @@ export default function AdminPanel() {
     docPdf.text(`Généré le ${new Date().toLocaleString('fr-FR')} • QCM App`, 14, 21);
 
     const body = [];
-    rankings.forEach((group) => {
+    sortedRankings.forEach((group) => {
       body.push([
         {
-          content: `${group.salle} · ${group.ue} — ${sessionLabel(group.sessionTimestamp)} (${group.count} étudiant(s))`,
+          content: `${group.faculte} · ${group.salle} · UE ${group.ue} — ${sessionLabel(group.sessionTimestamp)} (${group.count} étudiant(s))`,
           colSpan: 6,
           styles: { fillColor: [30, 58, 138], textColor: 255, fontStyle: 'bold' }
         }
@@ -1694,10 +1706,94 @@ export default function AdminPanel() {
           String(q.faculte || '').toUpperCase() === quizFilters.faculte.toUpperCase();
         const matchesFiliere = !quizFilters.filiere ||
           String(q.filiere || '').toLowerCase() === quizFilters.filiere.toLowerCase();
-        return matchesTerm && matchesSemestre && matchesFaculte && matchesFiliere;
+        const matchesNiveau = !quizFilters.niveau ||
+          String(q.niveau || '').toLowerCase() === quizFilters.niveau.toLowerCase();
+        return matchesTerm && matchesSemestre && matchesFaculte && matchesFiliere && matchesNiveau;
       })
       .sort((a, b) => (b.launchTime || 0) - (a.launchTime || 0));
   }, [history, quizFilters]);
+
+  /**
+   * Chaque filière + niveau dispose de son propre espace, contenant ses UE et
+   * les tests programmés pour chacune d'elles. La liste plate `filteredHistory`
+   * reste conservée pour les filtres, l'accueil et les exports par test.
+   */
+  const groupedQuizHistory = useMemo(() => {
+    const sections = new Map();
+    filteredHistory.forEach((q) => {
+      const faculte = String(q.faculte || '').trim().toUpperCase() || 'FACSCIENCES';
+      const filiere = String(q.filiere || '').trim() || 'Filière non renseignée';
+      const niveau = String(q.niveau || '').trim() || 'Niveau non renseigné';
+      const sectionKey = `${faculte}\u0000${filiere}\u0000${niveau}`;
+      if (!sections.has(sectionKey)) {
+        sections.set(sectionKey, { key: sectionKey, faculte, filiere, niveau, ues: new Map(), count: 0 });
+      }
+      const section = sections.get(sectionKey);
+      section.count += 1;
+
+      const code = String(q.ue || q.id || '-').trim();
+      const upperCode = code.toUpperCase();
+      if (!section.ues.has(upperCode)) {
+        const catalogue = allUes.find(u => String(u.code || u.id || '').toUpperCase() === upperCode);
+        section.ues.set(upperCode, {
+          key: upperCode,
+          ue: code,
+          label: catalogue?.label || '',
+          semestre: String(q.semestre || catalogue?.semestre || ''),
+          tests: []
+        });
+      }
+      section.ues.get(upperCode).tests.push(q);
+    });
+
+    return [...sections.values()]
+      .sort((a, b) => compareFaculte(a, b) || compareFiliere(a, b) || compareNiveau(a, b))
+      .map((section) => ({
+        ...section,
+        ues: [...section.ues.values()]
+          .sort((a, b) => compareText(a.semestre, b.semestre) || compareUe(a, b))
+          .map((ue) => ({
+            ...ue,
+            tests: [...ue.tests].sort(
+              (a, b) => compareText(a.semestre, b.semestre) ||
+                (b.launchTime || 0) - (a.launchTime || 0) ||
+                compareText(a.title, b.title)
+            )
+          }))
+      }));
+  }, [filteredHistory, allUes]);
+
+  // Classements : même ordre pédagogique que le serveur, appliqué aussi côté
+  // client pour garantir l'ordre des en-têtes et des exports.
+  const sortedRankings = [...rankings].sort(
+    (a, b) => compareFaculte(a, b) || compareFiliere(a, b) || compareNiveau(a, b) ||
+      compareUe(a, b) || (b.sessionTimestamp || 0) - (a.sessionTimestamp || 0) ||
+      compareText(b.date, a.date) || compareText(a.quizTitle, b.quizTitle)
+  );
+
+  const rankingSections = new Map();
+  sortedRankings.forEach((group) => {
+    const faculte = String(group.faculte || '').trim().toUpperCase() || 'FACSCIENCES';
+    const filiere = String(group.filiere || 'Non renseignée').trim();
+    const niveau = String(group.niveau || 'Non renseigné').trim();
+    const sectionKey = `${faculte}\u0000${filiere}\u0000${niveau}`;
+    if (!rankingSections.has(sectionKey)) {
+      rankingSections.set(sectionKey, { key: sectionKey, faculte, filiere, niveau, ues: new Map(), count: 0 });
+    }
+    const section = rankingSections.get(sectionKey);
+    section.count += 1;
+    const ueKey = String(group.ue || '-').trim().toUpperCase();
+    if (!section.ues.has(ueKey)) section.ues.set(ueKey, []);
+    section.ues.get(ueKey).push(group);
+  });
+  const groupedRankings = [...rankingSections.values()]
+    .sort((a, b) => compareFaculte(a, b) || compareFiliere(a, b) || compareNiveau(a, b))
+    .map((section) => ({
+      ...section,
+      ues: [...section.ues.entries()]
+        .sort((a, b) => compareText(a[0], b[0]))
+        .map(([code, groups]) => ({ key: code, ue: code, groups }))
+    }));
 
   // Cible de l'import CSV (même calcul que le serveur) et questions remplacées.
   const importTargetTitle = quizTitle.trim() || ue.trim().toUpperCase();
@@ -1708,6 +1804,187 @@ export default function AdminPanel() {
   const quizFilterFacultes = useMemo(
     () => [...new Set(history.map(q => q.faculte).filter(Boolean))],
     [history]
+  );
+
+  /** Ligne d'un test : actions inchangées, réutilisée dans chaque espace UE. */
+  const renderQuizRow = (q) => {
+    const isUpcoming = upcomingIds.has(q.id);
+    return (
+      <div key={q.id} className="px-6 py-4 flex flex-col md:flex-row md:items-center gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[10px] font-bold text-blue-300 bg-blue-600/15 px-2 py-0.5 rounded-full">
+              {q.filiere || '-'} · {q.niveau || '-'}
+            </span>
+            {q.semestre && (
+              <span className="text-[10px] font-bold text-emerald-300 bg-emerald-600/15 px-2 py-0.5 rounded-full">
+                S{q.semestre}
+              </span>
+            )}
+            <span
+              className={`inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full ${
+                isUpcoming
+                  ? 'bg-emerald-500/15 text-emerald-300'
+                  : 'bg-slate-800 text-slate-400'
+              }`}
+            >
+              <Icon name={isUpcoming ? 'clock' : 'check-circle'} size={10} />
+              {isUpcoming ? 'À venir' : 'Terminée'}
+            </span>
+          </div>
+          <h4 className="font-black text-white text-base mt-1">
+            {q.title || q.ue || q.id}
+            {editingQuizId === q.id && (
+              <span className="ml-2 text-[10px] font-black text-amber-300 bg-amber-500/15 border border-amber-600/30 px-2 py-0.5 rounded-full align-middle">
+                en cours d'édition
+              </span>
+            )}
+          </h4>
+          <p className="text-[11px] text-slate-500">
+            UE {q.ue || q.id} · {q.questionCount || 0} questions{q.drawCount ? ` • ${q.drawCount} tirées/étudiant` : ''} • {q.timePerQuestion || 60}s/question •
+            Ouverture : {formatDate(q.launchTime)}
+            {q.endTime ? ` • Clôture : ${formatDate(q.endTime)}` : ''}
+          </p>
+        </div>
+        <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+          <button
+            onClick={() => loadQuizForEdit(q)}
+            title="Modifier la programmation de ce test"
+            className={btnSecondary}
+          >
+            <Icon name="edit" size={13} />
+            Modifier
+          </button>
+          <button
+            onClick={() => duplicateQuiz(q)}
+            disabled={duplicatingId === q.id}
+            title="Créer une copie de ce test (questions incluses)"
+            className={btnSecondary}
+          >
+            <Icon name="copy" size={13} />
+            {duplicatingId === q.id ? 'Copie…' : 'Dupliquer'}
+          </button>
+          <button
+            onClick={() => loadInspectQuestions(q.id)}
+            title="Inspecter les questions"
+            className={btnSecondary}
+          >
+            <Icon name="eye" size={13} />
+            Questions
+          </button>
+          <button
+            onClick={() => openResults(q.id)}
+            title="Voir les résultats"
+            className={btnSecondary}
+          >
+            <Icon name="trophy" size={13} />
+            Résultats
+          </button>
+          <button
+            onClick={() => exportCSV(q.id)}
+            title="Exporter les résultats en CSV"
+            className={btnSecondary}
+          >
+            <Icon name="download" size={13} />
+            CSV
+          </button>
+          <button
+            onClick={() => exportPDF(q.id)}
+            title="Exporter le procès-verbal PDF"
+            className={btnSecondary}
+          >
+            <Icon name="document" size={13} />
+            PDF
+          </button>
+          <button
+            onClick={() => deleteQuiz(q.id)}
+            title="Supprimer l'évaluation (résultats conservés)"
+            className="inline-flex items-center gap-1.5 border border-red-900/60 hover:border-red-700 text-red-400 hover:text-red-300 hover:bg-red-950/40 font-bold text-xs px-3 py-2 rounded-xl transition"
+          >
+            <Icon name="trash" size={13} />
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  /** Carte de classement d'une session, réutilisée sous chaque en-tête UE. */
+  const renderRankingCard = (group) => (
+    <div key={group.key} className={`${card} overflow-hidden`}>
+      <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+            <Icon name="trophy" size={15} className="text-amber-400" />
+            {group.quizTitle || group.ue}
+          </h3>
+          <p className="text-[11px] text-slate-500 mt-0.5">
+            {group.salle} · {sessionLabel(group.sessionTimestamp)} · {group.count} étudiant(s) classé(s)
+          </p>
+        </div>
+        <div className="flex items-center gap-2 text-[10px] font-bold flex-wrap">
+          <span className="px-2 py-1 rounded-full bg-blue-600/15 text-blue-300 border border-blue-600/30">
+            Moyenne : {Number(group.averageNote).toFixed(2)}/20
+          </span>
+          <span className="px-2 py-1 rounded-full bg-emerald-600/15 text-emerald-300 border border-emerald-600/30">
+            Meilleure note : {Number(group.bestNote).toFixed(2)}/20
+          </span>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-xs">
+          <thead>
+            <tr className="bg-slate-950 border-b border-slate-800 text-slate-500 uppercase text-[10px] tracking-wider">
+              <th className="py-2.5 px-4 text-left">Rang</th>
+              <th className="py-2.5 px-4 text-left">Étudiant</th>
+              <th className="py-2.5 px-4 text-right">Score</th>
+              <th className="py-2.5 px-4 text-right">Note /20</th>
+              <th className="py-2.5 px-4 text-left">Type</th>
+              <th className="py-2.5 px-4 text-right">Tentatives</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-800">
+            {group.participants.map((p) => {
+              const rankCls = p.rank === 1
+                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                : p.rank === 2
+                  ? 'bg-slate-400/20 text-slate-200 border-slate-400/40'
+                  : p.rank === 3
+                    ? 'bg-orange-600/20 text-orange-300 border-orange-600/40'
+                    : 'bg-slate-800 text-slate-400 border-slate-700';
+              return (
+                <tr
+                  key={`${group.key}-${p.name}-${p.rank}`}
+                  className={p.isMe ? 'bg-blue-600/10' : 'hover:bg-slate-950/60 transition'}
+                >
+                  <td className="py-2.5 px-4">
+                    <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg border text-[11px] font-black ${rankCls}`}>
+                      {p.rank}
+                    </span>
+                  </td>
+                  <td className="py-2.5 px-4">
+                    <span className="font-bold text-slate-200">{p.name}</span>
+                    {p.isMe && (
+                      <span className="ml-2 text-[9px] font-black text-blue-300 bg-blue-600/20 border border-blue-600/40 px-1.5 py-0.5 rounded-full">
+                        Moi
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-2.5 px-4 text-right font-bold text-slate-300">{p.score}/{p.total}</td>
+                  <td className="py-2.5 px-4 text-right font-black text-white">{Number(p.note).toFixed(2)}</td>
+                  <td className="py-2.5 px-4">
+                    <span className={p.isMakeup ? 'text-amber-400 font-bold' : 'text-slate-400'}>
+                      {p.isMakeup ? 'Rattrapage' : 'Régulier'}
+                    </span>
+                  </td>
+                  <td className="py-2.5 px-4 text-right text-slate-400">{p.attempts}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 
   // ══════════════════════════════════════════════════════════════════════
@@ -2403,7 +2680,7 @@ export default function AdminPanel() {
                       Tous les tests ({filteredHistory.length}/{history.length})
                     </h3>
                     <p className="text-[11px] text-slate-500 mt-0.5">
-                      Inspectez, modifiez, dupliquez ou supprimez un test · plusieurs tests par UE sont possibles
+                      Chaque filière + niveau a son espace, avec ses UE et leurs tests · plusieurs tests par UE sont possibles
                     </p>
                   </div>
                   <button onClick={fetchHistory} className={btnSecondary}>
@@ -2413,7 +2690,7 @@ export default function AdminPanel() {
                 </div>
 
                 {/* Filtres de la liste */}
-                <div className="px-6 py-3 border-b border-slate-800 bg-slate-950/40 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                <div className="px-6 py-3 border-b border-slate-800 bg-slate-950/40 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
                   <div className="relative">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">
                       <Icon name="search" size={13} />
@@ -2460,6 +2737,16 @@ export default function AdminPanel() {
                       <option key={fil} value={fil}>{fil}</option>
                     ))}
                   </select>
+                  <select
+                    className={selectCls}
+                    value={quizFilters.niveau}
+                    onChange={e => setQuizFilters(f => ({ ...f, niveau: e.target.value }))}
+                  >
+                    <option value="">Tous les niveaux</option>
+                    {niveaux.map(n => (
+                      <option key={n} value={n}>{n}</option>
+                    ))}
+                  </select>
                 </div>
 
                 {history.length === 0 ? (
@@ -2472,106 +2759,44 @@ export default function AdminPanel() {
                   </p>
                 ) : (
                   <div className="divide-y divide-slate-800">
-                    {filteredHistory.map(q => {
-                      const isUpcoming = upcomingIds.has(q.id);
-                      return (
-                        <div key={q.id} className="px-6 py-4 flex flex-col md:flex-row md:items-center gap-3">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-[10px] font-bold text-blue-300 bg-blue-600/15 px-2 py-0.5 rounded-full">
-                                {q.filiere || '-'} · {q.niveau || '-'}
-                              </span>
-                              {q.semestre && (
-                                <span className="text-[10px] font-bold text-emerald-300 bg-emerald-600/15 px-2 py-0.5 rounded-full">
-                                  S{q.semestre}
+                    {groupedQuizHistory.map((section) => (
+                      <section key={section.key}>
+                        <div className="px-6 py-2.5 bg-slate-950/70 border-b border-slate-800 flex items-center justify-between gap-2 flex-wrap">
+                          <h4 className="text-xs font-black text-white uppercase tracking-wider flex items-center gap-2">
+                            <Icon name="list" size={13} className="text-blue-400" />
+                            {section.filiere} · {section.niveau}
+                          </h4>
+                          <span className="text-[10px] font-bold text-slate-500">
+                            {section.faculte} · {section.count} test(s) · {section.ues.size} UE
+                          </span>
+                        </div>
+                        {section.ues.map((ueGroup) => (
+                          <div key={`${section.key}-${ueGroup.key}`}>
+                            <div className="px-6 py-2 bg-slate-900/60 border-b border-slate-800 flex items-center justify-between gap-2 flex-wrap">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-[11px] font-black text-blue-300">
+                                  UE {ueGroup.ue}
                                 </span>
-                              )}
-                              <span
-                                className={`inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full ${
-                                  isUpcoming
-                                    ? 'bg-emerald-500/15 text-emerald-300'
-                                    : 'bg-slate-800 text-slate-400'
-                                }`}
-                              >
-                                <Icon name={isUpcoming ? 'clock' : 'check-circle'} size={10} />
-                                {isUpcoming ? 'À venir' : 'Terminée'}
+                                {ueGroup.label && ueGroup.label !== ueGroup.ue && (
+                                  <span className="text-[10px] text-slate-400">{ueGroup.label}</span>
+                                )}
+                                {ueGroup.semestre && (
+                                  <span className="text-[9px] font-bold text-emerald-300 bg-emerald-600/15 px-1.5 py-0.5 rounded-full">
+                                    S{ueGroup.semestre}
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-[10px] font-bold text-slate-500">
+                                {ueGroup.tests.length} test(s) programmé(s)
                               </span>
                             </div>
-                            <h4 className="font-black text-white text-base mt-1">
-                              {q.title || q.ue || q.id}
-                              {editingQuizId === q.id && (
-                                <span className="ml-2 text-[10px] font-black text-amber-300 bg-amber-500/15 border border-amber-600/30 px-2 py-0.5 rounded-full align-middle">
-                                  en cours d'édition
-                                </span>
-                              )}
-                            </h4>
-                            <p className="text-[11px] text-slate-500">
-                              UE {q.ue || q.id} · {q.questionCount || 0} questions{q.drawCount ? ` • ${q.drawCount} tirées/étudiant` : ''} • {q.timePerQuestion || 60}s/question •
-                              Ouverture : {formatDate(q.launchTime)}
-                              {q.endTime ? ` • Clôture : ${formatDate(q.endTime)}` : ''}
-                            </p>
+                            <div className="divide-y divide-slate-800">
+                              {ueGroup.tests.map(renderQuizRow)}
+                            </div>
                           </div>
-                          <div className="flex items-center gap-1.5 flex-wrap shrink-0">
-                            <button
-                              onClick={() => loadQuizForEdit(q)}
-                              title="Modifier la programmation de ce test"
-                              className={btnSecondary}
-                            >
-                              <Icon name="edit" size={13} />
-                              Modifier
-                            </button>
-                            <button
-                              onClick={() => duplicateQuiz(q)}
-                              disabled={duplicatingId === q.id}
-                              title="Créer une copie de ce test (questions incluses)"
-                              className={btnSecondary}
-                            >
-                              <Icon name="copy" size={13} />
-                              {duplicatingId === q.id ? 'Copie…' : 'Dupliquer'}
-                            </button>
-                            <button
-                              onClick={() => loadInspectQuestions(q.id)}
-                              title="Inspecter les questions"
-                              className={btnSecondary}
-                            >
-                              <Icon name="eye" size={13} />
-                              Questions
-                            </button>
-                            <button
-                              onClick={() => openResults(q.id)}
-                              title="Voir les résultats"
-                              className={btnSecondary}
-                            >
-                              <Icon name="trophy" size={13} />
-                              Résultats
-                            </button>
-                            <button
-                              onClick={() => exportCSV(q.id)}
-                              title="Exporter les résultats en CSV"
-                              className={btnSecondary}
-                            >
-                              <Icon name="download" size={13} />
-                              CSV
-                            </button>
-                            <button
-                              onClick={() => exportPDF(q.id)}
-                              title="Exporter le procès-verbal PDF"
-                              className={btnSecondary}
-                            >
-                              <Icon name="document" size={13} />
-                              PDF
-                            </button>
-                            <button
-                              onClick={() => deleteQuiz(q.id)}
-                              title="Supprimer l'évaluation (résultats conservés)"
-                              className="inline-flex items-center gap-1.5 border border-red-900/60 hover:border-red-700 text-red-400 hover:text-red-300 hover:bg-red-950/40 font-bold text-xs px-3 py-2 rounded-xl transition"
-                            >
-                              <Icon name="trash" size={13} />
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
+                        ))}
+                      </section>
+                    ))}
                   </div>
                 )}
               </div>
@@ -3775,9 +4000,9 @@ export default function AdminPanel() {
 
                 <div className="flex items-center justify-between gap-3 flex-wrap mt-5">
                   <p className="text-[11px] text-slate-500 max-w-xl leading-relaxed">
-                    Une salle correspond à la classe de l'étudiant (filière + niveau). Chaque étudiant est
-                    classé sur sa meilleure tentative, par épreuve et par session. Les exports reprennent
-                    exactement les filtres appliqués.
+                    Les classements sont présentés par filière → niveau → UE, puis par session (la plus
+                    récente d'abord). Chaque étudiant est classé sur sa meilleure tentative. Les exports
+                    reprennent exactement cet ordre et les filtres appliqués.
                   </p>
                   <div className="flex items-center gap-2">
                     <button
@@ -3809,82 +4034,30 @@ export default function AdminPanel() {
                   Aucun classement trouvé pour ces filtres. Les classements apparaissent après les premières copies corrigées.
                 </div>
               ) : (
-                rankings.map((group) => (
-                  <div key={group.key} className={`${card} overflow-hidden`}>
-                    <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between gap-3 flex-wrap">
-                      <div>
-                        <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
-                          <Icon name="trophy" size={15} className="text-amber-400" />
-                          {group.salle} · {group.ue}
-                        </h3>
-                        <p className="text-[11px] text-slate-500 mt-0.5">
-                          {sessionLabel(group.sessionTimestamp)} · {group.count} étudiant(s) classé(s)
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2 text-[10px] font-bold flex-wrap">
-                        <span className="px-2 py-1 rounded-full bg-blue-600/15 text-blue-300 border border-blue-600/30">
-                          Moyenne : {Number(group.averageNote).toFixed(2)}/20
-                        </span>
-                        <span className="px-2 py-1 rounded-full bg-emerald-600/15 text-emerald-300 border border-emerald-600/30">
-                          Meilleure note : {Number(group.bestNote).toFixed(2)}/20
-                        </span>
-                      </div>
+                groupedRankings.map((section) => (
+                  <section key={section.key} className="space-y-3">
+                    <div className="px-5 py-3 border-l-4 border-blue-600 bg-slate-900/70 rounded-r-xl flex items-center justify-between gap-2 flex-wrap">
+                      <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                        <Icon name="list" size={14} className="text-blue-400" />
+                        {section.filiere} · {section.niveau}
+                      </h3>
+                      <span className="text-[10px] font-bold text-slate-500">
+                        {section.faculte} · {section.count} classement(s) · {section.ues.size} UE
+                      </span>
                     </div>
-
-                    <div className="overflow-x-auto">
-                      <table className="min-w-full text-xs">
-                        <thead>
-                          <tr className="bg-slate-950 border-b border-slate-800 text-slate-500 uppercase text-[10px] tracking-wider">
-                            <th className="py-2.5 px-4 text-left">Rang</th>
-                            <th className="py-2.5 px-4 text-left">Étudiant</th>
-                            <th className="py-2.5 px-4 text-right">Score</th>
-                            <th className="py-2.5 px-4 text-right">Note /20</th>
-                            <th className="py-2.5 px-4 text-left">Type</th>
-                            <th className="py-2.5 px-4 text-right">Tentatives</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-800">
-                          {group.participants.map((p) => {
-                            const rankCls = p.rank === 1
-                              ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                              : p.rank === 2
-                                ? 'bg-slate-400/20 text-slate-200 border-slate-400/40'
-                                : p.rank === 3
-                                  ? 'bg-orange-600/20 text-orange-300 border-orange-600/40'
-                                  : 'bg-slate-800 text-slate-400 border-slate-700';
-                            return (
-                              <tr
-                                key={`${group.key}-${p.name}-${p.rank}`}
-                                className={p.isMe ? 'bg-blue-600/10' : 'hover:bg-slate-950/60 transition'}
-                              >
-                                <td className="py-2.5 px-4">
-                                  <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg border text-[11px] font-black ${rankCls}`}>
-                                    {p.rank}
-                                  </span>
-                                </td>
-                                <td className="py-2.5 px-4">
-                                  <span className="font-bold text-slate-200">{p.name}</span>
-                                  {p.isMe && (
-                                    <span className="ml-2 text-[9px] font-black text-blue-300 bg-blue-600/20 border border-blue-600/40 px-1.5 py-0.5 rounded-full">
-                                      Moi
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="py-2.5 px-4 text-right font-bold text-slate-300">{p.score}/{p.total}</td>
-                                <td className="py-2.5 px-4 text-right font-black text-white">{Number(p.note).toFixed(2)}</td>
-                                <td className="py-2.5 px-4">
-                                  <span className={p.isMakeup ? 'text-amber-400 font-bold' : 'text-slate-400'}>
-                                    {p.isMakeup ? 'Rattrapage' : 'Régulier'}
-                                  </span>
-                                </td>
-                                <td className="py-2.5 px-4 text-right text-slate-400">{p.attempts}</td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
+                    {section.ues.map((ueGroup) => (
+                      <div key={`${section.key}-${ueGroup.key}`} className="space-y-3 pl-1 md:pl-4">
+                        <h4 className="text-[11px] font-black uppercase tracking-wider text-blue-300 flex items-center gap-2">
+                          <Icon name="book" size={13} />
+                          UE {ueGroup.ue}
+                          <span className="text-[10px] text-slate-500 font-bold bg-slate-950 border border-slate-800 px-1.5 py-0.5 rounded-full">
+                            {ueGroup.groups.length} session(s)
+                          </span>
+                        </h4>
+                        {ueGroup.groups.map(renderRankingCard)}
+                      </div>
+                    ))}
+                  </section>
                 ))
               )}
             </div>
