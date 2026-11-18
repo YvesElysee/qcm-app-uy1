@@ -114,9 +114,11 @@ export default function NotificationBell({ compact = false }) {
           ? 'alert'
           : type === 'quiz_request_validated'
             ? 'clock'
-            : type === 'quiz_request_approved' || type === 'referral_joined'
-              ? 'trophy'
-              : 'bell';
+            : type === 'feedback_reply'
+              ? 'mail'
+              : type === 'quiz_request_approved' || type === 'referral_joined'
+                ? 'trophy'
+                : 'bell';
 
   return (
     <div className="relative" ref={wrapRef}>

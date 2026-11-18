@@ -160,6 +160,76 @@ export async function sendFiliereAvailableEmail({ email, name, filiere, faculte 
 }
 
 /**
+ * Échappe le texte injecté dans un email HTML (réponses admin, sujet, etc.).
+ */
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
+ * Transmet à l'étudiant la réponse donnée par l'administration à un message.
+ * L'email est complémentaire de la notification interne : si SMTP n'est pas
+ * configuré, la réponse reste consultable dans l'application.
+ */
+export async function sendFeedbackReplyEmail({ email, name, subject, originalMessage, reply }) {
+  const { email: user, appPassword: pass } = getSmtpConfig();
+  if (!user || !pass || !email) return { success: false, skipped: true, error: 'SMTP non configuré' };
+
+  const transporter = createGmailTransporter(user, pass);
+  const safeName = escapeHtml(name || 'Étudiant');
+  const safeSubject = escapeHtml(subject || 'Votre message');
+  const safeOriginal = escapeHtml(originalMessage || '').slice(0, 500);
+  const safeReply = escapeHtml(reply || '').replace(/\n/g, '<br />');
+
+  const htmlContent = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h2 style="color: #2563eb; margin: 0; font-size: 24px;">QCM App</h2>
+        <p style="color: #64748b; font-size: 14px; margin-top: 4px;">Réponse de l'administration</p>
+      </div>
+      <div style="background-color: #f8fafc; border-radius: 12px; padding: 20px;">
+        <p style="color: #334155; font-size: 15px; margin-top: 0;">Bonjour <strong>${safeName}</strong>,</p>
+        <p style="color: #334155; font-size: 14px; line-height: 1.6;">
+          L'administration a répondu à votre message concernant <strong>${safeSubject}</strong>.
+        </p>
+        ${safeOriginal ? `<div style="border-left: 3px solid #cbd5e1; padding-left: 12px; color: #64748b; font-size: 13px; margin: 16px 0;">${safeOriginal}</div>` : ''}
+        <div style="background-color: #ffffff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 16px; color: #1e293b; font-size: 14px; line-height: 1.7;">
+          ${safeReply}
+        </div>
+        <div style="text-align: center; margin: 24px 0;">
+          <a href="${process.env.APP_URL || 'https://qcm-app.local'}/contact"
+             style="display: inline-block; background: #2563eb; color: #ffffff; text-decoration: none; font-weight: bold; padding: 12px 24px; border-radius: 10px;">
+            Voir mes messages
+          </a>
+        </div>
+      </div>
+      <p style="color: #94a3b8; font-size: 12px; text-align: center;">
+        Vous recevez cet email car vous avez envoyé un message depuis QCM App.
+      </p>
+    </div>
+  `;
+
+  try {
+    await transporter.sendMail({
+      from: `"QCM App" <${user}>`,
+      to: email,
+      subject: `Re : ${String(subject || 'Votre message').slice(0, 150)} · QCM App`,
+      text: `Bonjour ${name || 'Étudiant'},\n\n${reply}\n\nQCM App`,
+      html: htmlContent
+    });
+    return { success: true };
+  } catch (err) {
+    console.error('Erreur lors de l\'envoi de l\'email de réponse :', err);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
  * Teste la connexion SMTP et envoie un email de test (panneau admin).
  * Retourne { success, message?, error? } · identique à l'ancien handler.
  */

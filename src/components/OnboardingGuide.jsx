@@ -17,9 +17,9 @@ const SECTIONS = [
     items: [
       { icon: 'home', label: 'Accueil', role: "Présentation de la plateforme et prochaines évaluations publiques." },
       { icon: 'calendar', label: 'Planning', role: "Calendrier des épreuves à venir, des épreuves terminées et des rattrapages." },
-      { icon: 'book', label: 'Ressources', role: "Documents de cours déposés par l'administration pour votre filière." },
+      { icon: 'book', label: 'Ressources', role: "Documents classés par type (cours, TD, TP, examens, corrigés, fiches) pour votre filière." },
       { icon: 'sparkles', label: 'Exercices', role: "Générateur d'exercices corrigés (filières mathématiques)." },
-      { icon: 'mail', label: 'Contact', role: "Contacter l'administration : suggestions, signalements d'erreurs et demandes d'assistance." },
+      { icon: 'mail', label: 'Contact', role: "Écrire à l'administration et lire ses réponses dans « Mes Messages Envoyés »." },
       { icon: 'graduation', label: 'Mon espace', role: "Votre tableau de bord : matières, tests, notes, demandes et parrainage." },
       { icon: 'sparkles', label: 'Tuteur IA', role: "Aide à la révision : notions, exemples et explications de vos erreurs (5 questions / 24 h)." },
       { icon: 'bell', label: 'Cloche de notifications', role: "Vous prévient d'un nouveau test, d'une programmation ou d'une demande validée." },

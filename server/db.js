@@ -123,8 +123,13 @@ db.exec(`
     subject         TEXT,
     message         TEXT,
     status          TEXT DEFAULT 'en_attente',  -- 'en_attente' | 'en_cours' | 'traite'
-    date            TEXT
+    date            TEXT,
+    reply           TEXT DEFAULT '',            -- réponse de l'administration
+    repliedAt       TEXT,
+    repliedBy       TEXT DEFAULT 'admin'
   );
+  CREATE INDEX IF NOT EXISTS idx_feedback_user ON feedback(userId);
+  CREATE INDEX IF NOT EXISTS idx_feedback_email ON feedback(email);
 
   -- Unités d'enseignement (ex-collection "ues")
   CREATE TABLE IF NOT EXISTS ues (
@@ -276,6 +281,7 @@ db.exec(`
     title        TEXT NOT NULL,
     description  TEXT DEFAULT '',
     ue           TEXT DEFAULT '',
+    type         TEXT DEFAULT 'autre',           -- cours | td | tp | examen | corrige | fiche | autre
     faculte      TEXT,
     filiere      TEXT,
     niveau       TEXT,
@@ -393,13 +399,24 @@ ensureColumn('quizzes', 'title', "TEXT DEFAULT ''");
 // Les copies mémorisent le test exact (et son intitulé) en plus de l'UE.
 ensureColumn('results', 'quizId', "TEXT DEFAULT ''");
 ensureColumn('results', 'quizTitle', "TEXT DEFAULT ''");
+// Les documents de cours sont classés par type (cours, TD, TP, examen…).
+ensureColumn('resources', 'type', "TEXT DEFAULT 'autre'");
+// L'administration peut répondre à un message depuis le panneau de contrôle.
+ensureColumn('feedback', 'reply', "TEXT DEFAULT ''");
+ensureColumn('feedback', 'repliedAt', 'TEXT');
+ensureColumn('feedback', 'repliedBy', "TEXT DEFAULT 'admin'");
 
 db.exec(`
   CREATE INDEX IF NOT EXISTS idx_results_quiz ON results(quizId);
+  CREATE INDEX IF NOT EXISTS idx_resources_type ON resources(type);
+  CREATE INDEX IF NOT EXISTS idx_feedback_user ON feedback(userId);
+  CREATE INDEX IF NOT EXISTS idx_feedback_email ON feedback(email);
   UPDATE quizzes SET title = COALESCE(NULLIF(TRIM(ue), ''), id)
     WHERE title IS NULL OR TRIM(title) = '';
   UPDATE results SET quizId = ue WHERE quizId IS NULL OR TRIM(quizId) = '';
   UPDATE results SET quizTitle = ue WHERE quizTitle IS NULL OR TRIM(quizTitle) = '';
+  UPDATE resources SET type = 'autre' WHERE type IS NULL OR TRIM(type) = '';
+  UPDATE feedback SET reply = '' WHERE reply IS NULL;
 `);
 
 // Division par semestre : le catalogue UE hérite du semestre des épreuves

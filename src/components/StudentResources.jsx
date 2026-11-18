@@ -2,6 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, getSession } from '../services/api';
 import usePageTitle from '../hooks/usePageTitle';
+import {
+  RESOURCE_TYPES,
+  normalizeResourceType,
+  resourceTypeIcon,
+  resourceTypeLabel
+} from '../constants/resourceTypes.js';
 import Icon from './ui/icons.jsx';
 
 const MAX_FILE_MB = 25;
@@ -38,6 +44,8 @@ export default function StudentResources() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [ue, setUe] = useState('');
+  const [type, setType] = useState('cours');
+  const [typeFilter, setTypeFilter] = useState('all');
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
@@ -71,6 +79,7 @@ export default function StudentResources() {
     setTitle('');
     setDescription('');
     setUe('');
+    setType('cours');
     setFile(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -95,6 +104,7 @@ export default function StudentResources() {
       body.append('title', title.trim() || file.name);
       body.append('description', description.trim());
       body.append('ue', ue.trim());
+      body.append('type', type);
       body.append('file', file);
 
       const token = getSession()?.token;
@@ -159,6 +169,28 @@ export default function StudentResources() {
     () => resources.reduce((sum, r) => sum + (Number(r.downloads) || 0), 0),
     [resources]
   );
+
+  // Les documents sont regroupés par type, dans l'ordre pédagogique fixé par
+  // RESOURCE_TYPES. Le filtre ne masque que l'affichage, pas les compteurs.
+  const countsByType = useMemo(() => {
+    const counts = {};
+    resources.forEach((item) => {
+      const key = normalizeResourceType(item.type);
+      counts[key] = (counts[key] || 0) + 1;
+    });
+    return counts;
+  }, [resources]);
+
+  const groupedResources = useMemo(() => {
+    const visible = typeFilter === 'all'
+      ? resources
+      : resources.filter((item) => normalizeResourceType(item.type) === typeFilter);
+    return RESOURCE_TYPES
+      .map((entry) => ({ ...entry, items: visible.filter((item) => normalizeResourceType(item.type) === entry.value) }))
+      .filter((group) => group.items.length > 0);
+  }, [resources, typeFilter]);
+
+  const visibleCount = groupedResources.reduce((sum, group) => sum + group.items.length, 0);
 
   return (
     <div className="flex-1 bg-slate-950 py-8 px-4">
@@ -233,7 +265,7 @@ export default function StudentResources() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div>
               <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
                 Titre
@@ -245,6 +277,20 @@ export default function StudentResources() {
                 onChange={(e) => setTitle(e.target.value)}
                 className="w-full p-2.5 border border-slate-800 rounded-xl bg-slate-950 text-slate-100 placeholder:text-slate-600 focus:border-blue-600 outline-none transition text-xs"
               />
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                Type de document
+              </label>
+              <select
+                value={type}
+                onChange={(e) => setType(e.target.value)}
+                className="w-full p-2.5 border border-slate-800 rounded-xl bg-slate-950 text-slate-100 focus:border-blue-600 outline-none transition text-xs font-medium"
+              >
+                {RESOURCE_TYPES.map((entry) => (
+                  <option key={entry.value} value={entry.value}>{entry.label}</option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
@@ -291,12 +337,50 @@ export default function StudentResources() {
           </div>
         </form>
 
-        {/* Liste */}
+        {/* Liste classée par type */}
         <div className="bg-slate-900/70 border border-slate-800 rounded-3xl p-5">
-          <h2 className="text-sm font-black text-white mb-3 flex items-center gap-2">
-            <Icon name="document" size={16} className="text-blue-400" />
-            Documents disponibles
-          </h2>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <h2 className="text-sm font-black text-white flex items-center gap-2">
+              <Icon name="document" size={16} className="text-blue-400" />
+              Documents disponibles
+            </h2>
+            {!loading && resources.length > 0 && (
+              <span className="text-[10px] font-bold text-slate-500">
+                Classés par type · {visibleCount} affiché(s)
+              </span>
+            )}
+          </div>
+
+          {!loading && resources.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-4 mb-5">
+              <button
+                type="button"
+                onClick={() => setTypeFilter('all')}
+                className={`text-[10px] font-black px-2.5 py-1.5 rounded-lg border transition ${
+                  typeFilter === 'all'
+                    ? 'bg-blue-600 text-white border-blue-500'
+                    : 'bg-slate-950 text-slate-400 border-slate-800 hover:border-slate-600 hover:text-white'
+                }`}
+              >
+                Tous ({resources.length})
+              </button>
+              {RESOURCE_TYPES.filter((entry) => countsByType[entry.value]).map((entry) => (
+                <button
+                  key={entry.value}
+                  type="button"
+                  onClick={() => setTypeFilter(entry.value)}
+                  className={`inline-flex items-center gap-1 text-[10px] font-black px-2.5 py-1.5 rounded-lg border transition ${
+                    typeFilter === entry.value
+                      ? 'bg-blue-600 text-white border-blue-500'
+                      : 'bg-slate-950 text-slate-400 border-slate-800 hover:border-slate-600 hover:text-white'
+                  }`}
+                >
+                  <Icon name={entry.icon} size={11} />
+                  {entry.label} ({countsByType[entry.value]})
+                </button>
+              ))}
+            </div>
+          )}
 
           {loading ? (
             <p className="text-xs text-slate-500 text-center py-10 animate-pulse">Chargement…</p>
@@ -310,57 +394,77 @@ export default function StudentResources() {
                 Soyez le premier à partager un document utile à la promotion.
               </p>
             </div>
+          ) : groupedResources.length === 0 ? (
+            <p className="text-xs text-slate-500 text-center py-10">
+              Aucun document de ce type pour le moment.
+            </p>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {resources.map((item) => (
-                <div
-                  key={item.id}
-                  className="bg-slate-950/60 border border-slate-800 hover:border-slate-700 rounded-2xl p-4 flex flex-col justify-between gap-3 transition"
-                >
-                  <div>
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="text-[9px] font-black px-2 py-1 rounded-lg bg-blue-600/15 text-blue-300 border border-blue-600/30 shrink-0">
-                          {fileLabel(item.originalName)}
-                        </span>
-                        <h3 className="text-sm font-bold text-white truncate">{item.title}</h3>
-                      </div>
-                      {canDelete(item) && (
+            <div className="space-y-6">
+              {groupedResources.map((group) => (
+                <section key={group.value}>
+                  <h3 className="text-[11px] font-black uppercase tracking-wider text-blue-300 flex items-center gap-2 mb-2.5">
+                    <Icon name={resourceTypeIcon(group.value)} size={14} />
+                    {group.label}
+                    <span className="text-[10px] text-slate-500 font-bold bg-slate-950 border border-slate-800 px-1.5 py-0.5 rounded-full">
+                      {group.items.length}
+                    </span>
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {group.items.map((item) => (
+                      <div
+                        key={item.id}
+                        className="bg-slate-950/60 border border-slate-800 hover:border-slate-700 rounded-2xl p-4 flex flex-col justify-between gap-3 transition"
+                      >
+                        <div>
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                              <span className="text-[9px] font-black px-2 py-1 rounded-lg bg-emerald-600/15 text-emerald-300 border border-emerald-600/30 shrink-0">
+                                {resourceTypeLabel(item.type)}
+                              </span>
+                              <span className="text-[9px] font-black px-2 py-1 rounded-lg bg-blue-600/15 text-blue-300 border border-blue-600/30 shrink-0">
+                                {fileLabel(item.originalName)}
+                              </span>
+                              <h3 className="text-sm font-bold text-white truncate">{item.title}</h3>
+                            </div>
+                            {canDelete(item) && (
+                              <button
+                                type="button"
+                                onClick={() => handleDelete(item)}
+                                aria-label="Supprimer la ressource"
+                                className="text-slate-600 hover:text-red-400 transition shrink-0"
+                              >
+                                <Icon name="trash" size={14} />
+                              </button>
+                            )}
+                          </div>
+                          {item.description && (
+                            <p className="text-[11px] text-slate-400 mt-1.5 line-clamp-2">
+                              {item.description}
+                            </p>
+                          )}
+                          <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-500 mt-2">
+                            {item.ue && <span>UE : <strong className="text-slate-400">{item.ue}</strong></span>}
+                            <span>{humanSize(item.size)}</span>
+                            <span>{item.downloads || 0} téléch.</span>
+                          </div>
+                          <p className="text-[10px] text-slate-500 mt-1">
+                            Par {item.uploaderName || 'Anonyme'}
+                            {item.uploaderRole === 'admin' ? ' · Administration' : ''}
+                          </p>
+                        </div>
+
                         <button
                           type="button"
-                          onClick={() => handleDelete(item)}
-                          aria-label="Supprimer la ressource"
-                          className="text-slate-600 hover:text-red-400 transition shrink-0"
+                          onClick={() => handleDownload(item)}
+                          className="inline-flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold px-3 py-2 rounded-xl transition"
                         >
-                          <Icon name="trash" size={14} />
+                          <Icon name="download" size={14} />
+                          Télécharger
                         </button>
-                      )}
-                    </div>
-                    {item.description && (
-                      <p className="text-[11px] text-slate-400 mt-1.5 line-clamp-2">
-                        {item.description}
-                      </p>
-                    )}
-                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-500 mt-2">
-                      {item.ue && <span>UE : <strong className="text-slate-400">{item.ue}</strong></span>}
-                      <span>{humanSize(item.size)}</span>
-                      <span>{item.downloads || 0} téléch.</span>
-                    </div>
-                    <p className="text-[10px] text-slate-500 mt-1">
-                      Par {item.uploaderName || 'Anonyme'}
-                      {item.uploaderRole === 'admin' ? ' · Administration' : ''}
-                    </p>
+                      </div>
+                    ))}
                   </div>
-
-                  <button
-                    type="button"
-                    onClick={() => handleDownload(item)}
-                    className="inline-flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold px-3 py-2 rounded-xl transition"
-                  >
-                    <Icon name="download" size={14} />
-                    Télécharger
-                  </button>
-                </div>
+                </section>
               ))}
             </div>
           )}

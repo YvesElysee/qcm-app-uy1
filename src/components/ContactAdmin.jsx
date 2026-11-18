@@ -11,7 +11,7 @@ const CATEGORIES = [
   "Autre demande"
 ];
 
-export default function ContactAdmin({ onClose, preselectedUe = '' }) {
+export default function ContactAdmin({ onClose, preselectedUe = '', initialTab = 'new' }) {
   const user = getCurrentUser() || {};
   const [category, setCategory] = useState(CATEGORIES[0]);
   const [ue, setUe] = useState(preselectedUe);
@@ -20,7 +20,7 @@ export default function ContactAdmin({ onClose, preselectedUe = '' }) {
   const [submitting, setSubmitting] = useState(false);
   const [sentSuccess, setSentSuccess] = useState(false);
   const [myMessages, setMyMessages] = useState([]);
-  const [activeTab, setActiveTab] = useState('new'); // 'new' | 'history'
+  const [activeTab, setActiveTab] = useState(initialTab === 'history' ? 'history' : 'new'); // 'new' | 'history'
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   useEffect(() => {
@@ -237,6 +237,19 @@ export default function ContactAdmin({ onClose, preselectedUe = '' }) {
           )
         ) : (
           <div className="space-y-3 max-h-96 overflow-y-auto">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <p className="text-[11px] text-slate-500">
+                Les réponses de l'administration apparaissent sous votre message.
+              </p>
+              <button
+                type="button"
+                onClick={() => setRefreshTrigger(t => t + 1)}
+                className="inline-flex items-center gap-1.5 text-[11px] font-bold text-blue-300 hover:text-blue-200 border border-blue-800/60 bg-blue-950/40 px-2.5 py-1.5 rounded-lg transition"
+              >
+                <Icon name="refresh" size={12} />
+                Actualiser
+              </button>
+            </div>
             {myMessages.length === 0 ? (
               <p className="text-slate-500 text-xs italic text-center py-10">
                 Vous n'avez envoyé aucun message pour le moment.
@@ -261,10 +274,19 @@ export default function ContactAdmin({ onClose, preselectedUe = '' }) {
                       {msg.status === 'traite' ? 'Traité' : msg.status === 'en_cours' ? 'En cours' : 'En attente'}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-300 leading-relaxed mb-2">{msg.message}</p>
+                  <p className="text-xs text-slate-300 leading-relaxed mb-2 whitespace-pre-wrap">{msg.message}</p>
                   <p className="text-[10px] text-slate-500">
                     {msg.category} • Envoyé le {new Date(msg.date).toLocaleString('fr-FR')}
                   </p>
+                  {msg.reply && (
+                    <div className="mt-3 border-l-2 border-emerald-500 bg-emerald-950/30 rounded-r-xl p-3">
+                      <p className="text-[10px] font-black uppercase tracking-wider text-emerald-300 flex items-center gap-1.5">
+                        <Icon name="check-circle" size={12} />
+                        Réponse de l'administration · {msg.repliedAt ? new Date(msg.repliedAt).toLocaleString('fr-FR') : ''}
+                      </p>
+                      <p className="text-xs text-slate-200 leading-relaxed mt-1.5 whitespace-pre-wrap">{msg.reply}</p>
+                    </div>
+                  )}
                 </div>
               ))
             )}

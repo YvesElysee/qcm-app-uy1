@@ -64,8 +64,9 @@ Conçue avec **React 19 + Vite 8 + Tailwind CSS** et un **backend Node.js / Expr
 - Formulaire dédié accessible en un clic depuis l'espace étudiant :
   - Catégorie : *Suggestion d'amélioration*, *Signalement d'erreur dans un QCM*, *Demande de rattrapage*, *Problème technique*, *Autre demande*.
   - Sélection de l'UE concernée, sujet et message.
-  - Suivi des messages envoyés par l'étudiant avec leur statut (*En attente*, *En cours*, *Traité*).
-- Côté Administrateur : section *Messages* permettant de filtrer par catégorie/filière, mettre à jour le statut, répondre directement par email (`mailto:`) ou supprimer.
+  - Suivi des messages envoyés par l'étudiant avec leur statut (*En attente*, *En cours*, *Traité*) et la **réponse de l'administration** affichée sous chaque message.
+  - La notification « Réponse de l'administration » ouvre directement l'historique des messages (`/contact?tab=history`).
+- Côté Administrateur : section *Messages* permettant de filtrer par catégorie/filière/statut, **répondre depuis l'application** (la réponse est enregistrée, notifiée à l'étudiant et envoyée par email si SMTP est configuré), modifier une réponse, mettre à jour le statut, répondre par email externe (`mailto:`) ou supprimer.
 
 ### 6. Panneau Administrateur Réorganisé & Complet
 - **Interface repensée** : barre latérale sur desktop et onglets défilants sur mobile, **seize sections** claires · *Vue d'ensemble, Évaluations, Analytique, Tuteur IA, Génération QCM IA, Unités d'enseignement, Facultés & filières, Demandes de filière, Demandes de QCM, Étudiants, Résultats, Classements, Ressources, Messages, Sauvegardes, Paramètres SMTP*.
@@ -115,9 +116,10 @@ Conçue avec **React 19 + Vite 8 + Tailwind CSS** et un **backend Node.js / Expr
 
 ### 9. Ressources de cours partagées
 - **Espace étudiant `/resources`** : chaque étudiant voit et télécharge les documents de **sa faculté, sa filière et son niveau** uniquement. Il peut déposer un fichier (25 Mo max) et supprimer **uniquement ses propres dépôts**.
+- **Classement par type** : chaque document est étiqueté **Cours, TD, TP, Examen, Corrigé, Fiche de révision ou Autre**. Les documents sont regroupés par type dans l'espace étudiant, avec des filtres et des compteurs ; l'administration choisit le type à la publication et peut filtrer sa liste.
 - **Formats acceptés** : PDF, DOC/DOCX, PPT/PPTX, XLS/XLSX, TXT, MD, CSV, JSON, images (PNG, JPG, JPEG, WEBP) et ZIP.
 - **Téléchargement contrôlé** : les fichiers sont stockés hors du dossier public et servis par `GET /api/resources/:id/download`, qui vérifie la portée avant d'envoyer le fichier.
-- **Modération admin** : publication de ressources officielles pour n'importe quel parcours, filtrage par faculté / filière / niveau, téléchargement et suppression.
+- **Modération admin** : publication de ressources officielles pour n'importe quel parcours, filtrage par faculté / filière / niveau / type, téléchargement et suppression.
 
 ### 9 bis. Générateur d'exercices de Mathématiques (L1 → M1)
 - **Accès ciblé** : fonctionnalité réservée aux étudiants de la filière **Mathématiques**, niveaux **L1, L2, L3 et M1**. Le contrôle est appliqué côté serveur (`/api/exercises/*`) et l'interface affiche un message explicite aux autres parcours.
@@ -252,8 +254,8 @@ npm start
 | `GET /api/quiz-requests/mine` | étudiant | Mes demandes de QCM, progression et lien de parrainage |
 | `GET /api/quiz-requests/progress?ue=` | étudiant | Progression d'une pétition pour son parcours |
 | `POST /api/quiz-requests` | étudiant | Demander un QCM (portée imposée par le jeton) |
-| `GET /api/resources` | étudiant / admin | Ressources du parcours (étudiant) ou toutes les ressources filtrables (admin) |
-| `POST /api/resources` | étudiant / admin | Déposer une ressource (multipart, portée imposée pour l'étudiant) |
+| `GET /api/resources?type=cours` | étudiant / admin | Ressources du parcours (étudiant) ou toutes les ressources filtrables (admin) ; filtre optionnel par type |
+| `POST /api/resources` | étudiant / admin | Déposer une ressource (multipart avec `type`, portée imposée pour l'étudiant) |
 | `GET /api/resources/:id/download` | étudiant autorisé / admin | Téléchargement contrôlé hors dossier public |
 | `DELETE /api/resources/:id` | auteur / admin | Supprimer une ressource |
 | `GET /api/exercises/access` | étudiant | Vérifier l'éligibilité (Mathématiques L1 → M1) et lister les types d'exercices |
@@ -264,7 +266,7 @@ npm start
 | `GET /api/exercises/history` · `DELETE /:id` | étudiant éligible | Consulter / supprimer ses générations récentes |
 | `POST /api/feedback` | étudiant | Envoyer un message/suggestion |
 | `GET /api/feedback/mine` | étudiant | Suivi de mes messages |
-| `GET /api/feedback` · `PATCH` · `DELETE` | admin | Gestion des messages |
+| `GET /api/feedback` · `PATCH` · `DELETE` | admin | Gestion des messages ; `PATCH { reply, status }` enregistre la réponse, notifie l'étudiant et envoie un email si SMTP est configuré |
 | `GET /api/ues?faculte=&filiere=&niveau=` | public | Liste des UEs |
 | `POST /api/ues` · `DELETE /api/ues/:id` | admin | Gestion des UEs (faculté, filière, niveau) |
 | `GET /api/ai/status` | étudiant | Disponibilité de l'assistant + quotas restants (dont fenêtre 24 h par question) |

@@ -7,6 +7,7 @@ import { parseQuestionsCsv, downloadCsvTemplate } from './utils/csvParser';
 import { getSmtpSettings, saveSmtpSettings, testSmtpConnection } from './services/emailService';
 import usePageTitle from './hooks/usePageTitle';
 import Icon from './components/ui/icons.jsx';
+import { RESOURCE_TYPES, resourceTypeLabel } from './constants/resourceTypes.js';
 import { ADMIN_LOGIN_PATH } from './config';
 
 const SECTIONS = [
@@ -196,11 +197,12 @@ export default function AdminPanel() {
   // ── Ressources de cours (modération) ───────────────────────────────────
   const [adminResources, setAdminResources] = useState([]);
   const [loadingResources, setLoadingResources] = useState(true);
-  const [resourceFilters, setResourceFilters] = useState({ faculte: '', filiere: '', niveau: '' });
+  const [resourceFilters, setResourceFilters] = useState({ faculte: '', filiere: '', niveau: '', type: '' });
   const [resourceForm, setResourceForm] = useState({
     title: '',
     description: '',
     ue: '',
+    type: 'cours',
     faculte: '',
     filiere: '',
     niveau: 'L1'
@@ -268,6 +270,11 @@ export default function AdminPanel() {
   const [feedbacks, setFeedbacks] = useState([]);
   const [fbCategory, setFbCategory] = useState('');
   const [fbFiliere, setFbFiliere] = useState('');
+  const [fbStatus, setFbStatus] = useState('');
+  const [replyDrafts, setReplyDrafts] = useState({});
+  const [replyOpen, setReplyOpen] = useState({});
+  const [sendingReply, setSendingReply] = useState(null);
+  const [feedbackNotice, setFeedbackNotice] = useState('');
   const [loadingFb, setLoadingFb] = useState(true);
 
   // ── Tuteur IA : requêtes et consommation de tokens ─────────────────────
@@ -398,6 +405,7 @@ export default function AdminPanel() {
       if (filters.faculte) params.set('faculte', filters.faculte);
       if (filters.filiere) params.set('filiere', filters.filiere);
       if (filters.niveau) params.set('niveau', filters.niveau);
+      if (filters.type) params.set('type', filters.type);
       const query = params.toString();
       const data = await api(`/resources${query ? `?${query}` : ''}`, { auth: 'admin' });
       setAdminResources(Array.isArray(data.resources) ? data.resources : []);
@@ -490,6 +498,7 @@ export default function AdminPanel() {
       let list = data.feedback;
       if (fbCategory) list = list.filter(f => f.category === fbCategory);
       if (fbFiliere) list = list.filter(f => f.filiere === fbFiliere);
+      if (fbStatus) list = list.filter(f => (f.status || 'en_attente') === fbStatus);
       list.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
       setFeedbacks(list);
     } catch (err) {
@@ -497,7 +506,7 @@ export default function AdminPanel() {
     } finally {
       setLoadingFb(false);
     }
-  }, [fbCategory, fbFiliere]);
+  }, [fbCategory, fbFiliere, fbStatus]);
 
   useEffect(() => {
     // Chargement initial : la fonction locale asynchrone évite tout setState
@@ -1060,6 +1069,7 @@ export default function AdminPanel() {
       body.append('title', resourceForm.title.trim() || resourceFile.name);
       body.append('description', resourceForm.description.trim());
       body.append('ue', resourceForm.ue.trim());
+      body.append('type', resourceForm.type);
       body.append('faculte', resourceForm.faculte);
       body.append('filiere', resourceForm.filiere);
       body.append('niveau', resourceForm.niveau);
@@ -1324,6 +1334,34 @@ export default function AdminPanel() {
       fetchFeedbacks();
     },
     [fetchFeedbacks]
+  );
+
+  const sendFeedbackReply = useCallback(
+    async (id) => {
+      const reply = String(replyDrafts[id] || '').trim();
+      if (!reply) {
+        setFeedbackNotice('Écrivez votre réponse avant de l’envoyer.');
+        return;
+      }
+      setSendingReply(id);
+      setFeedbackNotice('');
+      try {
+        await api(`/feedback/${id}`, {
+          method: 'PATCH',
+          auth: 'admin',
+          body: { reply, status: 'traite' }
+        });
+        setReplyDrafts((prev) => ({ ...prev, [id]: '' }));
+        setReplyOpen((prev) => ({ ...prev, [id]: false }));
+        setFeedbackNotice('Réponse envoyée : elle apparaît dans les messages de l’étudiant et une notification lui est adressée.');
+        await fetchFeedbacks();
+      } catch (err) {
+        setFeedbackNotice(`Envoi impossible : ${err.message}`);
+      } finally {
+        setSendingReply(null);
+      }
+    },
+    [replyDrafts, fetchFeedbacks]
   );
 
   // ─── Exports résultats ────────────────────────────────────────────────
@@ -4389,6 +4427,18 @@ export default function AdminPanel() {
                     </select>
                   </div>
                   <div>
+                    <label className={label}>Type de document</label>
+                    <select
+                      className={selectCls}
+                      value={resourceForm.type}
+                      onChange={e => setResourceForm(prev => ({ ...prev, type: e.target.value }))}
+                    >
+                      {RESOURCE_TYPES.map(entry => (
+                        <option key={entry.value} value={entry.value}>{entry.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
                     <label className={label}>Titre</label>
                     <input
                       type="text"
@@ -4458,11 +4508,11 @@ export default function AdminPanel() {
                   </button>
                 </div>
 
-                <div className="px-6 py-4 border-b border-slate-800 grid md:grid-cols-3 gap-3">
+                <div className="px-6 py-4 border-b border-slate-800 grid md:grid-cols-4 gap-3">
                   <select
                     className={selectCls}
                     value={resourceFilters.faculte}
-                    onChange={e => setResourceFilters({ faculte: e.target.value, filiere: '', niveau: '' })}
+                    onChange={e => setResourceFilters(prev => ({ ...prev, faculte: e.target.value, filiere: '', niveau: '' }))}
                   >
                     <option value="">Toutes les facultés</option>
                     {facultes.map(f => (
@@ -4489,6 +4539,16 @@ export default function AdminPanel() {
                       <option key={n}>{n}</option>
                     ))}
                   </select>
+                  <select
+                    className={selectCls}
+                    value={resourceFilters.type}
+                    onChange={e => setResourceFilters(prev => ({ ...prev, type: e.target.value }))}
+                  >
+                    <option value="">Tous les types</option>
+                    {RESOURCE_TYPES.map(entry => (
+                      <option key={entry.value} value={entry.value}>{entry.label}</option>
+                    ))}
+                  </select>
                 </div>
 
                 {loadingResources ? (
@@ -4505,6 +4565,9 @@ export default function AdminPanel() {
                       <div key={item.id} className="px-6 py-4 flex flex-col md:flex-row md:items-center gap-3">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[9px] font-black px-2 py-1 rounded-lg bg-emerald-600/15 text-emerald-300 border border-emerald-600/30">
+                              {resourceTypeLabel(item.type)}
+                            </span>
                             <span className="text-[9px] font-black px-2 py-1 rounded-lg bg-blue-600/15 text-blue-300 border border-blue-600/30">
                               {String(item.originalName || '').split('.').pop()?.toUpperCase() || 'FICHIER'}
                             </span>
@@ -4933,7 +4996,24 @@ export default function AdminPanel() {
                     <option key={f}>{f}</option>
                   ))}
                 </select>
+                <select
+                  className={selectCls + ' flex-1 min-w-40'}
+                  value={fbStatus}
+                  onChange={e => setFbStatus(e.target.value)}
+                >
+                  <option value="">Tous les statuts</option>
+                  <option value="en_attente">En attente</option>
+                  <option value="en_cours">En cours</option>
+                  <option value="traite">Traité</option>
+                </select>
               </div>
+
+              {feedbackNotice && (
+                <div className="mx-6 mt-4 bg-blue-950/50 border border-blue-900 text-blue-300 text-xs rounded-xl px-3 py-2 flex items-start gap-2">
+                  <Icon name="info" size={14} className="mt-0.5 shrink-0" />
+                  <span>{feedbackNotice}</span>
+                </div>
+              )}
 
               {loadingFb ? (
                 <p className="text-xs text-slate-500 text-center py-10 animate-pulse">Chargement des messages…</p>
@@ -4968,22 +5048,82 @@ export default function AdminPanel() {
                             {f.name || 'Étudiant'} • {f.email || '-'} • {f.filiere || '-'} •{' '}
                             {f.category} • {formatDate(f.date)}
                           </p>
-                          <p className="text-xs text-slate-300 leading-relaxed mt-2">{f.message}</p>
+                          <p className="text-xs text-slate-300 leading-relaxed mt-2 whitespace-pre-wrap">{f.message}</p>
+
+                          {f.reply && (
+                            <div className="mt-3 border-l-2 border-emerald-500 bg-emerald-950/30 rounded-r-xl px-3 py-2.5">
+                              <p className="text-[10px] font-black uppercase tracking-wider text-emerald-300 flex items-center gap-1.5">
+                                <Icon name="check-circle" size={12} />
+                                Votre réponse · {formatDate(f.repliedAt)}
+                              </p>
+                              <p className="text-xs text-slate-200 leading-relaxed mt-1 whitespace-pre-wrap">{f.reply}</p>
+                            </div>
+                          )}
+
+                          {replyOpen[f.id] && (
+                            <div className="mt-3 bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-2">
+                              <label className={label}>Votre réponse à {f.name || 'l’étudiant'}</label>
+                              <textarea
+                                rows={3}
+                                className={input + ' resize-none'}
+                                placeholder="Expliquez la marche à suivre, la correction apportée ou la décision prise…"
+                                value={replyDrafts[f.id] || ''}
+                                onChange={e => setReplyDrafts(prev => ({ ...prev, [f.id]: e.target.value }))}
+                              />
+                              <div className="flex items-center justify-between gap-2 flex-wrap">
+                                <p className="text-[10px] text-slate-500">
+                                  Réponse visible dans l’espace étudiant · notification et email si configuré.
+                                </p>
+                                <div className="flex gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => setReplyOpen(prev => ({ ...prev, [f.id]: false }))}
+                                    className={btnSecondary}
+                                  >
+                                    Annuler
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => sendFeedbackReply(f.id)}
+                                    disabled={sendingReply === f.id}
+                                    className={btnPrimary}
+                                  >
+                                    <Icon name="send" size={13} />
+                                    {sendingReply === f.id ? 'Envoi…' : 'Envoyer la réponse'}
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
-                          <a
-                            href={`mailto:${encodeURIComponent(f.email || '')}?subject=${encodeURIComponent('Re: ' + (f.subject || ''))}`}
-                            title="Répondre par email"
-                            className="w-8 h-8 rounded-lg text-blue-400 hover:text-blue-300 hover:bg-blue-950/50 flex items-center justify-center transition"
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setReplyDrafts(prev => ({ ...prev, [f.id]: prev[f.id] || f.reply || '' }));
+                              setReplyOpen(prev => ({ ...prev, [f.id]: !prev[f.id] }));
+                            }}
+                            title="Répondre depuis l'application"
+                            className={btnSecondary}
                           >
-                            <Icon name="mail" size={14} />
-                          </a>
+                            <Icon name={f.reply ? 'edit' : 'chat'} size={13} />
+                            {f.reply ? 'Modifier' : 'Répondre'}
+                          </button>
+                          {f.email && (
+                            <a
+                              href={`mailto:${encodeURIComponent(f.email)}?subject=${encodeURIComponent('Re: ' + (f.subject || ''))}`}
+                              title="Répondre par email (externe)"
+                              className="w-8 h-8 rounded-lg text-blue-400 hover:text-blue-300 hover:bg-blue-950/50 flex items-center justify-center transition"
+                            >
+                              <Icon name="mail" size={14} />
+                            </a>
+                          )}
                           <select
                             className="p-2 border border-slate-800 rounded-lg bg-slate-950 text-slate-300 text-[11px] font-bold outline-none focus:border-blue-600 transition"
-                            value={f.status || 'nouveau'}
+                            value={f.status || 'en_attente'}
                             onChange={e => updateMessageStatus(f.id, e.target.value)}
                           >
-                            <option value="nouveau">En attente</option>
+                            <option value="en_attente">En attente</option>
                             <option value="en_cours">En cours</option>
                             <option value="traite">Traité</option>
                           </select>

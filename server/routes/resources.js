@@ -33,6 +33,16 @@ const ALLOWED_EXTENSIONS = new Set([
   'txt', 'md', 'csv', 'json', 'png', 'jpg', 'jpeg', 'webp', 'zip'
 ]);
 
+// Types de documents proposés à l'étudiant et à l'administration. La valeur
+// stockée est un slug court ; le libellé français est géré côté interface.
+const RESOURCE_TYPES = new Set(['cours', 'td', 'tp', 'examen', 'corrige', 'fiche', 'autre']);
+const DEFAULT_RESOURCE_TYPE = 'autre';
+
+function normalizeResourceType(value) {
+  const type = String(value || '').trim().toLowerCase().slice(0, 30);
+  return RESOURCE_TYPES.has(type) ? type : DEFAULT_RESOURCE_TYPE;
+}
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_FILE_BYTES, files: 1 }
@@ -61,6 +71,7 @@ function publicResource(row) {
     title: row.title,
     description: row.description || '',
     ue: row.ue || '',
+    type: normalizeResourceType(row.type),
     faculte: row.faculte || '',
     filiere: row.filiere || '',
     niveau: row.niveau || '',
@@ -90,6 +101,13 @@ router.get('/', (req, res) => {
 
   const where = [];
   const params = [];
+
+  // Filtre optionnel par type de document (cours, td, tp, examen…).
+  const type = String(req.query.type || '').trim().toLowerCase();
+  if (type && RESOURCE_TYPES.has(type)) {
+    where.push('LOWER(TRIM(type)) = LOWER(TRIM(?))');
+    params.push(type);
+  }
 
   if (admin) {
     const faculte = String(req.query.faculte || '').trim();
@@ -147,6 +165,7 @@ router.post('/', uploadSingle, (req, res) => {
   const title = String(req.body?.title || '').trim() || originalName;
   const description = String(req.body?.description || '').trim().slice(0, 1000);
   const ue = String(req.body?.ue || '').trim().toUpperCase().slice(0, 40);
+  const type = normalizeResourceType(req.body?.type);
 
   let faculte;
   let filiere;
@@ -174,14 +193,15 @@ router.post('/', uploadSingle, (req, res) => {
   try {
     const info = db.prepare(`
       INSERT INTO resources
-        (title, description, ue, faculte, filiere, niveau,
+        (title, description, ue, type, faculte, filiere, niveau,
          originalName, storedName, mimeType, size,
          uploaderId, uploaderName, uploaderRole, downloads, createdAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
     `).run(
       title.slice(0, 200),
       description,
       ue,
+      type,
       faculte,
       filiere,
       niveau,
