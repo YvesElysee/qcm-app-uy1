@@ -1,7 +1,6 @@
 /**
- * Présentation du portail, partagée entre l'accueil public et l'espace
- * étudiant connecté : les étudiants connectés doivent retrouver les mêmes
- * explications que sur la page d'accueil.
+ * Présentation du portail affichée uniquement aux visiteurs non connectés.
+ * Une fois le compte ouvert, ces explications ne sont plus affichées.
  */
 export const FEATURES = [
   {

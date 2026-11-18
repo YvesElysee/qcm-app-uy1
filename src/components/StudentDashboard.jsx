@@ -6,7 +6,6 @@ import ContactAdmin from './ContactAdmin';
 import usePageTitle from '../hooks/usePageTitle';
 import Icon from './ui/icons.jsx';
 import { pathwayFor } from '../utils/studentProfile.js';
-import { FEATURES, STEPS } from '../constants/portalInfo.js';
 
 const textCollator = new Intl.Collator('fr', { numeric: true, sensitivity: 'base' });
 const compareText = (a, b) => textCollator.compare(String(a || ''), String(b || ''));
@@ -549,63 +548,6 @@ export default function StudentDashboard() {
             </Link>
           </div>
         </div>
-
-        {/* ── Présentation du portail, conservée après la connexion ── */}
-        <section className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5">
-            <div className="flex items-center gap-2">
-              <span className="w-8 h-8 rounded-lg bg-blue-500/15 text-blue-300 flex items-center justify-center">
-                <Icon name="sparkles" size={16} />
-              </span>
-              <h3 className="text-sm font-black text-white">Ce que le portail vous offre</h3>
-            </div>
-            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {FEATURES.map((f) => (
-                <div key={f.title} className="flex items-start gap-2 rounded-xl bg-slate-950/50 px-2.5 py-2">
-                  <span className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 ${f.style}`}>
-                    <Icon name={f.icon} size={13} />
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-[11px] font-bold text-slate-200">{f.title}</p>
-                    <p className="text-[10px] text-slate-400 leading-snug">{f.desc}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <Link
-              to="/"
-              className="inline-flex items-center gap-1.5 mt-3 text-[11px] font-bold text-blue-300 hover:text-white transition"
-            >
-              Revoir la présentation complète
-              <Icon name="arrow-right" size={13} />
-            </Link>
-          </div>
-
-          <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5">
-            <div className="flex items-center gap-2">
-              <span className="w-8 h-8 rounded-lg bg-emerald-500/15 text-emerald-300 flex items-center justify-center">
-                <Icon name="book" size={16} />
-              </span>
-              <h3 className="text-sm font-black text-white">Comment ça marche ?</h3>
-            </div>
-            <ol className="mt-3 space-y-2">
-              {STEPS.map((s) => (
-                <li key={s.n} className="flex items-start gap-2.5">
-                  <span className="w-6 h-6 rounded-full bg-blue-600 text-white font-black flex items-center justify-center text-[11px] shrink-0">
-                    {s.n}
-                  </span>
-                  <div>
-                    <p className="text-[11px] font-bold text-slate-200">{s.title}</p>
-                    <p className="text-[10px] text-slate-400 leading-snug">{s.desc}</p>
-                  </div>
-                </li>
-              ))}
-            </ol>
-            <p className="text-[10px] text-slate-500 mt-3">
-              Ces étapes restent visibles ici même lorsque vous êtes connecté.
-            </p>
-          </div>
-        </section>
 
         {/* ── Générateur d'exercices (Mathématiques L1 → M1) ── */}
         {canGenerateExercises && (

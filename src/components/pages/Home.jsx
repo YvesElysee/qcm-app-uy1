@@ -214,48 +214,54 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ── Fonctionnalités ── */}
-      <section className="max-w-6xl mx-auto px-4 mt-14">
-        <div className="text-center mb-8">
-          <h2 className="text-2xl font-black text-white">Ce que le portail vous offre</h2>
-          <p className="text-xs text-slate-400 mt-1">Tout ce qu'il faut pour évaluer et être évalué sereinement</p>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {FEATURES.map(f => (
-            <div
-              key={f.title}
-              className="bg-slate-900 border border-slate-800 hover:border-blue-500/40 rounded-2xl p-5 transition"
-            >
-              <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-3 ${f.style}`}>
-                <Icon name={f.icon} size={20} />
-              </div>
-              <h3 className="font-black text-white text-sm">{f.title}</h3>
-              <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">{f.desc}</p>
+      {/* Présentation réservée aux visiteurs non connectés : une fois le
+          compte ouvert, ces explications n'apparaissent plus nulle part. */}
+      {!user && (
+        <>
+          {/* ── Fonctionnalités ── */}
+          <section className="max-w-6xl mx-auto px-4 mt-14">
+            <div className="text-center mb-8">
+              <h2 className="text-2xl font-black text-white">Ce que le portail vous offre</h2>
+              <p className="text-xs text-slate-400 mt-1">Tout ce qu'il faut pour évaluer et être évalué sereinement</p>
             </div>
-          ))}
-        </div>
-      </section>
 
-      {/* ── Comment ça marche ── */}
-      <section className="max-w-6xl mx-auto px-4 mt-14">
-        <div className="text-center mb-8">
-          <h2 className="text-2xl font-black text-white">Comment ça marche ?</h2>
-          <p className="text-xs text-slate-400 mt-1">Trois étapes, et vous êtes prêt</p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {STEPS.map(s => (
-            <div key={s.n} className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 relative">
-              <div className="w-9 h-9 rounded-full bg-blue-600 text-white font-black flex items-center justify-center text-sm shadow-lg shadow-blue-600/30">
-                {s.n}
-              </div>
-              <h3 className="font-black text-white text-sm mt-4">{s.title}</h3>
-              <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">{s.desc}</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {FEATURES.map(f => (
+                <div
+                  key={f.title}
+                  className="bg-slate-900 border border-slate-800 hover:border-blue-500/40 rounded-2xl p-5 transition"
+                >
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-3 ${f.style}`}>
+                    <Icon name={f.icon} size={20} />
+                  </div>
+                  <h3 className="font-black text-white text-sm">{f.title}</h3>
+                  <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">{f.desc}</p>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      </section>
+          </section>
+
+          {/* ── Comment ça marche ── */}
+          <section className="max-w-6xl mx-auto px-4 mt-14">
+            <div className="text-center mb-8">
+              <h2 className="text-2xl font-black text-white">Comment ça marche ?</h2>
+              <p className="text-xs text-slate-400 mt-1">Trois étapes, et vous êtes prêt</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {STEPS.map(s => (
+                <div key={s.n} className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 relative">
+                  <div className="w-9 h-9 rounded-full bg-blue-600 text-white font-black flex items-center justify-center text-sm shadow-lg shadow-blue-600/30">
+                    {s.n}
+                  </div>
+                  <h3 className="font-black text-white text-sm mt-4">{s.title}</h3>
+                  <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">{s.desc}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        </>
+      )}
 
       {/* ── Appel à l'action final ── */}
       <section className="max-w-6xl mx-auto px-4 mt-14 mb-6">
