@@ -100,7 +100,7 @@ Conçue avec **React 19 + Vite 8 + Tailwind CSS** et un **backend Node.js / Expr
   - Bouton *Comprendre cette erreur avec l'IA* sur chaque question ratée (la question, les options, la réponse choisie et la bonne réponse alimentent le contexte).
   - Conversations guidées : le tuteur explique **pourquoi** la réponse est incorrecte au lieu de donner la lettre de la solution.
 - **Historique persistant** : la conversation est conservée dans le navigateur par étudiant et par contexte (question ou QCM). Un rafraîchissement du site ne la fait plus disparaître.
-- **Aucune clé côté navigateur** : les appels passent par le proxy serveur `/api/ai/tutor`. Les clés `GROQ_API_KEYS` (ou `GROQ_API_KEYS_EXTRA`), `GROK_API_KEYS` / `XAI_API_KEYS` et `GEMINI_API_KEYS` restent dans le `.env` du serveur, avec **rotation automatique** et **repli d'un fournisseur à l'autre** en cas d'erreur ou de quota atteint. Trois clés Grok supplémentaires peuvent donc être ajoutées sans bloquer le site.
+- **Aucune clé côté navigateur** : les appels passent par le proxy serveur `/api/ai/tutor`. Les clés `GROQ_API_KEYS` (ou `GROQ_API_KEYS_EXTRA`), `GROK_API_KEYS` / `XAI_API_KEYS`, `GEMINI_API_KEYS` et `DASHSCOPE_API_KEYS` / `QWEN_API_KEYS` restent dans le `.env` du serveur, avec **rotation automatique** et **repli d'un fournisseur à l'autre** en cas d'erreur ou de quota atteint. Trois clés Groq/Grok supplémentaires peuvent donc être ajoutées sans bloquer le site.
 - **Réponses complètes et erreurs actionnables** : le serveur vérifie `finish_reason` / `finishReason`, poursuit le texte tronqué ou relance la génération JSON avec un budget plus large, et borne chaque tentative (`AI_REQUEST_TIMEOUT_MS`) ainsi que le total (`AI_TOTAL_TIMEOUT_MS`). Si le délai est dépassé, l'étudiant voit « Veuillez reformuler votre prompt et réessayer » ; si tous les fournisseurs échouent, « Revenez plus tard ». Le quota n'est pas consommé quand tous les essais échouent, et un bouton **Réessayer** relance exactement la dernière question.
 - **Taille des requêtes maîtrisée** : les générations à partir de documents (générateur d'exercices/épreuves et générateur de QCM admin) plafonnent le contexte à `AI_MAX_CONTEXT_CHARS` (10 000 caractères par défaut) et la sortie à `AI_MAX_OUTPUT_TOKENS` (3 000 tokens). Si le fournisseur répond malgré tout `413 · Request too large` (quota TPM, par exemple 8 000 tokens/minute sur l'offre gratuite Groq), le serveur réduit automatiquement l'extrait deux fois avant d'échouer, puis affiche « Sélectionnez moins de documents ou des extraits plus courts ». Les erreurs `429` donnent « Réessayez dans un instant ». Ces limites sont ajustables dans le `.env` selon le forfait du fournisseur.
 - L'assistant s'identifie uniquement comme **QCM App** : il ne révèle jamais le fournisseur, le modèle ou la technologie sous-jacente.
@@ -184,24 +184,43 @@ Pour activer l'envoi réel des emails de récupération de mot de passe :
 
 ---
 
-## Configuration du Tuteur IA (Groq + Gemini)
+## Configuration du Tuteur IA (Groq + Gemini + Qwen)
 
 Ajoutez vos clés dans le `.env` du serveur (jamais dans le frontend) :
 
 ```env
-# 1 à 6 clés par fournisseur, séparées par des virgules
-GROQ_API_KEYS=cle_groq_1,cle_groq_2,cle_groq_3
-GEMINI_API_KEYS=cle_gemini_1,cle_gemini_2,cle_gemini_3
+# Clés Groq (gsk_...) — jusqu'à 3, séparées par des virgules
+GROQ_API_KEYS=gsk_cle_1,gsk_cle_2,gsk_cle_3
+# Encore 3 clés Groq sans toucher à la ligne ci-dessus
+GROQ_API_KEYS_EXTRA=gsk_cle_4,gsk_cle_5,gsk_cle_6
 
-# Facultatif : modèles et quotas
-# GROQ_MODEL=llama-3.3-70b-versatile
-# GEMINI_MODEL=gemini-2.0-flash
+# Gratuit, puissant et sans carte bancaire : Google Gemini
+# Obtenir une clé : https://aistudio.google.com/apikey
+GEMINI_API_KEYS=cle_gemini_1,cle_gemini_2
+
+# Option chinoise (Alibaba Qwen / DashScope), compatible OpenAI
+# Obtenir une clé : https://bailian.console.aliyun.com/  (région internationale / Singapour)
+# DASHSCOPE_API_KEY=sk-cle_qwen
+# DASHSCOPE_MODEL=qwen3.8-flash
+
+# Modèles et quotas (optionnel)
+# GROQ_MODEL=openai/gpt-oss-120b
+# GEMINI_MODEL=gemini-3.5-flash-lite
+# AI_MAX_CONTEXT_CHARS=8000
+# AI_MAX_OUTPUT_TOKENS=2500
 # AI_MAX_QUESTIONS_PER_ERROR=2
 # AI_DAILY_LIMIT=30
 
 # Budget mensuel de tokens (tableau de bord admin) · 0 = illimité
 # AI_TOKEN_BUDGET=1000000
 ```
+
+**Où obtenir les clés :**
+- **Groq** (`gsk_`) : https://console.groq.com/keys — offre gratuite, mais quota TPM bas selon le modèle (d'où le réglage de la taille des requêtes ci-dessus).
+- **Gemini** (recommandé en premier repli) : https://aistudio.google.com/apikey — quotas gratuits par projet, sans carte bancaire. Voir les limites : https://aistudio.google.com/rate-limit. `gemini-2.0-flash` est arrêté ; le modèle par défaut est désormais `gemini-3.5-flash-lite`.
+- **Qwen / DashScope** : https://bailian.console.aliyun.com/ (Model Studio, région internationale). Documentation : https://help.aliyun.com/en/model-studio/get-started-with-models/ et https://help.aliyun.com/en/model-studio/compatibility-of-openai-with-dashscope. Par défaut, l'endpoint international `https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions` est utilisé ; `DASHSCOPE_BASE_URL` permet de le changer (région Pékin par exemple).
+
+Aucun fournisseur n'est réellement « illimité et gratuit » : même l'offre gratuite de Gemini/Qwen a des limites de débit. La rotation multi-clés et le repli automatique répartissent la charge. OpenRouter propose des modèles gratuits mais plafonnés (50 requêtes/jour sans crédits, 1 000/jour avec au moins 10 crédits) : ce n'est donc pas un meilleur choix pour la production.
 
 Le serveur alterne les clés à chaque requête et bascule automatiquement vers une autre clé ou l'autre fournisseur en cas d'échec. Sans aucune clé, `GET /api/ai/status` renvoie `available: false` et les boutons IA sont masqués dans l'interface.
 

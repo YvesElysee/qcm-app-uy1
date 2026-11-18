@@ -52,9 +52,22 @@ export function getConfig() {
       process.env.XAI_API_KEY
     ),
     geminiKeys: splitKeys(process.env.GEMINI_API_KEYS, process.env.GEMINI_API_KEY),
+    // Qwen / DashScope (Alibaba) : endpoint compatible OpenAI. L'URL par défaut
+    // est la région internationale (Singapour), qui propose une offre gratuite.
+    qwenKeys: splitKeys(
+      process.env.DASHSCOPE_API_KEYS,
+      process.env.DASHSCOPE_API_KEY,
+      process.env.QWEN_API_KEYS,
+      process.env.QWEN_API_KEY
+    ),
     groqModel: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
     grokModel: process.env.GROK_MODEL || process.env.XAI_MODEL || 'grok-3-mini',
-    geminiModel: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
+    // gemini-2.0-flash est désormais arrêté : on part sur un modèle Flash-Lite
+    // actuel, éligible au quota gratuit de Google AI Studio.
+    geminiModel: process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite',
+    qwenModel: process.env.DASHSCOPE_MODEL || process.env.QWEN_MODEL || 'qwen3.8-flash',
+    qwenEndpoint: process.env.DASHSCOPE_BASE_URL ||
+      'https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions',
     maxPerError: intEnv('AI_MAX_QUESTIONS_PER_ERROR', 2, 1, 10),
     // Mode « question générale » : 5 questions par jour, toutes matières
     // confondues, quelle que soit la filière de l'étudiant.
@@ -75,7 +88,8 @@ export function getConfig() {
 }
 
 export function configuredKeyCount(cfg) {
-  return (cfg.groqKeys?.length || 0) + (cfg.grokKeys?.length || 0) + (cfg.geminiKeys?.length || 0);
+  return (cfg.groqKeys?.length || 0) + (cfg.grokKeys?.length || 0) +
+    (cfg.geminiKeys?.length || 0) + (cfg.qwenKeys?.length || 0);
 }
 
 // ── Quota persisté en base ────────────────────────────────────────────
@@ -343,7 +357,7 @@ async function fetchJson(url, options, timeoutMs = 15000) {
 }
 
 /**
- * Fournisseurs au format OpenAI (Groq et xAI/Grok). `finish_reason = length`
+ * Fournisseurs au format OpenAI (Groq, xAI/Grok et Qwen/DashScope). `finish_reason = length`
  * signale une réponse tronquée : on la remonte au moteur de rotation pour qu'il
  * poursuive ou réessaie avec un budget plus large, au lieu de la présenter
  * comme une réponse complète.
@@ -411,6 +425,16 @@ async function callGrok(options) {
     ...options,
     endpoint: 'https://api.x.ai/v1/chat/completions',
     provider: 'grok'
+  });
+}
+
+/** Qwen / DashScope : même format que Groq, seul l'endpoint change. */
+async function callQwen({ endpoint, ...options }) {
+  return callOpenAiCompatible({
+    ...options,
+    endpoint: endpoint ||
+      'https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions',
+    provider: 'qwen'
   });
 }
 
@@ -511,7 +535,10 @@ function orderedCandidates(cfg) {
   const all = [
     ...cfg.groqKeys.map((key) => ({ provider: 'groq', key, model: cfg.groqModel })),
     ...cfg.grokKeys.map((key) => ({ provider: 'grok', key, model: cfg.grokModel })),
-    ...cfg.geminiKeys.map((key) => ({ provider: 'gemini', key, model: cfg.geminiModel }))
+    ...cfg.geminiKeys.map((key) => ({ provider: 'gemini', key, model: cfg.geminiModel })),
+    ...cfg.qwenKeys.map((key) => ({
+      provider: 'qwen', key, model: cfg.qwenModel, endpoint: cfg.qwenEndpoint
+    }))
   ];
   if (all.length === 0) return [];
   const start = keyCursor % all.length;
@@ -531,6 +558,9 @@ async function callCandidate(candidate, { system, messages, maxTokens, temperatu
   };
   if (candidate.provider === 'groq') return callGroq(common);
   if (candidate.provider === 'grok') return callGrok(common);
+  if (candidate.provider === 'qwen') {
+    return callQwen({ ...common, endpoint: candidate.endpoint });
+  }
   return callGemini({ ...common, system });
 }
 
