@@ -6,6 +6,7 @@ import NotificationBell from '../NotificationBell';
 import OnboardingGuide from '../OnboardingGuide';
 import AiTutor from '../ai/AiTutor';
 import Icon from '../ui/icons.jsx';
+import BrandLogo from '../ui/BrandLogo.jsx';
 import { pathwayFor } from '../../utils/studentProfile.js';
 import { APK_DOWNLOAD_URL } from '../../constants/portalInfo.js';
 import { showApkDownload } from '../../utils/appEnvironment.js';
@@ -191,9 +192,7 @@ export default function Navbar() {
         <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between gap-3">
           {/* ── Marque ── */}
           <Link to="/" className="flex items-center gap-3 shrink-0">
-            <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center font-black text-white text-lg shadow-md shadow-blue-500/20">
-              QA
-            </div>
+            <BrandLogo size={40} className="shadow-md shadow-blue-500/20" />
             <div className="hidden sm:block leading-tight">
               <span className="font-black text-base tracking-tight text-white flex items-center gap-2">
                 QCM App
@@ -438,9 +437,7 @@ export default function Navbar() {
         >
           <div className="flex items-center justify-between px-4 h-16 border-b border-slate-800 shrink-0">
             <div className="flex items-center gap-2.5 min-w-0">
-              <span className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center font-black">
-                QA
-              </span>
+              <BrandLogo size={36} />
               <div className="min-w-0">
                 <p className="text-sm font-black text-white leading-tight">QCM App</p>
                 <p className="text-[11px] text-slate-400 truncate">Plateforme d'évaluation</p>

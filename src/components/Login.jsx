@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { api } from '../services/api';
 import usePageTitle from '../hooks/usePageTitle';
 import Icon from './ui/icons.jsx';
+import BrandLogo from './ui/BrandLogo.jsx';
 import { ADMIN_PANEL_PATH } from '../config';
 
 export default function Login() {
@@ -40,9 +41,7 @@ export default function Login() {
             <div className="w-full max-w-sm">
                 <form onSubmit={handleLogin} className="bg-slate-900 p-10 rounded-2xl shadow-2xl shadow-black/50 w-full border border-slate-800">
                 <div className="text-center mb-8">
-                    <div className="w-16 h-16 bg-blue-600/15 border border-blue-600/30 rounded-2xl flex items-center justify-center mx-auto mb-4 text-blue-400">
-                        <Icon name="shield" size={30} />
-                    </div>
+                    <BrandLogo size={64} className="mx-auto mb-4" />
                     <h1 className="text-2xl font-black text-white">Accès Administrateur</h1>
                     <p className="text-slate-400 text-sm mt-1">QCM App</p>
                 </div>

@@ -7,6 +7,7 @@ import { parseQuestionsCsv, downloadCsvTemplate } from './utils/csvParser';
 import { getSmtpSettings, saveSmtpSettings, testSmtpConnection } from './services/emailService';
 import usePageTitle from './hooks/usePageTitle';
 import Icon from './components/ui/icons.jsx';
+import BrandLogo from './components/ui/BrandLogo.jsx';
 import { RESOURCE_TYPES, resourceTypeLabel } from './constants/resourceTypes.js';
 import { ADMIN_LOGIN_PATH } from './config';
 import AdminQuizPreview from './components/AdminQuizPreview.jsx';
@@ -2086,9 +2087,7 @@ export default function AdminPanel() {
       {/* ── Barre latérale (desktop) ── */}
       <aside className="hidden lg:flex flex-col w-64 shrink-0 bg-slate-900 border-r border-slate-800 sticky top-0 h-screen">
         <div className="flex items-center gap-3 px-5 py-5 border-b border-slate-800">
-          <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center font-black text-white text-sm">
-            QA
-          </div>
+          <BrandLogo size={40} />
           <div className="min-w-0">
             <h1 className="text-sm font-black text-white leading-tight">Administration QCM</h1>
             <p className="text-[11px] text-slate-500">QCM App • Évaluation</p>
@@ -2137,9 +2136,7 @@ export default function AdminPanel() {
         {/* En-tête mobile */}
         <header className="lg:hidden bg-slate-900 border-b border-slate-800 px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center font-black text-white text-xs">
-              QA
-            </div>
+            <BrandLogo size={36} />
             <div>
               <h1 className="text-sm font-black text-white leading-tight">Administration QCM</h1>
               <p className="text-[10px] text-slate-500">QCM App • Évaluation</p>

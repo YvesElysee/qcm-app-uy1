@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { getCurrentUser } from '../../services/authService';
+import BrandLogo from '../ui/BrandLogo.jsx';
 
 /**
  * Pied de page partagé : identité, navigation rapide et informations
@@ -15,9 +16,7 @@ export default function Footer() {
         {/* ── Marque ── */}
         <div>
           <div className="flex items-center gap-2.5 mb-3">
-            <div className="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center font-black text-white text-sm">
-              QA
-            </div>
+            <BrandLogo size={36} />
             <span className="font-black text-white text-sm">QCM App</span>
           </div>
           <p className="text-xs leading-relaxed">

@@ -10,6 +10,7 @@ import {
 import { api } from '../services/api';
 import usePageTitle from '../hooks/usePageTitle';
 import Icon from './ui/icons.jsx';
+import BrandLogo from './ui/BrandLogo.jsx';
 
 const NIVEAUX = ['L1', 'L2', 'L3', 'M1', 'M2'];
 const OTHER_FILIERE = '__other__';
@@ -223,9 +224,7 @@ export default function StudentAuth({ defaultTab = 'login' }) {
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 py-10 px-4 flex flex-col justify-center items-center">
       {/* Header marque */}
       <div className="text-center mb-6">
-        <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-blue-600/20 border border-blue-500/30 text-blue-400 mb-3 shadow-lg shadow-blue-500/10">
-          <Icon name="graduation" size={32} />
-        </div>
+        <BrandLogo size={64} className="mx-auto mb-3 shadow-lg shadow-blue-500/10" />
         <h1 className="text-3xl font-black text-white tracking-tight">QCM App</h1>
         <p className="text-slate-400 text-sm mt-1">Plateforme d'évaluation en ligne • 2026</p>
       </div>
