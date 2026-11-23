@@ -11,6 +11,12 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:3001',
         changeOrigin: true
+      },
+      // Téléchargement de l'APK : le fichier est servi par Express en prod,
+      // on le proxie aussi en développement pour que le lien fonctionne partout.
+      '/download': {
+        target: 'http://localhost:3001',
+        changeOrigin: true
       }
     }
   }

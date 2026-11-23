@@ -2,6 +2,10 @@
  * Présentation du portail affichée uniquement aux visiteurs non connectés.
  * Une fois le compte ouvert, ces explications ne sont plus affichées.
  */
+
+// Lien de téléchargement de l'application Android (servi par Express).
+export const APK_DOWNLOAD_URL = '/download/apk';
+
 export const FEATURES = [
   {
     icon: 'clock',

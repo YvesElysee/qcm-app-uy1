@@ -88,6 +88,21 @@ app.use('/api', (_req, res) => {
   res.status(404).json({ error: 'Route API introuvable.' });
 });
 
+// ── Téléchargement de l'application Android ───────────────────────────
+// L'APK est servi depuis public/downloads (copié dans dist/ par Vite).
+// Route explicite avant le statique pour forcer le type et le nom de fichier,
+// ce qui déclenche bien le téléchargement depuis le navigateur mobile.
+const apkPath = path.join(__dirname, '..', 'public', 'downloads', 'qcm-app-uy1.apk');
+app.get('/download/apk', (_req, res) => {
+  if (!fs.existsSync(apkPath)) {
+    return res.status(404).json({ error: "L'application Android n'est pas disponible pour le moment." });
+  }
+  res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+  res.setHeader('Content-Disposition', 'attachment; filename="QCM-App-UY1.apk"');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  return res.sendFile(apkPath);
+});
+
 // ── Frontend statique (production) ─────────────────────────────────────
 const distDir = path.join(__dirname, '..', 'dist');
 if (fs.existsSync(distDir)) {
