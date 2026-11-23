@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api, getSession } from '../services/api';
 import usePageTitle from '../hooks/usePageTitle';
 import {
@@ -9,6 +9,7 @@ import {
   resourceTypeLabel
 } from '../constants/resourceTypes.js';
 import Icon from './ui/icons.jsx';
+import { groupResourcesByUe, ueCode } from '../utils/ueCatalog.js';
 
 const MAX_FILE_MB = 25;
 
@@ -36,6 +37,8 @@ export default function StudentResources() {
   usePageTitle('Ressources de cours');
 
   const [user] = useState(() => getSession());
+  const [searchParams] = useSearchParams();
+  const ueParam = ueCode(searchParams.get('ue'));
   const [resources, setResources] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -43,7 +46,7 @@ export default function StudentResources() {
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [ue, setUe] = useState('');
+  const [ue, setUe] = useState(ueParam);
   const [type, setType] = useState('cours');
   const [typeFilter, setTypeFilter] = useState('all');
   const [file, setFile] = useState(null);
@@ -58,7 +61,8 @@ export default function StudentResources() {
 
   const load = useCallback(async () => {
     try {
-      const data = await api('/resources', { auth: 'student' });
+      const query = ueParam ? `?ue=${encodeURIComponent(ueParam)}` : '';
+      const data = await api(`/resources${query}`, { auth: 'student' });
       setResources(Array.isArray(data.resources) ? data.resources : []);
       setError('');
     } catch (err) {
@@ -66,7 +70,7 @@ export default function StudentResources() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [ueParam]);
 
   useEffect(() => {
     const start = async () => {
@@ -78,7 +82,7 @@ export default function StudentResources() {
   const resetForm = () => {
     setTitle('');
     setDescription('');
-    setUe('');
+    setUe(ueParam);
     setType('cours');
     setFile(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -185,12 +189,13 @@ export default function StudentResources() {
     const visible = typeFilter === 'all'
       ? resources
       : resources.filter((item) => normalizeResourceType(item.type) === typeFilter);
-    return RESOURCE_TYPES
-      .map((entry) => ({ ...entry, items: visible.filter((item) => normalizeResourceType(item.type) === entry.value) }))
-      .filter((group) => group.items.length > 0);
+    return groupResourcesByUe(visible);
   }, [resources, typeFilter]);
 
-  const visibleCount = groupedResources.reduce((sum, group) => sum + group.items.length, 0);
+  const visibleCount = groupedResources.reduce(
+    (sum, group) => sum + group.items.length,
+    0
+  );
 
   return (
     <div className="flex-1 bg-slate-950 py-8 px-4">
@@ -227,6 +232,37 @@ export default function StudentResources() {
             </span>
           </div>
         </div>
+
+        {ueParam && (
+          <div className="bg-emerald-950/40 border border-emerald-800/60 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <span className="w-9 h-9 rounded-xl bg-emerald-600/20 text-emerald-300 flex items-center justify-center shrink-0">
+                <Icon name="book" size={17} />
+              </span>
+              <div>
+                <p className="text-xs font-black text-white">Documents de l'UE {ueParam}</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Le champ « UE concernée » est prérempli pour vos dépôts dans cette UE.
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Link
+                to={`/ues/${encodeURIComponent(ueParam)}`}
+                className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-black px-3 py-2 rounded-xl transition"
+              >
+                <Icon name="arrow-right" size={13} />
+                Ouvrir l'UE
+              </Link>
+              <Link
+                to="/resources"
+                className="inline-flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 text-[11px] font-bold px-3 py-2 rounded-xl transition"
+              >
+                Toutes les ressources
+              </Link>
+            </div>
+          </div>
+        )}
 
         {/* Messages */}
         {error && (
@@ -346,7 +382,7 @@ export default function StudentResources() {
             </h2>
             {!loading && resources.length > 0 && (
               <span className="text-[10px] font-bold text-slate-500">
-                Classés par type · {visibleCount} affiché(s)
+                Regroupés par UE et par type · {visibleCount} affiché(s)
               </span>
             )}
           </div>
@@ -399,71 +435,91 @@ export default function StudentResources() {
               Aucun document de ce type pour le moment.
             </p>
           ) : (
-            <div className="space-y-6">
+            <div className="space-y-7">
               {groupedResources.map((group) => (
-                <section key={group.value}>
-                  <h3 className="text-[11px] font-black uppercase tracking-wider text-blue-300 flex items-center gap-2 mb-2.5">
-                    <Icon name={resourceTypeIcon(group.value)} size={14} />
-                    {group.label}
-                    <span className="text-[10px] text-slate-500 font-bold bg-slate-950 border border-slate-800 px-1.5 py-0.5 rounded-full">
-                      {group.items.length}
-                    </span>
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {group.items.map((item) => (
-                      <div
-                        key={item.id}
-                        className="bg-slate-950/60 border border-slate-800 hover:border-slate-700 rounded-2xl p-4 flex flex-col justify-between gap-3 transition"
+                <section key={group.code} className="space-y-3">
+                  <div className="flex items-center justify-between gap-2 flex-wrap border-b border-slate-800 pb-2">
+                    <h3 className="text-xs font-black text-white flex items-center gap-2">
+                      <Icon name="book" size={14} className="text-emerald-400" />
+                      UE {group.code}
+                      {group.label && <span className="text-slate-400 font-bold">· {group.label}</span>}
+                      <span className="text-[10px] text-slate-500 font-bold bg-slate-950 border border-slate-800 px-1.5 py-0.5 rounded-full">
+                        {group.items.length}
+                      </span>
+                    </h3>
+                    {group.code !== 'DIVERS' && (
+                      <Link
+                        to={`/ues/${encodeURIComponent(group.code)}`}
+                        className="text-[10px] font-bold text-blue-400 hover:text-blue-300"
                       >
-                        <div>
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex items-center gap-2 min-w-0 flex-wrap">
-                              <span className="text-[9px] font-black px-2 py-1 rounded-lg bg-emerald-600/15 text-emerald-300 border border-emerald-600/30 shrink-0">
-                                {resourceTypeLabel(item.type)}
-                              </span>
-                              <span className="text-[9px] font-black px-2 py-1 rounded-lg bg-blue-600/15 text-blue-300 border border-blue-600/30 shrink-0">
-                                {fileLabel(item.originalName)}
-                              </span>
-                              <h3 className="text-sm font-bold text-white truncate">{item.title}</h3>
-                            </div>
-                            {canDelete(item) && (
-                              <button
-                                type="button"
-                                onClick={() => handleDelete(item)}
-                                aria-label="Supprimer la ressource"
-                                className="text-slate-600 hover:text-red-400 transition shrink-0"
-                              >
-                                <Icon name="trash" size={14} />
-                              </button>
-                            )}
-                          </div>
-                          {item.description && (
-                            <p className="text-[11px] text-slate-400 mt-1.5 line-clamp-2">
-                              {item.description}
-                            </p>
-                          )}
-                          <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-500 mt-2">
-                            {item.ue && <span>UE : <strong className="text-slate-400">{item.ue}</strong></span>}
-                            <span>{humanSize(item.size)}</span>
-                            <span>{item.downloads || 0} téléch.</span>
-                          </div>
-                          <p className="text-[10px] text-slate-500 mt-1">
-                            Par {item.uploaderName || 'Anonyme'}
-                            {item.uploaderRole === 'admin' ? ' · Administration' : ''}
-                          </p>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => handleDownload(item)}
-                          className="inline-flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold px-3 py-2 rounded-xl transition"
-                        >
-                          <Icon name="download" size={14} />
-                          Télécharger
-                        </button>
-                      </div>
-                    ))}
+                        Voir l'UE →
+                      </Link>
+                    )}
                   </div>
+
+                  {group.types.map((entry) => (
+                    <div key={entry.value} className="space-y-2.5">
+                      <h4 className="text-[11px] font-black uppercase tracking-wider text-blue-300 flex items-center gap-2">
+                        <Icon name={resourceTypeIcon(entry.value)} size={13} />
+                        {entry.label} ({entry.items.length})
+                      </h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {entry.items.map((item) => (
+                          <div
+                            key={item.id}
+                            className="bg-slate-950/60 border border-slate-800 hover:border-slate-700 rounded-2xl p-4 flex flex-col justify-between gap-3 transition"
+                          >
+                            <div>
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                                  <span className="text-[9px] font-black px-2 py-1 rounded-lg bg-emerald-600/15 text-emerald-300 border border-emerald-600/30 shrink-0">
+                                    {resourceTypeLabel(item.type)}
+                                  </span>
+                                  <span className="text-[9px] font-black px-2 py-1 rounded-lg bg-blue-600/15 text-blue-300 border border-blue-600/30 shrink-0">
+                                    {fileLabel(item.originalName)}
+                                  </span>
+                                  <h5 className="text-sm font-bold text-white truncate">{item.title}</h5>
+                                </div>
+                                {canDelete(item) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDelete(item)}
+                                    aria-label="Supprimer la ressource"
+                                    className="text-slate-600 hover:text-red-400 transition shrink-0"
+                                  >
+                                    <Icon name="trash" size={14} />
+                                  </button>
+                                )}
+                              </div>
+                              {item.description && (
+                                <p className="text-[11px] text-slate-400 mt-1.5 line-clamp-2">
+                                  {item.description}
+                                </p>
+                              )}
+                              <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-500 mt-2">
+                                {item.ue && <span>UE : <strong className="text-slate-400">{item.ue}</strong></span>}
+                                <span>{humanSize(item.size)}</span>
+                                <span>{item.downloads || 0} téléch.</span>
+                              </div>
+                              <p className="text-[10px] text-slate-500 mt-1">
+                                Par {item.uploaderName || 'Anonyme'}
+                                {item.uploaderRole === 'admin' ? ' · Administration' : ''}
+                              </p>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handleDownload(item)}
+                              className="inline-flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold px-3 py-2 rounded-xl transition"
+                            >
+                              <Icon name="download" size={14} />
+                              Télécharger
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                 </section>
               ))}
             </div>

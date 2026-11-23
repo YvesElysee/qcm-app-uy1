@@ -6,6 +6,7 @@ import ContactAdmin from './ContactAdmin';
 import usePageTitle from '../hooks/usePageTitle';
 import Icon from './ui/icons.jsx';
 import { pathwayFor } from '../utils/studentProfile.js';
+import { isHighlighted, quizStatus } from '../utils/ueCatalog.js';
 
 const textCollator = new Intl.Collator('fr', { numeric: true, sensitivity: 'base' });
 const compareText = (a, b) => textCollator.compare(String(a || ''), String(b || ''));
@@ -83,6 +84,7 @@ export default function StudentDashboard() {
   // Modales
   const [showContactModal, setShowContactModal] = useState(false);
   const [selectedUeForStart, setSelectedUeForStart] = useState('');
+  const [selectedQuizId, setSelectedQuizId] = useState('');
   const [showStartWarning, setShowStartWarning] = useState(false);
   const [startAsMakeup, setStartAsMakeup] = useState(false);
 
@@ -323,6 +325,12 @@ export default function StudentDashboard() {
   // 1. Quizz à venir (launchTime > now)
   const upcomingQuizzes = scheduledQuizzes.filter(q => q.launchTime > now);
 
+  // Seuls les tests en cours et à venir sont mis en avant ; les tests passés
+  // et les rattrapages restent consultables dans leur UE.
+  const highlightedQuizzes = semesterQuizzes
+    .filter(q => isHighlighted(quizStatus(q, now, passedQuizIds)))
+    .sort((a, b) => a.launchTime - b.launchTime);
+
   // État d'une épreuve pour l'affichage de la carte UE
   const getQuizState = (ueCode) => {
     const quiz = quizByUe.get(String(ueCode || '').toUpperCase());
@@ -341,8 +349,9 @@ export default function StudentDashboard() {
   const nextDiffMinutes = nextQuiz ? Math.round((nextQuiz.launchTime - now) / (60 * 1000)) : null;
 
   // Lancement d'un QCM
-  const handleStartQuiz = (ueCode, isMakeup = false) => {
-    setSelectedUeForStart(ueCode);
+  const handleStartQuiz = (quizId, isMakeup = false, ueValue = '') => {
+    setSelectedQuizId(String(quizId || ''));
+    setSelectedUeForStart(String(ueValue || quizId || '').toUpperCase());
     setStartAsMakeup(isMakeup);
     setShowStartWarning(true);
   };
@@ -355,7 +364,7 @@ export default function StudentDashboard() {
       ue: selectedUeForStart,
       isMakeup: startAsMakeup
     }));
-    navigate(`/quiz/${selectedUeForStart}${startAsMakeup ? '?mode=rattrapage' : ''}`);
+    navigate(`/quiz/${selectedQuizId}${startAsMakeup ? '?mode=rattrapage' : ''}`);
   };
 
   const formatDate = (isoOrTs) => {
@@ -412,6 +421,24 @@ export default function StudentDashboard() {
               </div>
             </div>
 
+            {/* Bouton UE : porte d'entrée unique de l'espace étudiant */}
+            <Link
+              to="/ues"
+              className="group shrink-0 inline-flex items-center gap-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-2xl px-5 py-4 shadow-lg shadow-emerald-500/20 transition"
+            >
+              <span className="w-11 h-11 rounded-xl bg-slate-950/15 flex items-center justify-center">
+                <Icon name="book" size={22} />
+              </span>
+              <span className="text-left">
+                <span className="block text-sm font-black uppercase tracking-wide">UE</span>
+                <span className="block text-[10px] font-bold leading-tight opacity-80">
+                  Cours, QCM, rattrapages et copies
+                  <br />
+                  tout est là
+                </span>
+              </span>
+              <Icon name="arrow-right" size={18} className="group-hover:translate-x-0.5 transition-transform" />
+            </Link>
           </div>
         </div>
 
@@ -668,52 +695,41 @@ export default function StudentDashboard() {
           </div>
         )}
 
-        {/* ── Épreuves programmées (chaque épreuve est reliée à son UE) ── */}
-        {scheduledQuizzes.length > 0 && (
-          <div className="bg-slate-800/50 border border-slate-700/60 rounded-3xl p-6 space-y-4">
+        {/* ── Seuls les QCM en cours et à venir sont mis en avant ici ── */}
+        {highlightedQuizzes.length > 0 && (
+          <div className="bg-slate-800/50 border border-emerald-700/40 rounded-3xl p-6 space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div>
                 <h3 className="text-lg font-black text-white flex items-center gap-2">
-                  <Icon name="calendar" size={18} className="text-blue-400" />
-                  Épreuves programmées ({scheduledQuizzes.length})
+                  <Icon name="calendar" size={18} className="text-emerald-400" />
+                  En cours et à venir ({highlightedQuizzes.length})
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  {filiere} • {selectedNiveau} · {semesterLabel} · rejoignez l'épreuve au moment prévu ou rattrapez celles que vous avez manquées.
+                  {filiere} • {selectedNiveau} · {semesterLabel} · les épreuves passées et les rattrapages se trouvent dans leur UE.
                 </p>
               </div>
               <Link
-                to="/schedule"
-                className="text-xs font-bold text-blue-300 hover:text-white bg-blue-950/60 border border-blue-800 px-3 py-2 rounded-xl transition"
+                to="/ues"
+                className="text-xs font-bold text-emerald-300 hover:text-white bg-emerald-950/50 border border-emerald-800 px-3 py-2 rounded-xl transition"
               >
-                Voir l'emploi du temps
+                Voir toutes les UE
               </Link>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {scheduledQuizzes.map(q => {
-                const ueCode = q.ue || q.id;
-                const isPassed = passedQuizIds.has(q.id);
-                const notReady = !q.questionCount;
+              {highlightedQuizzes.map(q => {
+                const ueLabel = q.ueLabel || (availableUes.find(u => String(u.id).toUpperCase() === String(q.ue).toUpperCase())?.label || '');
                 const isUpcoming = q.launchTime > now;
-                const isOpen = !isUpcoming && (!q.endTime || q.endTime >= now);
-                const isMissed = !isPassed && !isUpcoming && !isOpen;
-
-                const badge = notReady
-                  ? { label: 'En préparation', cls: 'bg-slate-600/40 text-slate-300' }
-                  : isUpcoming
+                const badge = isUpcoming
                   ? { label: 'À venir', cls: 'bg-amber-500/20 text-amber-300' }
-                  : isOpen
-                  ? { label: 'En cours', cls: 'bg-emerald-500/20 text-emerald-300' }
-                  : isPassed
-                  ? { label: 'Passée', cls: 'bg-slate-600/40 text-slate-300' }
-                  : { label: 'Manquée', cls: 'bg-red-500/20 text-red-300' };
+                  : { label: 'En cours', cls: 'bg-emerald-500/20 text-emerald-300' };
 
                 return (
                   <div
                     key={q.id}
                     id={`test-${q.id}`}
                     className={`bg-slate-900/80 border rounded-2xl p-4 flex flex-col justify-between gap-3 scroll-mt-24 ${
-                      isOpen ? 'border-emerald-500/40' : isMissed ? 'border-red-500/30' : 'border-slate-700/80'
+                      isUpcoming ? 'border-slate-700/80' : 'border-emerald-500/40'
                     } ${focusQuizId === q.id ? 'ring-2 ring-blue-500 border-blue-500' : ''}`}
                   >
                     <div>
@@ -723,12 +739,13 @@ export default function StudentDashboard() {
                         </span>
                         <span className="text-xs text-slate-400">{q.filiere} · {q.niveau}</span>
                       </div>
-                      <h4 className="font-black text-white text-base">{q.title || ueCode}</h4>
-                      {(q.ue || q.ueLabel) && (
-                        <p className="text-xs text-slate-300 mt-0.5">
-                          UE {ueCode}{q.ueLabel && q.ueLabel !== ueCode ? ` · ${q.ueLabel}` : ''}
-                        </p>
-                      )}
+                      <h4 className="font-black text-white text-base">{q.title || q.ue || q.id}</h4>
+                      <Link
+                        to={`/ues/${encodeURIComponent(String(q.ue || q.id).toUpperCase())}`}
+                        className="text-xs text-blue-300 hover:text-blue-200 mt-0.5 inline-block"
+                      >
+                        UE {q.ue || q.id}{ueLabel && ueLabel !== q.ue ? ` · ${ueLabel}` : ''} →
+                      </Link>
                       <p className="text-[11px] text-slate-400 mt-1">
                         Début : {formatDate(q.launchTime)}
                         {q.endTime ? ` • Fin : ${formatDate(q.endTime)}` : ''}
@@ -739,7 +756,7 @@ export default function StudentDashboard() {
                       </p>
                     </div>
 
-                    {notReady ? (
+                    {!q.questionCount ? (
                       <div className="w-full text-center bg-slate-800 border border-slate-700 text-slate-400 text-xs font-bold py-2.5 rounded-xl">
                         Questions en préparation
                       </div>
@@ -747,26 +764,12 @@ export default function StudentDashboard() {
                       <div className="w-full text-center bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-bold py-2.5 rounded-xl">
                         Ouverture le {formatDate(q.launchTime)}
                       </div>
-                    ) : isOpen ? (
+                    ) : (
                       <button
-                        onClick={() => handleStartQuiz(q.id, false)}
+                        onClick={() => handleStartQuiz(q.id, false, q.ue || q.id)}
                         className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-black py-2.5 rounded-xl transition shadow-lg shadow-emerald-500/20"
                       >
                         Rejoindre maintenant
-                      </button>
-                    ) : isPassed ? (
-                      <Link
-                        to={`/review/${q.id}`}
-                        className="w-full text-center bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-extrabold py-2.5 rounded-xl transition shadow-md shadow-indigo-600/20"
-                      >
-                        Relire ma copie
-                      </Link>
-                    ) : (
-                      <button
-                        onClick={() => handleStartQuiz(q.id, true)}
-                        className="w-full bg-red-600 hover:bg-red-500 text-white text-xs font-black py-2.5 rounded-xl transition shadow-lg shadow-red-600/30"
-                      >
-                        Rattraper l'épreuve
                       </button>
                     )}
                   </div>
@@ -780,16 +783,20 @@ export default function StudentDashboard() {
         <div className="bg-slate-800/50 border border-slate-700/60 rounded-3xl p-6">
           <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
             <div>
-              <h3 className="text-lg font-black text-white">
-                Unités d'Enseignement disponibles · {filiere} ({selectedNiveau})
+              <h3 className="text-lg font-black text-white flex items-center gap-2">
+                <Icon name="book" size={18} className="text-emerald-400" />
+                Toutes vos UE · {filiere} ({selectedNiveau})
               </h3>
               <p className="text-xs text-slate-400">
-                Sélectionnez une matière pour lancer un entraînement ou passer l'épreuve
+                Cours, TD, anciens sujets, rattrapages et QCM passés sont rangés dans chaque UE.
               </p>
             </div>
-            <span className="bg-blue-600/20 text-blue-300 border border-blue-500/30 text-xs font-bold px-3 py-1 rounded-full">
-              {semesterUes.length} UE(s) · {semesterLabel}
-            </span>
+            <Link
+              to="/ues"
+              className="bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 text-xs font-bold px-3 py-2 rounded-xl hover:bg-emerald-600/30 transition"
+            >
+              Ouvrir l'annuaire des UE →
+            </Link>
           </div>
 
           {loading ? (
@@ -883,78 +890,74 @@ export default function StudentDashboard() {
                       )}
                     </div>
 
-                    {state === 'ongoing' ? (
-                      <button
-                        onClick={() => handleStartQuiz(quiz.id, false)}
-                        className="mt-4 w-full bg-blue-600 hover:bg-blue-500 text-white text-xs font-extrabold py-2.5 rounded-xl transition shadow-md shadow-blue-600/20"
-                      >
-                        Démarrer l'épreuve
-                      </button>
-                    ) : state === 'done' ? (
-                      <Link
-                        to={`/review/${quiz.id}`}
-                        className="mt-4 w-full text-center bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-extrabold py-2.5 rounded-xl transition shadow-md shadow-indigo-600/20"
-                      >
-                        Relire ma copie
-                      </Link>
-                    ) : state === 'missed' ? (
-                      <button
-                        onClick={() => handleStartQuiz(quiz.id, true)}
-                        className="mt-4 w-full bg-red-600 hover:bg-red-500 text-white text-xs font-extrabold py-2.5 rounded-xl transition shadow-md shadow-red-600/20"
-                      >
-                        Rattraper l'épreuve
-                      </button>
-                    ) : state === 'upcoming' ? (
-                      <div className="mt-4 w-full text-center bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[11px] font-bold py-2.5 rounded-xl">
-                        Ouverture le {formatDate(quiz.launchTime)}
-                      </div>
-                    ) : (() => {
-                      const req = requestByUe.get(String(ue.id).toLowerCase());
-                      if (req && req.status !== 'rejected') {
-                        const validated = req.status === 'validated' || req.status === 'approved';
-                        const percent = req.progress?.percent || 0;
-                        return (
-                          <div className="mt-4 space-y-2">
-                            <div className="flex items-center justify-between text-[10px] font-bold">
-                              <span className={validated ? 'text-emerald-300' : 'text-amber-300'}>
-                                {req.status === 'approved'
-                                  ? 'Demande acceptée'
-                                  : validated
-                                  ? 'Demande validée'
-                                  : 'Demande en attente'}
-                              </span>
-                              <span className="text-slate-400">
-                                {req.progress?.count || 0}/{req.progress?.threshold || requestThreshold}
-                              </span>
-                            </div>
-                            <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                              <div
-                                className={`h-full ${validated ? 'bg-emerald-500' : 'bg-amber-500'}`}
-                                style={{ width: `${Math.max(percent, 6)}%` }}
-                              />
-                            </div>
-                            {!validated && (
-                              <button
-                                onClick={copyReferralLink}
-                                disabled={!referralLink}
-                                className="w-full bg-amber-500/15 hover:bg-amber-500/25 disabled:opacity-50 text-amber-200 border border-amber-500/30 text-[11px] font-bold py-2 rounded-xl transition"
-                              >
-                                {copiedReferral ? 'Lien copié !' : 'Inviter des camarades'}
-                              </button>
-                            )}
-                          </div>
-                        );
-                      }
-                      return (
+                    <div className="mt-4 space-y-2">
+                      {state === 'ongoing' && (
                         <button
-                          onClick={() => submitQuizRequest(ue.id, ue.label)}
-                          disabled={requestBusy === ue.id}
-                          className="mt-4 w-full bg-blue-950/60 hover:bg-blue-900 disabled:opacity-50 text-blue-200 border border-blue-800/80 text-[11px] font-bold py-2.5 rounded-xl transition"
+                          onClick={() => handleStartQuiz(quiz.id, false, ue.id)}
+                          className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-extrabold py-2.5 rounded-xl transition shadow-md shadow-emerald-500/20"
                         >
-                          {requestBusy === ue.id ? 'Envoi…' : 'Demander ce QCM'}
+                          Démarrer l'épreuve
                         </button>
-                      );
-                    })()}
+                      )}
+                      {state === 'upcoming' && (
+                        <div className="w-full text-center bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[11px] font-bold py-2.5 rounded-xl">
+                          Ouverture le {formatDate(quiz.launchTime)}
+                        </div>
+                      )}
+                      <Link
+                        to={`/ues/${encodeURIComponent(String(ue.id).toUpperCase())}`}
+                        className="w-full text-center bg-blue-600 hover:bg-blue-500 text-white text-xs font-extrabold py-2.5 rounded-xl transition shadow-md shadow-blue-600/20"
+                      >
+                        Ouvrir l'UE · cours, TD, QCM passés
+                      </Link>
+                      {state === 'none' && (() => {
+                        const req = requestByUe.get(String(ue.id).toLowerCase());
+                        if (req && req.status !== 'rejected') {
+                          const validated = req.status === 'validated' || req.status === 'approved';
+                          const percent = req.progress?.percent || 0;
+                          return (
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between text-[10px] font-bold">
+                                <span className={validated ? 'text-emerald-300' : 'text-amber-300'}>
+                                  {req.status === 'approved'
+                                    ? 'Demande acceptée'
+                                    : validated
+                                    ? 'Demande validée'
+                                    : 'Demande en attente'}
+                                </span>
+                                <span className="text-slate-400">
+                                  {req.progress?.count || 0}/{req.progress?.threshold || requestThreshold}
+                                </span>
+                              </div>
+                              <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                                <div
+                                  className={`h-full ${validated ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                                  style={{ width: `${Math.max(percent, 6)}%` }}
+                                />
+                              </div>
+                              {!validated && (
+                                <button
+                                  onClick={copyReferralLink}
+                                  disabled={!referralLink}
+                                  className="w-full bg-amber-500/15 hover:bg-amber-500/25 disabled:opacity-50 text-amber-200 border border-amber-500/30 text-[11px] font-bold py-2 rounded-xl transition"
+                                >
+                                  {copiedReferral ? 'Lien copié !' : 'Inviter des camarades'}
+                                </button>
+                              )}
+                            </div>
+                          );
+                        }
+                        return (
+                          <button
+                            onClick={() => submitQuizRequest(ue.id, ue.label)}
+                            disabled={requestBusy === ue.id}
+                            className="w-full bg-blue-950/60 hover:bg-blue-900 disabled:opacity-50 text-blue-200 border border-blue-800/80 text-[11px] font-bold py-2.5 rounded-xl transition"
+                          >
+                            {requestBusy === ue.id ? 'Envoi…' : 'Demander ce QCM'}
+                          </button>
+                        );
+                      })()}
+                    </div>
                   </div>
                 );
               })}
@@ -1075,74 +1078,40 @@ export default function StudentDashboard() {
           </div>
         </div>
 
-        {/* ── Mes QCM Passés STRICTEMENT CET UTILISATEUR (Point 2) ── */}
-        <div className="bg-slate-800/50 border border-slate-700/60 rounded-3xl p-6">
-          <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+        {/* ── Les copies sont consultables dans leur UE ── */}
+        <div className="bg-slate-800/50 border border-slate-700/60 rounded-3xl p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <span className="w-10 h-10 rounded-xl bg-indigo-600/20 text-indigo-300 flex items-center justify-center shrink-0">
+              <Icon name="check-circle" size={19} />
+            </span>
             <div>
-              <h3 className="text-lg font-black text-white">
-                Mes Évaluations Passées ({myResults.length})
+              <h3 className="text-sm font-black text-white">
+                {myResults.length} QCM passé(s) · rangés dans vos UE
               </h3>
-              <p className="text-xs text-slate-400">
-                Historique exclusif de vos copies et notes · {currentUser.name}
+              <p className="text-xs text-slate-400 mt-1 max-w-xl leading-relaxed">
+                Vos notes, corrigés et rattrapages ne sont plus listés ici : ouvrez une UE pour
+                retrouver la partie « QCM passés » correspondante.
               </p>
             </div>
           </div>
-
-          {myResults.length === 0 ? (
-            <div className="text-center py-12 bg-slate-900/50 rounded-2xl border border-dashed border-slate-700 text-slate-400 text-xs">
-              Vous n'avez pas encore passé de QCM sur votre compte.
-            </div>
-          ) : (
-            <div className="space-y-2.5">
-              {myResults.map(res => {
-                const note20 = res.total ? ((res.score / res.total) * 20).toFixed(1) : '-';
-                const isGood = parseFloat(note20) >= 10;
-                const linkedQuiz = allQuizzes.find(q => q.id === (res.quizId || res.ue));
-                const resultLabel = res.quizTitle || linkedQuiz?.title || res.ue;
-                return (
-                  <div
-                    key={res.id}
-                    className="bg-slate-900/70 border border-slate-700/80 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:border-slate-600 transition"
-                  >
-                    <div>
-                      <div className="flex items-center gap-2 mb-1 flex-wrap">
-                        <span className="font-black text-white text-base">{resultLabel}</span>
-                        {res.isMakeup && (
-                          <span className="bg-purple-500/20 text-purple-300 text-[10px] font-black px-2 py-0.5 rounded-full">
-                            Rattrapage
-                          </span>
-                        )}
-                        <span className="text-xs text-slate-400">
-                          UE {res.ue}{linkedQuiz?.ueLabel ? ` · ${linkedQuiz.ueLabel}` : ''} · {res.filiere} {res.niveau}
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-400">
-                        Passé le {formatDate(res.date)}
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-4 self-end sm:self-auto">
-                      <div className="text-right">
-                        <div className={`text-xl font-black ${isGood ? 'text-emerald-400' : 'text-red-400'}`}>
-                          {note20}/20
-                        </div>
-                        <div className="text-xs text-slate-400">
-                          Score : {res.score} / {res.total}
-                        </div>
-                      </div>
-
-                      <Link
-                        to={`/review/${res.quizId || res.ue}`}
-                        className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-extrabold px-4 py-2.5 rounded-xl transition shadow-md shadow-indigo-600/20 shrink-0"
-                      >
-                        Relire ma copie
-                      </Link>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+          <div className="flex flex-wrap gap-2 shrink-0">
+            <Link
+              to="/ues"
+              className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black px-4 py-2.5 rounded-xl transition"
+            >
+              <Icon name="book" size={14} />
+              Voir mes copies par UE
+            </Link>
+            {myResults.length > 0 && (
+              <Link
+                to={`/review/${myResults[0].quizId || myResults[0].ue}`}
+                className="inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 text-xs font-bold px-4 py-2.5 rounded-xl transition"
+              >
+                <Icon name="eye" size={14} />
+                Dernière copie
+              </Link>
+            )}
+          </div>
         </div>
 
         {/* ── Classement de ma salle (chargé uniquement après clic) ── */}

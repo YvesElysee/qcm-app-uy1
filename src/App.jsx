@@ -13,6 +13,8 @@ import Navbar from './components/layout/Navbar';
 import Footer from './components/layout/Footer';
 import ScrollToTop from './components/ScrollToTop';
 import Home from './components/pages/Home';
+import UeCatalog from './components/pages/UeCatalog';
+import UeDetail from './components/pages/UeDetail';
 import NotFound from './components/pages/NotFound';
 import ContactPage from './components/pages/ContactPage';
 import { getCurrentUser } from './services/authService';
@@ -88,6 +90,16 @@ export default function App() {
         <Route
           path="/dashboard"
           element={<RequireStudent><Layout><StudentDashboard /></Layout></RequireStudent>}
+        />
+
+        {/* Annuaire des UE : cours, QCM, rattrapages et copies regroupés */}
+        <Route
+          path="/ues"
+          element={<RequireStudent><Layout><UeCatalog /></Layout></RequireStudent>}
+        />
+        <Route
+          path="/ues/:code"
+          element={<RequireStudent><Layout><UeDetail /></Layout></RequireStudent>}
         />
 
         {/* Ressources de cours partagées (étudiant connecté) */}

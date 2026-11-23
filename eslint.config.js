@@ -5,7 +5,12 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  // `dist` et la copie Capacitor sont des artefacts générés, pas du code source.
+  globalIgnores([
+    'dist',
+    'android/**/build/**',
+    'android/**/assets/public/**'
+  ]),
   {
     files: ['**/*.{js,jsx}'],
     extends: [

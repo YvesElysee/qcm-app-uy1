@@ -109,6 +109,13 @@ router.get('/', (req, res) => {
     params.push(type);
   }
 
+  // Filtre optionnel par UE : utilisé par la vue détaillée d'une UE.
+  const ue = String(req.query.ue || '').trim().toUpperCase();
+  if (ue) {
+    where.push('UPPER(TRIM(COALESCE(ue, \'\'))) = ?');
+    params.push(ue);
+  }
+
   if (admin) {
     const faculte = String(req.query.faculte || '').trim();
     const filiere = String(req.query.filiere || '').trim();

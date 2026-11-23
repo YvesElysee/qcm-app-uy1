@@ -1,0 +1,17 @@
+{
+  "appId": "org.qcmapp.uy1",
+  "appName": "QCM App UY1",
+  "webDir": "dist",
+  "server": {
+    "url": "https://qcm-app.duckdns.org",
+    "androidScheme": "https",
+    "allowNavigation": ["qcm-app.duckdns.org"]
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1200,
+      "backgroundColor": "#020617",
+      "showSpinner": false
+    }
+  }
+}

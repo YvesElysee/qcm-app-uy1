@@ -10,6 +10,7 @@ import Icon from './components/ui/icons.jsx';
 import { RESOURCE_TYPES, resourceTypeLabel } from './constants/resourceTypes.js';
 import { ADMIN_LOGIN_PATH } from './config';
 import AdminQuizPreview from './components/AdminQuizPreview.jsx';
+import { ueCode, quizUeCode } from './utils/ueCatalog.js';
 
 const SECTIONS = [
   { id: 'overview', label: "Vue d'ensemble", icon: 'chart', desc: 'Statistiques clés et prochaines évaluations' },
@@ -181,6 +182,11 @@ export default function AdminPanel() {
   const [newUeNiveau, setNewUeNiveau] = useState('L1');
   const [newUeSemestre, setNewUeSemestre] = useState('1');
   const [allUes, setAllUes] = useState([]);
+  // Regroupement de l'existant : aperçu avant application.
+  const [backfillPreview, setBackfillPreview] = useState(null);
+  const [backfillBusy, setBackfillBusy] = useState(false);
+  const [editingUe, setEditingUe] = useState(null);
+  const [ueBusy, setUeBusy] = useState(false);
 
   // ── Gestion du catalogue (facultés & filières) ─────────────────────────
   const [newFaculteLabel, setNewFaculteLabel] = useState('');
@@ -311,6 +317,21 @@ export default function AdminPanel() {
     () => [...new Set(catalogFilieres.map(f => f.label))],
     [catalogFilieres]
   );
+
+  // Vue regroupée de l'existant : une ligne par UE avec ses QCM et ses documents.
+  const ueGroups = useMemo(() => {
+    const codes = new Set(allUes.map(u => ueCode(u.code || u.id)));
+    history.forEach(q => codes.add(quizUeCode(q)));
+    adminResources.forEach(r => { if (ueCode(r.ue)) codes.add(ueCode(r.ue)); });
+    return [...codes]
+      .map(code => ({
+        code,
+        ue: allUes.find(u => ueCode(u.code || u.id) === code),
+        quizzes: history.filter(q => quizUeCode(q) === code),
+        resources: adminResources.filter(r => ueCode(r.ue) === code)
+      }))
+      .sort((a, b) => a.code.localeCompare(b.code, 'fr', { numeric: true }));
+  }, [allUes, history, adminResources]);
   const filieresForFaculte = (fac) =>
     catalogFilieres.filter(f => !fac || f.faculte === fac).map(f => f.label);
 
@@ -984,6 +1005,66 @@ export default function AdminPanel() {
     setNewUeLabel('');
     fetchUes();
   }, [newUeCode, newUeLabel, newUeFaculte, newUeFiliere, newUeNiveau, newUeSemestre, fetchUes]);
+
+  /** Aperçu des UE manquantes détectées dans les QCM/docs/copies existants. */
+  const previewBackfill = useCallback(async () => {
+    setBackfillBusy(true);
+    try {
+      const data = await api('/ues/backfill/preview', { auth: 'admin' });
+      setBackfillPreview(data);
+    } catch (err) {
+      alert(`Aperçu impossible : ${err.message}`);
+    } finally {
+      setBackfillBusy(false);
+    }
+  }, []);
+
+  /** Crée les UE manquantes et complète les champs vides, sans écraser les libellés. */
+  const runBackfill = useCallback(async () => {
+    if (!backfillPreview?.missing) return;
+    if (!confirm(
+      `Regrouper ${backfillPreview.missing} UE manquante(s) ?\n\n` +
+      'Les libellés déjà renseignés ne seront pas modifiés.'
+    )) return;
+    setBackfillBusy(true);
+    try {
+      const res = await api('/ues/backfill', { method: 'POST', auth: 'admin', body: {} });
+      alert(
+        `Regroupement terminé : ${res.created} UE créée(s), ${res.updated} UE complétée(s).`
+      );
+      setBackfillPreview(null);
+      await Promise.all([fetchUes(), fetchHistory(), fetchResources()]);
+    } catch (err) {
+      alert(`Regroupement impossible : ${err.message}`);
+    } finally {
+      setBackfillBusy(false);
+    }
+  }, [backfillPreview, fetchUes, fetchHistory, fetchResources]);
+
+  const saveUe = useCallback(async () => {
+    if (!editingUe) return;
+    setUeBusy(true);
+    try {
+      await api(`/ues/${encodeURIComponent(editingUe.code)}`, {
+        method: 'PUT',
+        auth: 'admin',
+        body: {
+          label: editingUe.label,
+          faculte: editingUe.faculte,
+          filiere: editingUe.filiere,
+          niveau: editingUe.niveau,
+          semestre: editingUe.semestre
+        }
+      });
+      alert(`UE « ${editingUe.code} » mise à jour.`);
+      setEditingUe(null);
+      await Promise.all([fetchUes(), fetchHistory(), fetchResources()]);
+    } catch (err) {
+      alert(`Modification impossible : ${err.message}`);
+    } finally {
+      setUeBusy(false);
+    }
+  }, [editingUe, fetchUes, fetchHistory, fetchResources]);
 
   // ─── Demandes de filière ──────────────────────────────────────────────
   const approveFiliereRequest = useCallback(async (request) => {
@@ -3554,6 +3635,66 @@ export default function AdminPanel() {
           {/* ════════════ UNITÉS D'ENSEIGNEMENT ════════════ */}
           {activeSection === 'ues' && (
             <div className="space-y-6">
+              {/* Regroupement du travail créé avant la mise à jour */}
+              <div className={`${card} p-6`}>
+                <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <span className="w-10 h-10 rounded-xl bg-emerald-600/20 text-emerald-300 flex items-center justify-center shrink-0">
+                      <Icon name="refresh" size={18} />
+                    </span>
+                    <div>
+                      <h3 className="text-sm font-black text-white flex items-center gap-2">
+                        Regrouper l'existant par UE
+                      </h3>
+                      <p className="text-[11px] text-slate-400 mt-1 max-w-2xl leading-relaxed">
+                        Les QCM, documents et copies créés avant la mise à jour sont analysés :
+                        les UE manquantes sont créées et les champs vides complétés, sans écraser
+                        vos libellés. L'opération peut être répétée sans risque.
+                      </p>
+                    </div>
+                  </div>
+                  <button onClick={previewBackfill} disabled={backfillBusy} className={btnPrimary}>
+                    <Icon name="search" size={14} />
+                    {backfillBusy ? 'Analyse…' : 'Analyser l’existant'}
+                  </button>
+                </div>
+
+                {backfillPreview && (
+                  <div className="mt-5 border-t border-slate-800 pt-5 space-y-3">
+                    <div className="flex flex-wrap gap-2 text-[11px] font-black">
+                      <span className="bg-blue-600/15 text-blue-300 border border-blue-600/30 px-3 py-1.5 rounded-full">
+                        {backfillPreview.total} UE détectée(s)
+                      </span>
+                      <span className="bg-emerald-600/15 text-emerald-300 border border-emerald-600/30 px-3 py-1.5 rounded-full">
+                        {backfillPreview.existing} déjà au catalogue
+                      </span>
+                      <span className={
+                        backfillPreview.missing
+                          ? 'bg-amber-600/15 text-amber-300 border border-amber-600/30 px-3 py-1.5 rounded-full'
+                          : 'bg-slate-800 text-slate-400 px-3 py-1.5 rounded-full'
+                      }>
+                        {backfillPreview.missing} à créer
+                      </span>
+                    </div>
+                    {backfillPreview.missing > 0 && (
+                      <>
+                        <div className="flex flex-wrap gap-1.5">
+                          {backfillPreview.ues.filter(u => !allUes.some(x => x.id === u.code)).slice(0, 20).map(u => (
+                            <span key={u.code} className="text-[10px] font-bold text-amber-200 bg-amber-600/10 border border-amber-600/25 px-2 py-1 rounded-lg">
+                              {u.code}{u.label && u.label !== u.code ? ` · ${u.label}` : ''}
+                            </span>
+                          ))}
+                        </div>
+                        <button onClick={runBackfill} disabled={backfillBusy} className={btnPrimary}>
+                          <Icon name="check-circle" size={14} />
+                          Créer les UE manquantes
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <div className="grid lg:grid-cols-2 gap-4 items-start">
                 {/* Ajouter une UE */}
                 <div className={`${card} p-6 space-y-4`}>
@@ -3743,63 +3884,79 @@ export default function AdminPanel() {
                     Actualiser
                   </button>
                 </div>
-                {allUes.length === 0 ? (
+                {ueGroups.length === 0 ? (
                   <p className="text-xs text-slate-500 text-center py-10">
                     Aucune UE enregistrée dans le catalogue.
                   </p>
                 ) : (
                   <div className="divide-y divide-slate-800">
-                    {allUes.map(u => {
-                      const linkedQuiz = history.find(
-                        q => (q.ue || q.id) === (u.code || u.id) || q.id === u.id
-                      );
+                    {ueGroups.map(({ code, ue, quizzes: ueQuizzes, resources: ueResources }) => {
+                      const linkedQuiz = ueQuizzes.find(q => q.launchTime) || ueQuizzes[0];
                       return (
-                        <div key={u.id} className="px-6 py-3.5 flex items-center justify-between gap-3">
+                        <div key={code} className="px-6 py-3.5 flex items-center justify-between gap-3">
                           <div className="min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <span className="font-black text-white text-sm">{u.code}</span>
-                              {u.faculte && (
+                              <span className="font-black text-white text-sm">{code}</span>
+                              {!ue && (
+                                <span className="text-[10px] font-black text-amber-300 bg-amber-600/15 border border-amber-600/30 px-2 py-0.5 rounded-full">
+                                  À regrouper
+                                </span>
+                              )}
+                              {ue?.faculte && (
                                 <span className="text-[10px] font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded-full uppercase tracking-wider">
-                                  {u.faculte}
+                                  {ue.faculte}
                                 </span>
                               )}
                               <span className="text-[10px] font-bold text-blue-300 bg-blue-600/15 px-2 py-0.5 rounded-full">
-                                {u.filiere}
+                                {ue?.filiere || 'Filière à préciser'}
                               </span>
                               <span className="text-[10px] font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded-full">
-                                {u.niveau}
+                                {ue?.niveau || 'Niveau à préciser'}
                               </span>
                               <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                                u.semestre
+                                ue?.semestre
                                   ? 'text-emerald-300 bg-emerald-600/15'
                                   : 'text-slate-500 bg-slate-800'
                               }`}>
-                                {u.semestre ? `S${u.semestre}` : 'Tous semestres'}
+                                {ue?.semestre ? `S${ue.semestre}` : 'Tous semestres'}
                               </span>
                             </div>
-                            <p className="text-[11px] text-slate-500 mt-0.5 truncate">{u.label || u.code}</p>
+                            <p className="text-[11px] text-slate-500 mt-0.5 truncate">
+                              {ue?.label || 'Intitulé à préciser'} · {ueQuizzes.length} QCM · {ueResources.length} document(s)
+                            </p>
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
                             {linkedQuiz?.launchTime ? (
                               <span className="text-[10px] font-bold text-emerald-300 bg-emerald-600/15 border border-emerald-600/30 px-2 py-1 rounded-full">
                                 Épreuve : {formatDate(linkedQuiz.launchTime)}
                               </span>
-                            ) : linkedQuiz ? (
+                            ) : ueQuizzes.length ? (
                               <span className="text-[10px] font-bold text-amber-300 bg-amber-600/15 border border-amber-600/30 px-2 py-1 rounded-full">
-                                Épreuve non programmée
+                                QCM non programmé
                               </span>
                             ) : (
                               <span className="text-[10px] font-bold text-slate-400 bg-slate-800 px-2 py-1 rounded-full">
-                                Sans épreuve
+                                Sans QCM
                               </span>
                             )}
-                            <button
-                              onClick={() => deleteUe(u.id)}
-                              aria-label={`Supprimer l'UE ${u.code}`}
-                              className="w-8 h-8 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-950/50 flex items-center justify-center transition shrink-0"
-                            >
-                              <Icon name="trash" size={14} />
-                            </button>
+                            {ue && (
+                              <button
+                                onClick={() => setEditingUe({ ...ue, code: ueCode(ue.code || ue.id) })}
+                                aria-label={`Modifier l'UE ${code}`}
+                                className="w-8 h-8 rounded-lg text-blue-400 hover:text-blue-300 hover:bg-blue-950/50 flex items-center justify-center transition shrink-0"
+                              >
+                                <Icon name="edit" size={14} />
+                              </button>
+                            )}
+                            {ue && (
+                              <button
+                                onClick={() => deleteUe(ue.id)}
+                                aria-label={`Supprimer l'UE ${code}`}
+                                className="w-8 h-8 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-950/50 flex items-center justify-center transition shrink-0"
+                              >
+                                <Icon name="trash" size={14} />
+                              </button>
+                            )}
                           </div>
                         </div>
                       );
@@ -3807,6 +3964,91 @@ export default function AdminPanel() {
                   </div>
                 )}
               </div>
+
+              {/* Modale de modification d'une UE */}
+              {editingUe && (
+                <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                  <div className={`${card} w-full max-w-lg p-6 space-y-4 shadow-2xl`}>
+                    <div className="flex items-start justify-between gap-3 border-b border-slate-800 pb-3">
+                      <div>
+                        <h3 className="text-sm font-black text-white flex items-center gap-2">
+                          <Icon name="edit" size={15} className="text-blue-400" />
+                          Modifier l'UE {editingUe.code}
+                        </h3>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          Le semestre est appliqué aux QCM, la filière et le niveau aux documents de cette UE.
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => setEditingUe(null)}
+                        aria-label="Fermer"
+                        className="text-slate-500 hover:text-white transition"
+                      >
+                        <Icon name="close" size={18} />
+                      </button>
+                    </div>
+                    <div>
+                      <label className={label}>Intitulé</label>
+                      <input
+                        className={input}
+                        value={editingUe.label || ''}
+                        onChange={e => setEditingUe(prev => ({ ...prev, label: e.target.value }))}
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className={label}>Faculté</label>
+                        <select
+                          className={selectCls}
+                          value={editingUe.faculte || ''}
+                          onChange={e => setEditingUe(prev => ({ ...prev, faculte: e.target.value }))}
+                        >
+                          {facultes.map(f => <option key={f.id} value={f.id}>{f.label || f.id}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className={label}>Filière</label>
+                        <select
+                          className={selectCls}
+                          value={editingUe.filiere || ''}
+                          onChange={e => setEditingUe(prev => ({ ...prev, filiere: e.target.value }))}
+                        >
+                          {allFiliereLabels.map(f => <option key={f}>{f}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className={label}>Niveau</label>
+                        <select
+                          className={selectCls}
+                          value={editingUe.niveau || 'L1'}
+                          onChange={e => setEditingUe(prev => ({ ...prev, niveau: e.target.value }))}
+                        >
+                          {niveaux.map(n => <option key={n}>{n}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className={label}>Semestre</label>
+                        <select
+                          className={selectCls}
+                          value={editingUe.semestre || ''}
+                          onChange={e => setEditingUe(prev => ({ ...prev, semestre: e.target.value }))}
+                        >
+                          <option value="">Tous les semestres</option>
+                          <option value="1">Semestre 1</option>
+                          <option value="2">Semestre 2</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-2 pt-2">
+                      <button onClick={() => setEditingUe(null)} className={btnSecondary}>Annuler</button>
+                      <button onClick={saveUe} disabled={ueBusy} className={btnPrimary}>
+                        <Icon name="check" size={14} />
+                        {ueBusy ? 'Enregistrement…' : 'Enregistrer'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

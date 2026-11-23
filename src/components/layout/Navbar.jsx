@@ -141,6 +141,7 @@ export default function Navbar() {
     ...(user
       ? [
           ...(canGenerateExercises ? [{ to: '/exercises', label: 'Exercices' }] : []),
+          { to: '/ues', label: 'UE', highlight: true },
           { to: '/resources', label: 'Ressources' },
           { to: '/contact', label: 'Contact' },
           { to: '/dashboard', label: 'Mon espace' }
@@ -151,9 +152,10 @@ export default function Navbar() {
   const bottomLinks = user
     ? [
         { to: '/', label: 'Accueil', icon: 'home', end: true },
+        { to: '/ues', label: 'UE', icon: 'book' },
         { to: '/schedule', label: 'Planning', icon: 'calendar' },
         { action: 'ai', label: 'Tuteur IA', icon: 'sparkles' },
-        { to: '/resources', label: 'Ressources', icon: 'book' },
+        { to: '/resources', label: 'Ressources', icon: 'document' },
         { to: '/dashboard', label: 'Espace', icon: 'graduation' }
       ]
     : [
@@ -202,7 +204,20 @@ export default function Navbar() {
           {/* ── Liens desktop ── */}
           <nav className="hidden md:flex items-center gap-1" aria-label="Navigation principale">
             {links.map(l => (
-              <NavLink key={l.to} to={l.to} end={l.end} className={desktopLinkClass}>
+              <NavLink
+                key={l.to}
+                to={l.to}
+                end={l.end}
+                className={({ isActive }) => l.highlight
+                  ? `inline-flex items-center gap-1.5 text-xs font-black px-3 py-2 rounded-xl border transition ${
+                      isActive
+                        ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-md shadow-emerald-500/25'
+                        : 'bg-emerald-600/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-600/25'
+                    }`
+                  : desktopLinkClass({ isActive })
+              }
+              >
+                {l.highlight && <Icon name="book" size={13} />}
                 {l.label}
               </NavLink>
             ))}
@@ -294,11 +309,19 @@ export default function Navbar() {
                         Mon espace
                       </NavLink>
                       <NavLink
+                        to="/ues"
+                        onClick={() => setUserMenuOpen(false)}
+                        className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-black text-emerald-300 bg-emerald-600/10 hover:bg-emerald-600/20 transition"
+                      >
+                        <Icon name="book" size={15} />
+                        Toutes mes UE
+                      </NavLink>
+                      <NavLink
                         to="/resources"
                         onClick={() => setUserMenuOpen(false)}
                         className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-slate-200 hover:bg-slate-700 hover:text-white transition"
                       >
-                        <Icon name="book" size={15} />
+                        <Icon name="document" size={15} />
                         Ressources de cours
                       </NavLink>
                       {canGenerateExercises && (
@@ -463,6 +486,20 @@ export default function Navbar() {
                     <Icon name="sparkles" size={17} />
                     Tuteur IA
                   </button>
+                  <NavLink
+                    to="/ues"
+                    onClick={() => setMobileOpen(false)}
+                    className={({ isActive }) =>
+                      `w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-black transition ${
+                        isActive
+                          ? 'bg-emerald-500 text-slate-950'
+                          : 'bg-emerald-600/10 text-emerald-300 hover:bg-emerald-600/20'
+                      }`
+                    }
+                  >
+                    <Icon name="book" size={17} />
+                    Toutes mes UE
+                  </NavLink>
                   <button
                     type="button"
                     onClick={openGuide}
@@ -518,7 +555,7 @@ export default function Navbar() {
         aria-label="Navigation rapide"
         className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 pb-[env(safe-area-inset-bottom)]"
       >
-        <div className="grid grid-cols-5">
+        <div className="grid grid-cols-6">
           {bottomLinks.map((item) => {
             if (item.action === 'ai') {
               return (
