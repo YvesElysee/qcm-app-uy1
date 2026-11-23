@@ -5,6 +5,7 @@ import { getCurrentUser } from '../../services/authService';
 import usePageTitle from '../../hooks/usePageTitle';
 import Icon from '../ui/icons.jsx';
 import { APK_DOWNLOAD_URL, FEATURES, STEPS } from '../../constants/portalInfo.js';
+import { showApkDownload } from '../../utils/appEnvironment.js';
 
 // Chaîne officielle QCM App : invitée sur toutes les pages, connecté ou non.
 const WHATSAPP_CHANNEL = 'https://whatsapp.com/channel/0029Vb96OnjLCoXA4RDPES2n';
@@ -17,6 +18,7 @@ export default function Home() {
   usePageTitle('Accueil');
 
   const user = getCurrentUser();
+  const apkDownloadAvailable = showApkDownload();
   const [stats, setStats] = useState(null);
 
   // Statistiques publiques : QCM, UE, étudiants inscrits et épreuves à venir
@@ -129,19 +131,23 @@ export default function Home() {
               <Icon name="chat" size={16} />
               Rejoindre la chaîne WhatsApp
             </a>
-            <a
-              href={APK_DOWNLOAD_URL}
-              download="QCM App.apk"
-              title="Application Android · fichier APK"
-              className="inline-flex w-full sm:w-auto items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-sm px-6 py-3.5 rounded-2xl transition shadow-lg shadow-indigo-600/25"
-            >
-              <Icon name="download" size={16} />
-              Télécharger l'application Android
-            </a>
+            {apkDownloadAvailable && (
+              <a
+                href={APK_DOWNLOAD_URL}
+                download="QCM App.apk"
+                title="Application Android · fichier APK"
+                className="inline-flex w-full sm:w-auto items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-sm px-6 py-3.5 rounded-2xl transition shadow-lg shadow-indigo-600/25"
+              >
+                <Icon name="download" size={16} />
+                Télécharger l'application Android
+              </a>
+            )}
           </div>
-          <p className="text-[11px] text-slate-500 mt-3">
-            Android uniquement · installez le fichier APK puis ouvrez l'application : elle se connecte directement au portail.
-          </p>
+          {apkDownloadAvailable && (
+            <p className="text-[11px] text-slate-500 mt-3">
+              Android uniquement · installez le fichier APK puis ouvrez l'application : elle se connecte directement au portail.
+            </p>
+          )}
         </div>
       </section>
 

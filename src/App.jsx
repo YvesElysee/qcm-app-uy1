@@ -12,6 +12,7 @@ import ExerciseGenerator from './components/ExerciseGenerator';
 import Navbar from './components/layout/Navbar';
 import Footer from './components/layout/Footer';
 import ScrollToTop from './components/ScrollToTop';
+import OfflineBanner from './components/ui/OfflineBanner';
 import Home from './components/pages/Home';
 import UeCatalog from './components/pages/UeCatalog';
 import UeDetail from './components/pages/UeDetail';
@@ -58,6 +59,7 @@ function OnlyPublic({ children }) {
 function Layout({ children }) {
   return (
     <div className="min-h-screen flex flex-col bg-slate-950">
+      <OfflineBanner />
       <Navbar />
       <div className="flex-1 flex flex-col">{children}</div>
       <Footer />

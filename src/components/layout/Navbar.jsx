@@ -8,6 +8,7 @@ import AiTutor from '../ai/AiTutor';
 import Icon from '../ui/icons.jsx';
 import { pathwayFor } from '../../utils/studentProfile.js';
 import { APK_DOWNLOAD_URL } from '../../constants/portalInfo.js';
+import { showApkDownload } from '../../utils/appEnvironment.js';
 
 const WHATSAPP_CHANNEL = 'https://whatsapp.com/channel/0029Vb96OnjLCoXA4RDPES2n';
 
@@ -26,6 +27,7 @@ const guideSeenKey = (identity) => `qcm_guide_seen_v2:${identity}`;
  */
 export default function Navbar() {
   const user = getCurrentUser();
+  const apkDownloadAvailable = showApkDownload();
   const navigate = useNavigate();
 
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -162,7 +164,7 @@ export default function Navbar() {
     : [
         { to: '/', label: 'Accueil', icon: 'home', end: true },
         { to: '/schedule', label: 'Planning', icon: 'calendar' },
-        { action: 'apk', label: 'APK', icon: 'download' },
+        ...(apkDownloadAvailable ? [{ action: 'apk', label: 'APK', icon: 'download' }] : []),
         { to: '/login', label: 'Connexion', icon: 'user' },
         { to: '/register', label: 'Inscription', icon: 'graduation' }
       ];
@@ -250,7 +252,7 @@ export default function Navbar() {
                 <span className="hidden lg:inline">Guide</span>
               </button>
             )}
-            {!user && (
+            {!user && apkDownloadAvailable && (
               <a
                 href={APK_DOWNLOAD_URL}
                 download="QCM App.apk"
@@ -477,7 +479,7 @@ export default function Navbar() {
               </div>
             )}
 
-            {!user && (
+            {!user && apkDownloadAvailable && (
               <a
                 href={APK_DOWNLOAD_URL}
                 download="QCM App.apk"

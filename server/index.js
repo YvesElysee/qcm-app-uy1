@@ -107,10 +107,25 @@ app.get('/download/apk', (_req, res) => {
 // ── Frontend statique (production) ─────────────────────────────────────
 const distDir = path.join(__dirname, '..', 'dist');
 if (fs.existsSync(distDir)) {
-  app.use(express.static(distDir));
-  // SPA : toutes les autres requêtes GET renvoient index.html (routing React)
+  // Les fichiers de /assets ont des noms hachés : cache immutable sans risque.
+  // La WebView Android les garde ainsi entre deux lancements de l'APK.
+  app.use('/assets', express.static(path.join(distDir, 'assets'), {
+    maxAge: '1y',
+    immutable: true,
+    index: false
+  }));
+  app.use(express.static(distDir, {
+    maxAge: '1h',
+    index: false,
+    setHeaders(res, filePath) {
+      if (path.basename(filePath) === 'index.html') res.setHeader('Cache-Control', 'no-cache');
+    }
+  }));
+  // SPA : toutes les autres requêtes GET renvoient index.html (routing React).
+  // index.html doit toujours être revalidé pour récupérer les nouveaux hashes.
   app.use((req, res, next) => {
-    if (req.method !== 'GET' || req.path.startsWith('/api')) return next();
+    if (!['GET', 'HEAD'].includes(req.method) || req.path.startsWith('/api')) return next();
+    res.setHeader('Cache-Control', 'no-cache');
     res.sendFile(path.join(distDir, 'index.html'));
   });
 }
