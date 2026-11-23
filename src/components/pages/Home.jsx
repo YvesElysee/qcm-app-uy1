@@ -131,7 +131,7 @@ export default function Home() {
             </a>
             <a
               href={APK_DOWNLOAD_URL}
-              download="QCM-App-UY1.apk"
+              download="QCM App.apk"
               title="Application Android · fichier APK"
               className="inline-flex w-full sm:w-auto items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-sm px-6 py-3.5 rounded-2xl transition shadow-lg shadow-indigo-600/25"
             >

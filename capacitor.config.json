@@ -1,6 +1,6 @@
 {
-  "appId": "org.qcmapp.uy1",
-  "appName": "QCM App UY1",
+  "appId": "org.qcmapp.app",
+  "appName": "QCM App",
   "webDir": "dist",
   "server": {
     "url": "https://qcm-app.duckdns.org",

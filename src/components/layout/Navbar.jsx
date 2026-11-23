@@ -253,7 +253,7 @@ export default function Navbar() {
             {!user && (
               <a
                 href={APK_DOWNLOAD_URL}
-                download="QCM-App-UY1.apk"
+                download="QCM App.apk"
                 aria-label="Télécharger l'application Android"
                 title="Télécharger l'application Android (APK)"
                 className="inline-flex items-center justify-center gap-2 w-10 h-10 lg:w-auto lg:h-auto lg:px-3 lg:py-2 rounded-xl bg-indigo-600/15 hover:bg-indigo-600/25 border border-indigo-500/30 text-indigo-300 text-xs font-bold transition"
@@ -480,7 +480,7 @@ export default function Navbar() {
             {!user && (
               <a
                 href={APK_DOWNLOAD_URL}
-                download="QCM-App-UY1.apk"
+                download="QCM App.apk"
                 onClick={() => setMobileOpen(false)}
                 className="flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-bold bg-indigo-600/15 border border-indigo-500/30 text-indigo-300 hover:bg-indigo-600/25 transition"
               >
@@ -600,7 +600,7 @@ export default function Navbar() {
                 <a
                   key="apk"
                   href={APK_DOWNLOAD_URL}
-                  download="QCM-App-UY1.apk"
+                  download="QCM App.apk"
                   aria-label="Télécharger l'application Android"
                   className="flex flex-col items-center justify-center gap-1 py-2.5 text-[10px] font-bold transition active:bg-slate-800 text-indigo-300"
                 >

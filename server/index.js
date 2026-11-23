@@ -89,16 +89,17 @@ app.use('/api', (_req, res) => {
 });
 
 // ── Téléchargement de l'application Android ───────────────────────────
-// L'APK est servi depuis public/downloads (copié dans dist/ par Vite).
+// L'APK est servi depuis downloads/ (hors public/ pour ne pas être embarqué
+// dans les ressources web de l'application Android).
 // Route explicite avant le statique pour forcer le type et le nom de fichier,
 // ce qui déclenche bien le téléchargement depuis le navigateur mobile.
-const apkPath = path.join(__dirname, '..', 'public', 'downloads', 'qcm-app-uy1.apk');
+const apkPath = path.join(__dirname, '..', 'downloads', 'qcm-app.apk');
 app.get('/download/apk', (_req, res) => {
   if (!fs.existsSync(apkPath)) {
     return res.status(404).json({ error: "L'application Android n'est pas disponible pour le moment." });
   }
   res.setHeader('Content-Type', 'application/vnd.android.package-archive');
-  res.setHeader('Content-Disposition', 'attachment; filename="QCM-App-UY1.apk"');
+  res.setHeader('Content-Disposition', 'attachment; filename="QCM App.apk"');
   res.setHeader('Cache-Control', 'public, max-age=3600');
   return res.sendFile(apkPath);
 });

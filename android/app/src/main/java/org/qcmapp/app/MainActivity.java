@@ -1,4 +1,4 @@
-package org.qcmapp.uy1;
+package org.qcmapp.app;
 
 import com.getcapacitor.BridgeActivity;
 
