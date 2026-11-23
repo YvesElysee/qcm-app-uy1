@@ -23,12 +23,47 @@ function getAdminToken() {
   return sessionStorage.getItem('adminToken') || null;
 }
 
+// ── Cache local pour le mode hors ligne ─────────────────────────────────
+// Seules les lectures utiles hors connexion sont conservées : cours, UE,
+// QCM et derniers résultats de l'étudiant. Jamais d'écriture ni d'auth.
+const OFFLINE_PREFIX = 'qcm_offline_cache:';
+const OFFLINE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
+const CACHEABLE_GET = new Set(['/ues', '/quizzes', '/resources', '/results/mine', '/stats']);
+
+function offlineKey(path) {
+  const identity = getSession()?.id || 'anon';
+  return `${OFFLINE_PREFIX}${identity}:${path}`;
+}
+
+function saveOffline(path, data) {
+  try {
+    localStorage.setItem(offlineKey(path), JSON.stringify({ at: Date.now(), data }));
+  } catch {
+    // Quota dépassé ou stockage indisponible : on continue sans cache.
+  }
+}
+
+function readOffline(path) {
+  try {
+    const raw = localStorage.getItem(offlineKey(path));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.at) return null;
+    if (Date.now() - parsed.at > OFFLINE_MAX_AGE) return null;
+    return parsed.data;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Appelle l'API et lève une Error avec le message serveur en cas d'échec.
  * @param {string} path    Chemin relatif (ex: '/quizzes/INF232')
  * @param {object} options { method, body, auth: 'student' | 'admin' | null, signal }
  */
 export async function api(path, { method = 'GET', body, auth, signal } = {}) {
+  const basePath = path.split('?')[0];
+  const canCache = method === 'GET' && CACHEABLE_GET.has(basePath);
   const headers = {};
   if (body !== undefined) headers['Content-Type'] = 'application/json';
 
@@ -50,6 +85,16 @@ export async function api(path, { method = 'GET', body, auth, signal } = {}) {
     });
   } catch (err) {
     if (err?.name === 'AbortError') throw err;
+    // Pas de réseau : on sert la dernière copie enregistrée si elle existe.
+    if (canCache) {
+      const cached = readOffline(path);
+      if (cached) {
+        if (typeof window !== 'undefined') window.dispatchEvent(new Event('qcm:offline-cache'));
+        // On renvoie la copie telle quelle : certains endpoints renvoient un
+        // tableau et ne doivent pas être transformés en objet.
+        return cached;
+      }
+    }
     throw new Error('Le serveur est injoignable. Vérifiez que l\'API est démarrée.', { cause: err });
   }
 
@@ -74,6 +119,7 @@ export async function api(path, { method = 'GET', body, auth, signal } = {}) {
     throw err;
   }
 
+  if (canCache) saveOffline(path, data);
   return data;
 }
 
@@ -83,6 +129,7 @@ export async function api(path, { method = 'GET', body, auth, signal } = {}) {
 export function saveSession(sessionWithToken) {
   localStorage.setItem('userSession', JSON.stringify(sessionWithToken));
   localStorage.setItem('qcm_last_name', sessionWithToken.name);
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('qcm:auth-changed'));
 }
 
 /**

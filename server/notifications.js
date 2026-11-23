@@ -7,6 +7,7 @@
  */
 import { db } from './db.js';
 import { normalizeFaculte, quizFaculte } from './access.js';
+import { sendPushToUsers } from './push.js';
 
 export function createNotification({
   userId,
@@ -93,6 +94,17 @@ export function notifyQuizAvailable(quiz) {
     });
     if (ok) created += 1;
   });
+
+  // Même information en notification push sur les appareils Android connectés.
+  if (users.length) {
+    sendPushToUsers(users.map(u => u.id), {
+      title: `Nouvelle évaluation : ${title}`,
+      body: launch
+        ? `Le QCM ${title} est programmé pour le ${launch}.`
+        : `Le QCM ${title} est disponible dans votre espace.`,
+      link: `/dashboard?quiz=${encodeURIComponent(quiz.id)}`
+    }).catch(err => console.warn('[notifications] Push impossible :', err.message));
+  }
   return created;
 }
 

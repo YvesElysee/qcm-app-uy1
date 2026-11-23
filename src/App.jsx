@@ -13,12 +13,15 @@ import Navbar from './components/layout/Navbar';
 import Footer from './components/layout/Footer';
 import ScrollToTop from './components/ScrollToTop';
 import OfflineBanner from './components/ui/OfflineBanner';
+import UpdateBanner from './components/ui/UpdateBanner';
+import OfflineDataBanner from './components/ui/OfflineDataBanner';
 import Home from './components/pages/Home';
 import UeCatalog from './components/pages/UeCatalog';
 import UeDetail from './components/pages/UeDetail';
 import NotFound from './components/pages/NotFound';
 import ContactPage from './components/pages/ContactPage';
 import { getCurrentUser } from './services/authService';
+import { initPushNotifications } from './services/pushNotifications';
 import { ADMIN_LOGIN_PATH, ADMIN_PANEL_PATH } from './config';
 
 // ── Guard Admin ───────────────────────────────────────────────────────
@@ -60,6 +63,8 @@ function Layout({ children }) {
   return (
     <div className="min-h-screen flex flex-col bg-slate-950">
       <OfflineBanner />
+      <OfflineDataBanner />
+      <UpdateBanner />
       <Navbar />
       <div className="flex-1 flex flex-col">{children}</div>
       <Footer />
@@ -69,6 +74,13 @@ function Layout({ children }) {
 
 // ── App ───────────────────────────────────────────────────────────────
 export default function App() {
+  useEffect(() => {
+    initPushNotifications();
+    const onAuth = () => initPushNotifications();
+    window.addEventListener('qcm:auth-changed', onAuth);
+    return () => window.removeEventListener('qcm:auth-changed', onAuth);
+  }, []);
+
   return (
     <Router>
       <ScrollToTop />

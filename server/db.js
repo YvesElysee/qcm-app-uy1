@@ -409,6 +409,23 @@ ensureColumn('feedback', 'repliedBy', "TEXT DEFAULT 'admin'");
 ensureColumn('student_exercises', 'revisionPrompts', "TEXT DEFAULT '[]'");
 
 db.exec(`
+  -- Jetons FCM des étudiants (notifications push Android)
+  CREATE TABLE IF NOT EXISTS push_tokens (
+    token     TEXT PRIMARY KEY,
+    userId    TEXT NOT NULL,
+    platform  TEXT DEFAULT 'android',
+    createdAt TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_push_tokens_user ON push_tokens(userId);
+
+  -- Rappels déjà envoyés, pour ne jamais doublonner un QCM
+  CREATE TABLE IF NOT EXISTS quiz_reminders (
+    quizId    TEXT NOT NULL,
+    offsetKey TEXT NOT NULL,
+    sentAt    TEXT NOT NULL,
+    PRIMARY KEY (quizId, offsetKey)
+  );
+
   CREATE INDEX IF NOT EXISTS idx_results_quiz ON results(quizId);
   CREATE INDEX IF NOT EXISTS idx_resources_type ON resources(type);
   CREATE INDEX IF NOT EXISTS idx_feedback_user ON feedback(userId);

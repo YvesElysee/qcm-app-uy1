@@ -26,6 +26,8 @@ import aiGenerationRoutes from './routes/aiGeneration.js';
 import reviewRoutes from './routes/review.js';
 import catalogRoutes from './routes/catalog.js';
 import notificationsRoutes from './routes/notifications.js';
+import pushRoutes from './routes/push.js';
+import { initPush, startReminderScheduler } from './push.js';
 import resourcesRoutes from './routes/resources.js';
 import quizRequestsRoutes, { adminRouter as quizRequestsAdminRoutes } from './routes/quizRequests.js';
 import exercisesRoutes from './routes/exercises.js';
@@ -54,6 +56,7 @@ app.use('/api/ai-generation', aiGenerationRoutes);
 app.use('/api/review', reviewRoutes);
 app.use('/api/catalog', catalogRoutes);
 app.use('/api/notifications', notificationsRoutes);
+app.use('/api/push', pushRoutes);
 app.use('/api/resources', resourcesRoutes);
 app.use('/api/exercises', exercisesRoutes);
 app.use('/api/quiz-requests', quizRequestsRoutes);
@@ -80,6 +83,18 @@ app.get('/api/stats', (_req, res) => {
   } catch (err) {
     console.error('[api] Erreur statistiques :', err);
     res.status(500).json({ error: 'Impossible de charger les statistiques.' });
+  }
+});
+
+// Version de l'APK disponible au téléchargement (pour le bandeau de mise à jour)
+const releasePath = path.join(__dirname, '..', 'downloads', 'release.json');
+app.get('/api/app-version', (_req, res) => {
+  try {
+    const release = JSON.parse(fs.readFileSync(releasePath, 'utf8'));
+    res.setHeader('Cache-Control', 'no-cache');
+    res.json(release);
+  } catch {
+    res.status(404).json({ error: 'Version indisponible.' });
   }
 });
 
@@ -155,6 +170,9 @@ setInterval(() => {
     console.warn('[cleanup] Échec du nettoyage périodique :', err.message);
   }
 }, 60 * 1000).unref();
+
+// ── Notifications push et rappels de QCM ──────────────────────────────
+initPush().then(startReminderScheduler);
 
 // ── Démarrage ─────────────────────────────────────────────────────────
 if (!process.env.ADMIN_PASSWORD) {

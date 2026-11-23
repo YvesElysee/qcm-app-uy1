@@ -87,6 +87,7 @@ export function logoutStudent() {
   // Révocation best-effort (fire & forget), puis nettoyage local immédiat
   api('/auth/logout', { method: 'POST', auth: 'student' }).catch(() => {});
   localStorage.removeItem('userSession');
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('qcm:auth-changed'));
 }
 
 /**
