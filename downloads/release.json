@@ -1,7 +1,7 @@
 {
-  "versionCode": 3,
-  "versionName": "1.0.2",
-  "notes": "Nouveau logo, notifications push et rappels de QCM.",
+  "versionCode": 4,
+  "versionName": "1.0.3",
+  "notes": "Notifications push et rappels de QCM activés.",
   "apkUrl": "/download/apk",
   "required": false
 }
