@@ -160,7 +160,8 @@ export default function Navbar() {
         { to: '/ues', label: 'UE', icon: 'book' },
         { to: '/schedule', label: 'Planning', icon: 'calendar' },
         { action: 'ai', label: 'Tuteur IA', icon: 'sparkles' },
-        { to: '/resources', label: 'Ressources', icon: 'document' },
+        ...(apkDownloadAvailable ? [{ action: 'apk', label: 'APK', icon: 'download' }] : []),
+        { to: '/resources', label: 'Ress.', icon: 'document' },
         { to: '/dashboard', label: 'Espace', icon: 'graduation' }
       ]
     : [
@@ -252,7 +253,7 @@ export default function Navbar() {
                 <span className="hidden lg:inline">Guide</span>
               </button>
             )}
-            {!user && apkDownloadAvailable && (
+            {apkDownloadAvailable && (
               <a
                 href={APK_DOWNLOAD_URL}
                 download="QCM App.apk"
@@ -478,7 +479,7 @@ export default function Navbar() {
               </div>
             )}
 
-            {!user && apkDownloadAvailable && (
+            {apkDownloadAvailable && (
               <a
                 href={APK_DOWNLOAD_URL}
                 download="QCM App.apk"
@@ -582,7 +583,7 @@ export default function Navbar() {
         aria-label="Navigation rapide"
         className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 pb-[env(safe-area-inset-bottom)]"
       >
-        <div className="grid grid-cols-6">
+        <div className={`grid ${bottomLinks.length === 7 ? 'grid-cols-7' : bottomLinks.length === 5 ? 'grid-cols-5' : 'grid-cols-6'}`}>
           {bottomLinks.map((item) => {
             if (item.action === 'ai') {
               return (
