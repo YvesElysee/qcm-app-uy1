@@ -135,9 +135,16 @@ router.post('/initiate', async (req, res) => {
 
     const body = pickData(data);
     if (!sr.ok) {
-      const msg = body?.message || data?.message || 'initiation échouée';
-      console.error('[donations] SasPay initiate error:', sr.status, msg);
-      return res.status(502).json({ error: 'Impossible d’initier le paiement. Vérifiez le numéro et réessayez.' });
+      const msg = body?.message || body?.detail || data?.message || data?.error?.message || data?.error?.detail || (typeof data?.error === 'string' ? data.error : '') || 'initiation échouée';
+      const code = body?.code || data?.code || data?.error?.code || '';
+      console.error('[donations] SasPay initiate error:', sr.status, code, msg);
+      if (sr.status === 401 || sr.status === 403) {
+        return res.status(502).json({ error: 'Le service de don est mal configuré côté serveur. Contactez l’administrateur.' });
+      }
+      const safeMsg = typeof msg === 'string' ? msg.slice(0, 180) : '';
+      return res.status(502).json({
+        error: safeMsg || 'Impossible d’initier le paiement. Vérifiez le numéro et réessayez.'
+      });
     }
 
     const paymentId = body?.id || body?.payment_id;
