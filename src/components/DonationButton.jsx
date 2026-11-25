@@ -24,6 +24,16 @@ function normalizeCmPhone(value) {
   return '';
 }
 
+function detectCmNetwork(phone) {
+  const n = normalizeCmPhone(phone).replace(/^\+237/, '');
+  if (!/^6\d{8}$/.test(n)) return '';
+  const p3 = n.slice(0, 3);
+  const p2 = n.slice(0, 2);
+  if (['650', '651', '652', '653', '654', '680', '681', '682', '683', '684'].includes(p3) || ['67', '68'].includes(p2)) return 'mtn_cm';
+  if (['655', '656', '657', '658', '659'].includes(p3) || p2 === '69') return 'orange_cm';
+  return '';
+}
+
 /**
  * Petit bouton de don volontaire (SasPay softpay). L'utilisateur saisit son
  * numéro Mobile Money, reçoit un push USSD sur son téléphone et confirme.
@@ -78,6 +88,8 @@ export default function DonationButton({ className = '', compact = false, varian
   const selectedAmount = useCustom ? Math.round(Number(custom)) : amount;
   const amountValid = Number.isFinite(selectedAmount) && selectedAmount >= MIN_AMOUNT && selectedAmount <= MAX_AMOUNT;
   const phoneValid = !!normalizeCmPhone(phone);
+  const detectedNetwork = detectCmNetwork(phone);
+  const networkMismatch = phoneValid && detectedNetwork && detectedNetwork !== network;
 
   async function pollStatus(id) {
     attemptsRef.current += 1;
@@ -243,6 +255,11 @@ export default function DonationButton({ className = '', compact = false, varian
                     <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} required inputMode="tel" placeholder="Ex : 6XXXXXXXX"
                       className="mt-2 w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm text-white placeholder:text-slate-600 outline-none focus:border-slate-500" />
                     <span className="text-[11px] text-slate-500 mt-1 block">Le numéro qui recevra la demande de confirmation USSD.</span>
+                    {networkMismatch && (
+                      <span className="text-[11px] text-amber-300 mt-1 block">
+                        Ce numéro semble être {detectedNetwork === 'mtn_cm' ? 'MTN' : 'Orange'}. Vérifiez le réseau sélectionné.
+                      </span>
+                    )}
                   </label>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
