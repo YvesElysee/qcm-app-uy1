@@ -7,6 +7,7 @@ import OnboardingGuide from '../OnboardingGuide';
 import AiTutor from '../ai/AiTutor';
 import Icon from '../ui/icons.jsx';
 import BrandLogo from '../ui/BrandLogo.jsx';
+import DonationButton from '../DonationButton.jsx';
 import { pathwayFor } from '../../utils/studentProfile.js';
 import { APK_DOWNLOAD_URL } from '../../constants/portalInfo.js';
 import { showApkDownload } from '../../utils/appEnvironment.js';
@@ -373,6 +374,7 @@ export default function Navbar() {
                         <Icon name="user" size={15} />
                         Mon profil
                       </button>
+                      <DonationButton variant="menu" className="!text-xs !font-bold !text-slate-400 !px-3 !py-2.5 !gap-2.5" />
                       <div className="h-px bg-slate-700 my-1.5" />
                       <button
                         type="button"
@@ -540,6 +542,7 @@ export default function Navbar() {
                     <Icon name="user" size={17} />
                     Mon profil
                   </button>
+                  <DonationButton variant="menu" />
                   <button
                     type="button"
                     onClick={handleLogout}
