@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { getCurrentUser } from '../../services/authService';
 import BrandLogo from '../ui/BrandLogo.jsx';
+import DonationButton from '../DonationButton.jsx';
 
 /**
  * Pied de page partagé : identité, navigation rapide et informations
@@ -60,6 +61,9 @@ export default function Footer() {
               >
                 Rejoindre la chaîne WhatsApp
               </a>
+            </li>
+            <li className="pt-2">
+              <DonationButton />
             </li>
           </ul>
         </div>

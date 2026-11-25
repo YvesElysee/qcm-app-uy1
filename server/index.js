@@ -27,6 +27,7 @@ import reviewRoutes from './routes/review.js';
 import catalogRoutes from './routes/catalog.js';
 import notificationsRoutes from './routes/notifications.js';
 import pushRoutes from './routes/push.js';
+import donationsRoutes from './routes/donations.js';
 import { initPush, startReminderScheduler } from './push.js';
 import resourcesRoutes from './routes/resources.js';
 import quizRequestsRoutes, { adminRouter as quizRequestsAdminRoutes } from './routes/quizRequests.js';
@@ -60,7 +61,7 @@ app.use('/api/push', pushRoutes);
 app.use('/api/resources', resourcesRoutes);
 app.use('/api/exercises', exercisesRoutes);
 app.use('/api/quiz-requests', quizRequestsRoutes);
-app.use('/api/admin/quiz-requests', quizRequestsAdminRoutes);
+app.use('/api/donations', donationsRoutes);
 
 /**
  * Statistiques publiques de la plateforme (page d'accueil).
