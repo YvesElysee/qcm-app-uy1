@@ -156,10 +156,10 @@ export default function DonationButton({ className = '', compact = false, varian
   const isMenu = variant === 'menu';
   const isCard = variant === 'card';
   const btnClass = isMenu
-    ? `w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-bold bg-rose-500/10 border border-rose-400/25 text-rose-200 hover:bg-rose-500/20 hover:border-rose-400/40 transition ${className}`
+    ? `w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-bold max-w-full bg-indigo-500/12 border border-indigo-400/30 text-indigo-200 hover:bg-indigo-500/20 hover:border-indigo-400/45 transition ${className}`
     : isCard
-      ? `inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl text-sm font-black bg-rose-500 hover:bg-rose-400 text-white shadow-lg shadow-rose-500/25 transition ${className}`
-      : `inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold bg-rose-500/15 border border-rose-400/30 text-rose-200 hover:bg-rose-500/25 hover:text-white transition ${className}`;
+      ? `inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl text-sm font-black whitespace-nowrap max-w-full bg-indigo-500 hover:bg-indigo-400 text-white shadow-lg shadow-indigo-500/25 transition ${className}`
+      : `inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold whitespace-nowrap max-w-full bg-indigo-500/15 border border-indigo-400/30 text-indigo-200 hover:bg-indigo-500/25 hover:text-white transition ${className}`;
 
   return (
     <>
@@ -169,9 +169,9 @@ export default function DonationButton({ className = '', compact = false, varian
         className={btnClass}
         title="Soutenir QCM App (volontaire)"
       >
-        <Icon name="heart" size={isMenu || isCard ? 18 : 16} className={isCard ? 'text-white' : 'text-rose-400'} />
+        <Icon name="heart" size={isMenu || isCard ? 18 : 16} className={isCard ? 'text-white' : 'text-indigo-400'} />
         <span className={isMenu ? 'flex-1 text-left' : ''}>{compact ? 'Don' : 'Faire un don'}</span>
-        {isMenu && <span className="text-[10px] font-bold text-rose-300/70 bg-rose-500/10 px-2 py-0.5 rounded-full">volontaire</span>}
+        {isMenu && <span className="text-[10px] font-bold text-indigo-300/80 bg-indigo-500/10 px-2 py-0.5 rounded-full">volontaire</span>}
       </button>
 
       {open && createPortal(
@@ -180,8 +180,8 @@ export default function DonationButton({ className = '', compact = false, varian
           <div role="dialog" aria-modal="true" aria-label="Faire un don" className="relative w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-800 flex items-start justify-between gap-4">
               <div>
-                <div className="flex items-center gap-2 text-rose-300 font-black text-base">
-                  <Icon name="heart" size={18} className="text-rose-400" />
+                <div className="flex items-center gap-2 text-indigo-300 font-black text-base">
+                  <Icon name="heart" size={18} className="text-indigo-400" />
                   Soutenir QCM App
                 </div>
                 <p className="text-xs text-slate-400 mt-1 leading-relaxed">
@@ -254,7 +254,7 @@ export default function DonationButton({ className = '', compact = false, varian
                   </div>
 
                   <label className="block">
-                    <span className="text-[11px] font-black uppercase tracking-wider text-slate-500">Numéro Mobile Money <span className="text-rose-400">*</span></span>
+                    <span className="text-[11px] font-black uppercase tracking-wider text-slate-500">Numéro Mobile Money <span className="text-indigo-400">*</span></span>
                     <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} required inputMode="tel" placeholder="Ex : 6XXXXXXXX"
                       className="mt-2 w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm text-white placeholder:text-slate-600 outline-none focus:border-slate-500" />
                     <span className="text-[11px] text-slate-500 mt-1 block">Le numéro qui recevra la demande de confirmation USSD.</span>

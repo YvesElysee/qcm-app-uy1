@@ -152,6 +152,26 @@ export default function Home() {
         </div>
       </section>
 
+      {/* ── Soutien volontaire ── */}
+      <section className="max-w-6xl mx-auto px-4 mt-10 sm:mt-12" aria-label="Soutenir QCM App">
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 flex flex-col md:flex-row md:items-center gap-5 md:gap-8">
+          <div className="w-14 h-14 rounded-2xl bg-indigo-500/15 border border-indigo-400/20 text-indigo-400 flex items-center justify-center shrink-0">
+            <Icon name="heart" size={28} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[11px] font-black uppercase tracking-[0.18em] text-indigo-300 mb-1">Soutien volontaire</p>
+            <h2 className="text-lg sm:text-xl font-black text-white">Voulez-vous faire un don ?</h2>
+            <p className="text-sm text-slate-400 mt-1.5 leading-relaxed max-w-2xl">
+              C’est <span className="text-slate-200 font-semibold">entièrement volontaire</span> : aucun don n’est nécessaire pour utiliser QCM App.
+              Si vous le souhaitez, votre soutien encourage les administrateurs et aide à couvrir la maintenance des services.
+            </p>
+          </div>
+          <div className="shrink-0">
+            <DonationButton variant="card" />
+          </div>
+        </div>
+      </section>
+
       {/* ── Statistiques en direct ── */}
       <section className="max-w-6xl mx-auto px-4 -mt-10 relative z-10" aria-label="Statistiques du portail">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -281,26 +301,6 @@ export default function Home() {
           </section>
         </>
       )}
-
-      {/* ── Soutien volontaire ── */}
-      <section className="max-w-6xl mx-auto px-4 mt-14" aria-label="Soutenir QCM App">
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 flex flex-col md:flex-row md:items-center gap-5 md:gap-8">
-          <div className="w-14 h-14 rounded-2xl bg-rose-500/15 border border-rose-400/20 text-rose-400 flex items-center justify-center shrink-0">
-            <Icon name="heart" size={28} />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-[11px] font-black uppercase tracking-[0.18em] text-rose-300 mb-1">Soutien volontaire</p>
-            <h2 className="text-lg sm:text-xl font-black text-white">Voulez-vous faire un don ?</h2>
-            <p className="text-sm text-slate-400 mt-1.5 leading-relaxed max-w-2xl">
-              C’est <span className="text-slate-200 font-semibold">entièrement volontaire</span> : aucun don n’est nécessaire pour utiliser QCM App.
-              Si vous le souhaitez, votre soutien encourage les administrateurs et aide à couvrir la maintenance des services.
-            </p>
-          </div>
-          <div className="shrink-0">
-            <DonationButton variant="card" />
-          </div>
-        </div>
-      </section>
 
       {/* ── Appel à l'action final ── */}
       <section className="max-w-6xl mx-auto px-4 mt-14 mb-6">
