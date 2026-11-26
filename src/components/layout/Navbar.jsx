@@ -160,7 +160,6 @@ export default function Navbar() {
         { to: '/ues', label: 'UE', icon: 'book' },
         { to: '/schedule', label: 'Planning', icon: 'calendar' },
         { action: 'ai', label: 'Tuteur IA', icon: 'sparkles' },
-        ...(apkDownloadAvailable ? [{ action: 'apk', label: 'APK', icon: 'download' }] : []),
         { to: '/resources', label: 'Ress.', icon: 'document' },
         { to: '/dashboard', label: 'Espace', icon: 'graduation' }
       ]
@@ -265,6 +264,7 @@ export default function Navbar() {
                 <span className="hidden lg:inline">Application Android</span>
               </a>
             )}
+            <DonationButton compact className="!px-2.5 !py-2 lg:!px-3 lg:!py-2 [&>span:last-child]:hidden lg:[&>span:last-child]:inline" />
             <a
               href={WHATSAPP_CHANNEL}
               target="_blank"
@@ -500,6 +500,9 @@ export default function Navbar() {
               <Icon name="chat" size={17} />
               Rejoindre la chaîne WhatsApp
             </a>
+            <div className="mt-2">
+              <DonationButton variant="menu" />
+            </div>
 
             {user && (
               <>
@@ -543,7 +546,6 @@ export default function Navbar() {
                     <Icon name="user" size={17} />
                     Mon profil
                   </button>
-                  <DonationButton variant="menu" />
                   <button
                     type="button"
                     onClick={handleLogout}
@@ -583,7 +585,7 @@ export default function Navbar() {
         aria-label="Navigation rapide"
         className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 pb-[env(safe-area-inset-bottom)]"
       >
-        <div className={`grid ${bottomLinks.length === 7 ? 'grid-cols-7' : bottomLinks.length === 5 ? 'grid-cols-5' : 'grid-cols-6'}`}>
+        <div className={`grid ${bottomLinks.length === 5 ? 'grid-cols-5' : 'grid-cols-6'}`}>
           {bottomLinks.map((item) => {
             if (item.action === 'ai') {
               return (

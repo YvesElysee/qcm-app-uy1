@@ -154,9 +154,12 @@ export default function DonationButton({ className = '', compact = false, varian
   }
 
   const isMenu = variant === 'menu';
+  const isCard = variant === 'card';
   const btnClass = isMenu
-    ? `w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-slate-400 hover:bg-slate-800 hover:text-rose-300 transition ${className}`
-    : `inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold border border-rose-500/30 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 hover:text-rose-200 transition ${className}`;
+    ? `w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-bold bg-rose-500/10 border border-rose-400/25 text-rose-200 hover:bg-rose-500/20 hover:border-rose-400/40 transition ${className}`
+    : isCard
+      ? `inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl text-sm font-black bg-rose-500 hover:bg-rose-400 text-white shadow-lg shadow-rose-500/25 transition ${className}`
+      : `inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold bg-rose-500/15 border border-rose-400/30 text-rose-200 hover:bg-rose-500/25 hover:text-white transition ${className}`;
 
   return (
     <>
@@ -166,9 +169,9 @@ export default function DonationButton({ className = '', compact = false, varian
         className={btnClass}
         title="Soutenir QCM App (volontaire)"
       >
-        <Icon name="heart" size={isMenu ? 16 : 14} className={isMenu ? 'text-rose-400/70' : 'text-rose-400'} />
+        <Icon name="heart" size={isMenu || isCard ? 18 : 16} className={isCard ? 'text-white' : 'text-rose-400'} />
         <span className={isMenu ? 'flex-1 text-left' : ''}>{compact ? 'Don' : 'Faire un don'}</span>
-        {isMenu && <span className="text-[10px] text-slate-500">volontaire</span>}
+        {isMenu && <span className="text-[10px] font-bold text-rose-300/70 bg-rose-500/10 px-2 py-0.5 rounded-full">volontaire</span>}
       </button>
 
       {open && createPortal(
