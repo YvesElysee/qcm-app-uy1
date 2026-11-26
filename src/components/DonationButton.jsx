@@ -35,7 +35,7 @@ function detectCmNetwork(phone) {
 }
 
 /**
- * Petit bouton de don volontaire (SasPay softpay). L'utilisateur saisit son
+ * Bouton de soutien à la plateforme (SasPay softpay). L'utilisateur saisit son
  * numéro Mobile Money, reçoit un push USSD sur son téléphone et confirme.
  */
 export default function DonationButton({ className = '', compact = false, variant = 'pill' }) {
@@ -167,17 +167,17 @@ export default function DonationButton({ className = '', compact = false, varian
         type="button"
         onClick={openModal}
         className={btnClass}
-        title="Soutenir QCM App (volontaire)"
+        title="Soutenir QCM App"
       >
         <Icon name="heart" size={isMenu || isCard ? 18 : 16} className={isCard ? 'text-white' : 'text-indigo-400'} />
         <span className={isMenu ? 'flex-1 text-left' : ''}>{compact ? 'Don' : 'Faire un don'}</span>
-        {isMenu && <span className="text-[10px] font-bold text-indigo-300/80 bg-indigo-500/10 px-2 py-0.5 rounded-full">volontaire</span>}
+        {isMenu && <span className="text-[10px] font-bold text-indigo-300/80 bg-indigo-500/10 px-2 py-0.5 rounded-full">soutien</span>}
       </button>
 
       {open && createPortal(
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-2 sm:p-4">
           <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm" onClick={() => { if (!loading && phase !== 'pending') closeModal(); }} />
-          <div role="dialog" aria-modal="true" aria-label="Faire un don" className="relative w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden">
+          <div role="dialog" aria-modal="true" aria-label="Faire un don" className="relative w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden max-h-[calc(100dvh-1rem)] sm:max-h-[calc(100dvh-2rem)] flex flex-col">
             <div className="px-5 py-4 border-b border-slate-800 flex items-start justify-between gap-4">
               <div>
                 <div className="flex items-center gap-2 text-indigo-300 font-black text-base">
@@ -185,7 +185,7 @@ export default function DonationButton({ className = '', compact = false, varian
                   Soutenir QCM App
                 </div>
                 <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                  Don <span className="text-slate-200 font-semibold">volontaire</span>, pour encourager les administrateurs et soutenir la maintenance.
+                  Votre soutien encourage les administrateurs de la plateforme et aide à maintenir QCM App.
                 </p>
               </div>
               <button type="button" onClick={closeModal} disabled={loading} className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition disabled:opacity-50" aria-label="Fermer">
@@ -193,7 +193,7 @@ export default function DonationButton({ className = '', compact = false, varian
               </button>
             </div>
 
-            <div className="p-5">
+            <div className="p-4 sm:p-5 overflow-y-auto">
               {phase === 'success' ? (
                 <div className="text-center py-4 space-y-3">
                   <div className="w-14 h-14 rounded-full bg-emerald-500/15 text-emerald-400 flex items-center justify-center mx-auto"><Icon name="check-circle" size={30} /></div>
@@ -221,12 +221,12 @@ export default function DonationButton({ className = '', compact = false, varian
 
                   <div>
                     <p className="text-[11px] font-black uppercase tracking-wider text-slate-500 mb-2">Montant</p>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
                       {PRESETS.map((value) => {
                         const active = !useCustom && amount === value;
                         return (
                           <button key={value} type="button" onClick={() => { setUseCustom(false); setAmount(value); }}
-                            className={`px-3 py-2.5 rounded-xl text-sm font-bold border transition ${active ? 'bg-rose-500/20 border-rose-400/50 text-rose-200' : 'bg-slate-800/60 border-slate-700 text-slate-300 hover:border-slate-500'}`}>
+                            className={`px-2 sm:px-3 py-2.5 rounded-xl text-xs sm:text-sm font-bold border transition ${active ? 'bg-indigo-500/20 border-indigo-400/50 text-indigo-200' : 'bg-slate-800/60 border-slate-700 text-slate-300 hover:border-slate-500'}`}>
                             {formatFcfa(value)}
                           </button>
                         );
@@ -236,7 +236,7 @@ export default function DonationButton({ className = '', compact = false, varian
                       <input type="number" min={MIN_AMOUNT} max={MAX_AMOUNT} step="100" inputMode="numeric" value={custom}
                         onFocus={() => setUseCustom(true)} onChange={(e) => { setUseCustom(true); setCustom(e.target.value); }}
                         placeholder="Montant libre"
-                        className={`w-full px-3 py-2.5 rounded-xl bg-slate-950 border text-sm text-white placeholder:text-slate-600 outline-none transition ${useCustom ? 'border-rose-400/50' : 'border-slate-700 focus:border-slate-500'}`} />
+                        className={`w-full px-3 py-2.5 rounded-xl bg-slate-950 border text-sm text-white placeholder:text-slate-600 outline-none transition ${useCustom ? 'border-indigo-400/50' : 'border-slate-700 focus:border-slate-500'}`} />
                       <span className="text-sm font-bold text-slate-400 shrink-0">FCFA</span>
                     </div>
                   </div>
@@ -246,7 +246,7 @@ export default function DonationButton({ className = '', compact = false, varian
                     <div className="grid grid-cols-2 gap-2">
                       {NETWORKS.map((n) => (
                         <button key={n.id} type="button" onClick={() => setNetwork(n.id)}
-                          className={`px-3 py-2.5 rounded-xl text-sm font-bold border transition ${network === n.id ? 'bg-rose-500/20 border-rose-400/50 text-rose-200' : 'bg-slate-800/60 border-slate-700 text-slate-300 hover:border-slate-500'}`}>
+                          className={`px-2 sm:px-3 py-2.5 rounded-xl text-xs sm:text-sm font-bold border transition ${network === n.id ? 'bg-indigo-500/20 border-indigo-400/50 text-indigo-200' : 'bg-slate-800/60 border-slate-700 text-slate-300 hover:border-slate-500'}`}>
                           {n.label}
                         </button>
                       ))}
@@ -283,12 +283,12 @@ export default function DonationButton({ className = '', compact = false, varian
                   )}
 
                   <button type="submit" disabled={loading || !amountValid || !phoneValid}
-                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-black transition">
+                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-black transition">
                     {loading ? 'Envoi en cours...' : `Recevoir la demande USSD · ${amountValid ? formatFcfa(selectedAmount) : '—'}`}
                   </button>
 
                   <p className="text-[11px] text-slate-500 text-center leading-relaxed">
-                    Vous validerez le paiement directement sur votre téléphone. Aucun don n’est obligatoire pour utiliser QCM App.
+                    Vous validez le paiement directement sur votre téléphone. Merci d’encourager les administrateurs qui font vivre QCM App.
                   </p>
                 </form>
               )}

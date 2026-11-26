@@ -21,6 +21,8 @@ export default function Home() {
   const user = getCurrentUser();
   const apkDownloadAvailable = showApkDownload();
   const [stats, setStats] = useState(null);
+  const [showFeatures, setShowFeatures] = useState(false);
+  const [showSteps, setShowSteps] = useState(false);
 
   // Statistiques publiques : QCM, UE, étudiants inscrits et épreuves à venir
   useEffect(() => {
@@ -63,7 +65,7 @@ export default function Home() {
         <div className="absolute -top-24 -right-24 w-72 h-72 bg-blue-600/20 rounded-full blur-3xl" aria-hidden="true" />
         <div className="absolute -bottom-32 -left-24 w-96 h-96 bg-indigo-600/10 rounded-full blur-3xl" aria-hidden="true" />
 
-        <div className="relative max-w-6xl mx-auto px-4 pt-16 pb-24 text-center">
+        <div className="relative max-w-6xl mx-auto px-4 pt-12 pb-16 sm:pt-16 sm:pb-24 text-center">
           <span className="inline-flex items-center gap-2 bg-blue-500/10 border border-blue-500/30 text-blue-300 text-xs font-bold px-4 py-1.5 rounded-full">
             <Icon name="graduation" size={14} />
             QCM App · Évaluation en ligne 2026
@@ -123,57 +125,53 @@ export default function Home() {
                 </Link>
               </>
             )}
+          </div>
+
+          <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
             <a
               href={WHATSAPP_CHANNEL}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex w-full sm:w-auto items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm px-6 py-3.5 rounded-2xl transition shadow-lg shadow-emerald-600/25"
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-600/15 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-600/25 text-xs font-bold transition"
             >
-              <Icon name="chat" size={16} />
-              Rejoindre la chaîne WhatsApp
+              <Icon name="chat" size={14} />
+              Chaîne WhatsApp
             </a>
             {apkDownloadAvailable && (
               <a
                 href={APK_DOWNLOAD_URL}
                 download="QCM App.apk"
-                title="Application Android · fichier APK"
-                className="inline-flex w-full sm:w-auto items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-sm px-6 py-3.5 rounded-2xl transition shadow-lg shadow-indigo-600/25"
+                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-indigo-600/15 border border-indigo-500/30 text-indigo-300 hover:bg-indigo-600/25 text-xs font-bold transition"
               >
-                <Icon name="download" size={16} />
-                Télécharger l'application Android
+                <Icon name="download" size={14} />
+                Télécharger l'APK
               </a>
             )}
           </div>
-          {apkDownloadAvailable && (
-            <p className="text-[11px] text-slate-500 mt-3">
-              Android uniquement · installez le fichier APK puis ouvrez l'application : elle se connecte directement au portail.
-            </p>
-          )}
         </div>
       </section>
 
-      {/* ── Soutien volontaire ── */}
-      <section className="max-w-6xl mx-auto px-4 mt-10 sm:mt-12" aria-label="Soutenir QCM App">
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 flex flex-col md:flex-row md:items-center gap-5 md:gap-8">
-          <div className="w-14 h-14 rounded-2xl bg-indigo-500/15 border border-indigo-400/20 text-indigo-400 flex items-center justify-center shrink-0">
-            <Icon name="heart" size={28} />
+      {/* ── Soutien à la plateforme ── */}
+      <section className="max-w-6xl mx-auto px-4 mt-8 sm:mt-10" aria-label="Soutenir QCM App">
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-7 flex flex-col md:flex-row md:items-center gap-4 md:gap-7">
+          <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-indigo-500/15 border border-indigo-400/20 text-indigo-400 flex items-center justify-center shrink-0">
+            <Icon name="heart" size={26} />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-[11px] font-black uppercase tracking-[0.18em] text-indigo-300 mb-1">Soutien volontaire</p>
-            <h2 className="text-lg sm:text-xl font-black text-white">Voulez-vous faire un don ?</h2>
+            <p className="text-[11px] font-black uppercase tracking-[0.18em] text-indigo-300 mb-1">Soutenir la plateforme</p>
+            <h2 className="text-lg sm:text-xl font-black text-white">Encouragez les administrateurs de QCM App</h2>
             <p className="text-sm text-slate-400 mt-1.5 leading-relaxed max-w-2xl">
-              C’est <span className="text-slate-200 font-semibold">entièrement volontaire</span> : aucun don n’est nécessaire pour utiliser QCM App.
-              Si vous le souhaitez, votre soutien encourage les administrateurs et aide à couvrir la maintenance des services.
+              Votre don aide à soutenir les administrateurs qui font vivre la plateforme et à couvrir la maintenance des services pour tous les étudiants.
             </p>
           </div>
-          <div className="shrink-0">
-            <DonationButton variant="card" />
+          <div className="shrink-0 w-full md:w-auto">
+            <DonationButton variant="card" className="w-full md:w-auto" />
           </div>
         </div>
       </section>
 
       {/* ── Statistiques en direct ── */}
-      <section className="max-w-6xl mx-auto px-4 -mt-10 relative z-10" aria-label="Statistiques du portail">
+      <section className="max-w-6xl mx-auto px-4 mt-8 sm:mt-10 relative z-10" aria-label="Statistiques du portail">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {statCards.map(s => (
             <div
@@ -195,9 +193,9 @@ export default function Home() {
       </section>
 
       {/* ── IA & documents : ce que beaucoup d'étudiants ignorent ── */}
-      <section className="max-w-6xl mx-auto px-4 mt-14" aria-label="Tuteur IA et partage de cours">
+      <section className="max-w-6xl mx-auto px-4 mt-8 sm:mt-14" aria-label="Tuteur IA et partage de cours">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="relative overflow-hidden bg-gradient-to-br from-blue-950 via-slate-900 to-indigo-950 border border-blue-700/40 rounded-3xl p-6 md:p-8">
+          <div className="relative overflow-hidden bg-gradient-to-br from-blue-950 via-slate-900 to-indigo-950 border border-blue-700/40 rounded-3xl p-5 sm:p-6 md:p-8">
             <div className="absolute -top-10 -right-10 w-40 h-40 bg-blue-600/20 rounded-full blur-3xl" aria-hidden="true" />
             <div className="relative">
               <span className="inline-flex items-center gap-2 bg-blue-500/15 border border-blue-500/30 text-blue-300 text-[11px] font-bold px-3 py-1 rounded-full">
@@ -224,7 +222,7 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="relative overflow-hidden bg-gradient-to-br from-emerald-950 via-slate-900 to-teal-950 border border-emerald-700/40 rounded-3xl p-6 md:p-8">
+          <div className="relative overflow-hidden bg-gradient-to-br from-emerald-950 via-slate-900 to-teal-950 border border-emerald-700/40 rounded-3xl p-5 sm:p-6 md:p-8">
             <div className="absolute -top-10 -right-10 w-40 h-40 bg-emerald-600/20 rounded-full blur-3xl" aria-hidden="true" />
             <div className="relative">
               <span className="inline-flex items-center gap-2 bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[11px] font-bold px-3 py-1 rounded-full">
@@ -258,17 +256,25 @@ export default function Home() {
       {!user && (
         <>
           {/* ── Fonctionnalités ── */}
-          <section className="max-w-6xl mx-auto px-4 mt-14">
-            <div className="text-center mb-8">
-              <h2 className="text-2xl font-black text-white">Ce que le portail vous offre</h2>
+          <section className="max-w-6xl mx-auto px-4 mt-8 sm:mt-14">
+            <div className="text-center mb-4 sm:mb-8">
+              <h2 className="text-xl sm:text-2xl font-black text-white">Ce que le portail vous offre</h2>
               <p className="text-xs text-slate-400 mt-1">Tout ce qu'il faut pour évaluer et être évalué sereinement</p>
+              <button
+                type="button"
+                onClick={() => setShowFeatures(v => !v)}
+                className="md:hidden mt-3 inline-flex items-center gap-2 text-xs font-bold text-blue-300 bg-blue-500/10 border border-blue-500/30 px-3 py-2 rounded-xl"
+              >
+                {showFeatures ? 'Masquer' : 'Voir les fonctionnalités'}
+                <Icon name={showFeatures ? 'chevron-up' : 'chevron-down'} size={14} />
+              </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className={`${showFeatures ? 'grid' : 'hidden'} md:grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4`}>
               {FEATURES.map(f => (
                 <div
                   key={f.title}
-                  className="bg-slate-900 border border-slate-800 hover:border-blue-500/40 rounded-2xl p-5 transition"
+                  className="bg-slate-900 border border-slate-800 hover:border-blue-500/40 rounded-2xl p-4 sm:p-5 transition"
                 >
                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-3 ${f.style}`}>
                     <Icon name={f.icon} size={20} />
@@ -281,15 +287,23 @@ export default function Home() {
           </section>
 
           {/* ── Comment ça marche ── */}
-          <section className="max-w-6xl mx-auto px-4 mt-14">
-            <div className="text-center mb-8">
-              <h2 className="text-2xl font-black text-white">Comment ça marche ?</h2>
+          <section className="max-w-6xl mx-auto px-4 mt-8 sm:mt-14">
+            <div className="text-center mb-4 sm:mb-8">
+              <h2 className="text-xl sm:text-2xl font-black text-white">Comment ça marche ?</h2>
               <p className="text-xs text-slate-400 mt-1">Trois étapes, et vous êtes prêt</p>
+              <button
+                type="button"
+                onClick={() => setShowSteps(v => !v)}
+                className="md:hidden mt-3 inline-flex items-center gap-2 text-xs font-bold text-blue-300 bg-blue-500/10 border border-blue-500/30 px-3 py-2 rounded-xl"
+              >
+                {showSteps ? 'Masquer' : 'Voir les étapes'}
+                <Icon name={showSteps ? 'chevron-up' : 'chevron-down'} size={14} />
+              </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className={`${showSteps ? 'grid' : 'hidden'} md:grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4`}>
               {STEPS.map(s => (
-                <div key={s.n} className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 relative">
+                <div key={s.n} className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 sm:p-6 relative">
                   <div className="w-9 h-9 rounded-full bg-blue-600 text-white font-black flex items-center justify-center text-sm shadow-lg shadow-blue-600/30">
                     {s.n}
                   </div>
@@ -303,8 +317,8 @@ export default function Home() {
       )}
 
       {/* ── Appel à l'action final ── */}
-      <section className="max-w-6xl mx-auto px-4 mt-14 mb-6">
-        <div className="relative overflow-hidden bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-800 rounded-3xl p-10 md:p-14 text-center">
+      <section className="max-w-6xl mx-auto px-4 mt-8 sm:mt-14 mb-6">
+        <div className="relative overflow-hidden bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-800 rounded-3xl p-7 sm:p-10 md:p-14 text-center">
           <div className="absolute -top-16 -right-16 w-64 h-64 bg-white/10 rounded-full blur-3xl" aria-hidden="true" />
           <div className="relative">
             <h2 className="text-2xl md:text-3xl font-black text-white">

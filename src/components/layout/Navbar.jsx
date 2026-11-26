@@ -160,7 +160,6 @@ export default function Navbar() {
         { to: '/ues', label: 'UE', icon: 'book' },
         { to: '/schedule', label: 'Planning', icon: 'calendar' },
         { action: 'ai', label: 'Tuteur IA', icon: 'sparkles' },
-        { to: '/resources', label: 'Ress.', icon: 'document' },
         { to: '/dashboard', label: 'Espace', icon: 'graduation' }
       ]
     : [
@@ -530,6 +529,18 @@ export default function Navbar() {
                     <Icon name="book" size={17} />
                     Toutes mes UE
                   </NavLink>
+                  <NavLink
+                    to="/resources"
+                    onClick={() => setMobileOpen(false)}
+                    className={({ isActive }) =>
+                      `w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-bold transition ${
+                        isActive ? 'bg-slate-800 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                      }`
+                    }
+                  >
+                    <Icon name="document" size={17} />
+                    Ressources
+                  </NavLink>
                   <button
                     type="button"
                     onClick={openGuide}
@@ -593,7 +604,7 @@ export default function Navbar() {
                   key="ai"
                   type="button"
                   onClick={openAi}
-                  className="flex flex-col items-center justify-center gap-1 py-2.5 text-[10px] font-bold transition active:bg-slate-800 text-blue-300"
+                  className="flex flex-col items-center justify-center gap-0.5 py-2 px-0.5 text-[9px] sm:text-[10px] font-bold leading-tight text-center transition active:bg-slate-800 min-w-0 text-blue-300"
                 >
                   <Icon name={item.icon} size={18} />
                   {item.label}
@@ -607,7 +618,7 @@ export default function Navbar() {
                   href={APK_DOWNLOAD_URL}
                   download="QCM App.apk"
                   aria-label="Télécharger l'application Android"
-                  className="flex flex-col items-center justify-center gap-1 py-2.5 text-[10px] font-bold transition active:bg-slate-800 text-indigo-300"
+                  className="flex flex-col items-center justify-center gap-0.5 py-2 px-0.5 text-[9px] sm:text-[10px] font-bold leading-tight text-center transition active:bg-slate-800 min-w-0 text-indigo-300"
                 >
                   <Icon name={item.icon} size={18} />
                   {item.label}
@@ -620,7 +631,7 @@ export default function Navbar() {
                 to={item.to}
                 end={item.end}
                 className={({ isActive }) =>
-                  `flex flex-col items-center justify-center gap-1 py-2.5 text-[10px] font-bold transition active:bg-slate-800 ${
+                  `flex flex-col items-center justify-center gap-0.5 py-2 px-0.5 text-[9px] sm:text-[10px] font-bold leading-tight text-center transition active:bg-slate-800 min-w-0 ${
                     isActive ? 'text-blue-300' : 'text-slate-400'
                   }`
                 }

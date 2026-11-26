@@ -80,6 +80,8 @@ export default function StudentDashboard() {
   const [rankings, setRankings] = useState([]);
   const [loadingRankings, setLoadingRankings] = useState(false);
   const [rankingsError, setRankingsError] = useState('');
+  const [showMoreTools, setShowMoreTools] = useState(false);
+  const [showRequests, setShowRequests] = useState(false);
 
   // Modales
   const [showContactModal, setShowContactModal] = useState(false);
@@ -519,7 +521,161 @@ export default function StudentDashboard() {
           </div>
         </div>
 
-        {/* ── Révision & dépôt de documents ── */}
+        {/* ── Avertissement & Alerte Prochain Quizz (Point 4) ── */}
+        {nextQuiz && (
+          <div className="bg-amber-950/40 border border-amber-500/30 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center animate-pulse shrink-0">
+                <Icon name="bell" size={20} />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-black uppercase text-amber-400 tracking-wider">
+                    Alerte Évaluation à venir
+                  </span>
+                  <span className="bg-amber-400/20 text-amber-300 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                    {nextDiffMinutes <= 60
+                      ? `Dans ~${nextDiffMinutes} min`
+                      : nextDiffMinutes <= 1440
+                      ? `Dans ~${Math.round(nextDiffMinutes / 60)}h`
+                      : formatDate(nextQuiz.launchTime)}
+                  </span>
+                </div>
+                <h3 className="text-base font-bold text-white mt-0.5">
+                  {nextQuiz.title || nextQuiz.ue || nextQuiz.id} · {nextQuiz.filiere} ({nextQuiz.niveau})
+                </h3>
+                {(nextQuiz.ue || nextQuiz.ueLabel) && (
+                  <p className="text-[11px] text-amber-200/80">
+                    UE {nextQuiz.ue || nextQuiz.id}{nextQuiz.ueLabel ? ` · ${nextQuiz.ueLabel}` : ''}
+                  </p>
+                )}
+                <p className="text-xs text-amber-200/70">
+                  Début : {formatDate(nextQuiz.launchTime)} {nextQuiz.timePerQuestion ? `• ${nextQuiz.timePerQuestion}s par question` : ''}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              {notifPermission !== 'granted' && (
+                <button
+                  onClick={requestNotificationPermission}
+                  className="inline-flex items-center gap-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-xs font-bold px-3 py-2 rounded-xl transition border border-amber-500/30"
+                >
+                  <Icon name="bell" size={13} />
+                  M'avertir
+                </button>
+              )}
+              <Link
+                to="/schedule"
+                className="bg-amber-500 text-slate-950 hover:bg-amber-400 text-xs font-black px-4 py-2 rounded-xl transition shadow-md"
+              >
+                Voir l'emploi du temps
+              </Link>
+            </div>
+          </div>
+        )}
+
+        {/* ── Seuls les QCM en cours et à venir sont mis en avant ici ── */}
+        {highlightedQuizzes.length > 0 && (
+          <div className="bg-slate-800/50 border border-emerald-700/40 rounded-3xl p-4 sm:p-6 space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <h3 className="text-lg font-black text-white flex items-center gap-2">
+                  <Icon name="calendar" size={18} className="text-emerald-400" />
+                  En cours et à venir ({highlightedQuizzes.length})
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {filiere} • {selectedNiveau} · {semesterLabel} · les épreuves passées et les rattrapages se trouvent dans leur UE.
+                </p>
+              </div>
+              <Link
+                to="/ues"
+                className="text-xs font-bold text-emerald-300 hover:text-white bg-emerald-950/50 border border-emerald-800 px-3 py-2 rounded-xl transition"
+              >
+                Voir toutes les UE
+              </Link>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {highlightedQuizzes.map(q => {
+                const ueLabel = q.ueLabel || (availableUes.find(u => String(u.id).toUpperCase() === String(q.ue).toUpperCase())?.label || '');
+                const isUpcoming = q.launchTime > now;
+                const badge = isUpcoming
+                  ? { label: 'À venir', cls: 'bg-amber-500/20 text-amber-300' }
+                  : { label: 'En cours', cls: 'bg-emerald-500/20 text-emerald-300' };
+
+                return (
+                  <div
+                    key={q.id}
+                    id={`test-${q.id}`}
+                    className={`bg-slate-900/80 border rounded-2xl p-4 flex flex-col justify-between gap-3 scroll-mt-24 ${
+                      isUpcoming ? 'border-slate-700/80' : 'border-emerald-500/40'
+                    } ${focusQuizId === q.id ? 'ring-2 ring-blue-500 border-blue-500' : ''}`}
+                  >
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${badge.cls}`}>
+                          {badge.label}
+                        </span>
+                        <span className="text-xs text-slate-400">{q.filiere} · {q.niveau}</span>
+                      </div>
+                      <h4 className="font-black text-white text-base">{q.title || q.ue || q.id}</h4>
+                      <Link
+                        to={`/ues/${encodeURIComponent(String(q.ue || q.id).toUpperCase())}`}
+                        className="text-xs text-blue-300 hover:text-blue-200 mt-0.5 inline-block"
+                      >
+                        UE {q.ue || q.id}{ueLabel && ueLabel !== q.ue ? ` · ${ueLabel}` : ''} →
+                      </Link>
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        Début : {formatDate(q.launchTime)}
+                        {q.endTime ? ` • Fin : ${formatDate(q.endTime)}` : ''}
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        {q.questionCount || 0} question(s)
+                        {q.timePerQuestion ? ` • ${q.timePerQuestion}s / question` : ''}
+                      </p>
+                    </div>
+
+                    {!q.questionCount ? (
+                      <div className="w-full text-center bg-slate-800 border border-slate-700 text-slate-400 text-xs font-bold py-2.5 rounded-xl">
+                        Questions en préparation
+                      </div>
+                    ) : isUpcoming ? (
+                      <div className="w-full text-center bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-bold py-2.5 rounded-xl">
+                        Ouverture le {formatDate(q.launchTime)}
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => handleStartQuiz(q.id, false, q.ue || q.id)}
+                        className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-black py-2.5 rounded-xl transition shadow-lg shadow-emerald-500/20"
+                      >
+                        Rejoindre maintenant
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+
+        {/* ── Outils secondaires (repliables sur mobile) ── */}
+        <div className="bg-slate-800/30 border border-slate-700/50 rounded-2xl p-4 sm:p-5">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-black text-white flex items-center gap-2">
+                <Icon name="menu" size={16} className="text-blue-400" />
+                Outils rapides
+              </h3>
+              <p className="text-[11px] text-slate-400 mt-0.5">Révision, dépôt de documents et exercices.</p>
+            </div>
+            <button type="button" onClick={() => setShowMoreTools(v => !v)} className="shrink-0 text-xs font-bold text-blue-300 hover:text-white bg-slate-800 border border-slate-700 px-3 py-2 rounded-xl transition">
+              {showMoreTools ? 'Masquer' : 'Voir plus'}
+            </button>
+          </div>
+          {showMoreTools && (
+            <div className="mt-4 space-y-3">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="bg-gradient-to-br from-blue-950/70 to-slate-900 border border-blue-700/40 rounded-2xl p-5 flex flex-col gap-3">
             <div className="flex items-start gap-3">
@@ -607,6 +763,10 @@ export default function StudentDashboard() {
           </Link>
         )}
 
+            </div>
+          )}
+        </div>
+
         {/* ── Suivi de la demande de filière (si absente du catalogue) ── */}
         {filiereRequest && filiereRequest.status !== 'approved' && (
           <div className={`rounded-2xl p-4 border flex items-start gap-3 ${
@@ -641,146 +801,8 @@ export default function StudentDashboard() {
           </div>
         )}
 
-        {/* ── Avertissement & Alerte Prochain Quizz (Point 4) ── */}
-        {nextQuiz && (
-          <div className="bg-amber-950/40 border border-amber-500/30 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center animate-pulse shrink-0">
-                <Icon name="bell" size={20} />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-black uppercase text-amber-400 tracking-wider">
-                    Alerte Évaluation à venir
-                  </span>
-                  <span className="bg-amber-400/20 text-amber-300 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                    {nextDiffMinutes <= 60
-                      ? `Dans ~${nextDiffMinutes} min`
-                      : nextDiffMinutes <= 1440
-                      ? `Dans ~${Math.round(nextDiffMinutes / 60)}h`
-                      : formatDate(nextQuiz.launchTime)}
-                  </span>
-                </div>
-                <h3 className="text-base font-bold text-white mt-0.5">
-                  {nextQuiz.title || nextQuiz.ue || nextQuiz.id} · {nextQuiz.filiere} ({nextQuiz.niveau})
-                </h3>
-                {(nextQuiz.ue || nextQuiz.ueLabel) && (
-                  <p className="text-[11px] text-amber-200/80">
-                    UE {nextQuiz.ue || nextQuiz.id}{nextQuiz.ueLabel ? ` · ${nextQuiz.ueLabel}` : ''}
-                  </p>
-                )}
-                <p className="text-xs text-amber-200/70">
-                  Début : {formatDate(nextQuiz.launchTime)} {nextQuiz.timePerQuestion ? `• ${nextQuiz.timePerQuestion}s par question` : ''}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 shrink-0">
-              {notifPermission !== 'granted' && (
-                <button
-                  onClick={requestNotificationPermission}
-                  className="inline-flex items-center gap-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-xs font-bold px-3 py-2 rounded-xl transition border border-amber-500/30"
-                >
-                  <Icon name="bell" size={13} />
-                  M'avertir
-                </button>
-              )}
-              <Link
-                to="/schedule"
-                className="bg-amber-500 text-slate-950 hover:bg-amber-400 text-xs font-black px-4 py-2 rounded-xl transition shadow-md"
-              >
-                Voir l'emploi du temps
-              </Link>
-            </div>
-          </div>
-        )}
-
-        {/* ── Seuls les QCM en cours et à venir sont mis en avant ici ── */}
-        {highlightedQuizzes.length > 0 && (
-          <div className="bg-slate-800/50 border border-emerald-700/40 rounded-3xl p-6 space-y-4">
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <div>
-                <h3 className="text-lg font-black text-white flex items-center gap-2">
-                  <Icon name="calendar" size={18} className="text-emerald-400" />
-                  En cours et à venir ({highlightedQuizzes.length})
-                </h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  {filiere} • {selectedNiveau} · {semesterLabel} · les épreuves passées et les rattrapages se trouvent dans leur UE.
-                </p>
-              </div>
-              <Link
-                to="/ues"
-                className="text-xs font-bold text-emerald-300 hover:text-white bg-emerald-950/50 border border-emerald-800 px-3 py-2 rounded-xl transition"
-              >
-                Voir toutes les UE
-              </Link>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {highlightedQuizzes.map(q => {
-                const ueLabel = q.ueLabel || (availableUes.find(u => String(u.id).toUpperCase() === String(q.ue).toUpperCase())?.label || '');
-                const isUpcoming = q.launchTime > now;
-                const badge = isUpcoming
-                  ? { label: 'À venir', cls: 'bg-amber-500/20 text-amber-300' }
-                  : { label: 'En cours', cls: 'bg-emerald-500/20 text-emerald-300' };
-
-                return (
-                  <div
-                    key={q.id}
-                    id={`test-${q.id}`}
-                    className={`bg-slate-900/80 border rounded-2xl p-4 flex flex-col justify-between gap-3 scroll-mt-24 ${
-                      isUpcoming ? 'border-slate-700/80' : 'border-emerald-500/40'
-                    } ${focusQuizId === q.id ? 'ring-2 ring-blue-500 border-blue-500' : ''}`}
-                  >
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap mb-1">
-                        <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${badge.cls}`}>
-                          {badge.label}
-                        </span>
-                        <span className="text-xs text-slate-400">{q.filiere} · {q.niveau}</span>
-                      </div>
-                      <h4 className="font-black text-white text-base">{q.title || q.ue || q.id}</h4>
-                      <Link
-                        to={`/ues/${encodeURIComponent(String(q.ue || q.id).toUpperCase())}`}
-                        className="text-xs text-blue-300 hover:text-blue-200 mt-0.5 inline-block"
-                      >
-                        UE {q.ue || q.id}{ueLabel && ueLabel !== q.ue ? ` · ${ueLabel}` : ''} →
-                      </Link>
-                      <p className="text-[11px] text-slate-400 mt-1">
-                        Début : {formatDate(q.launchTime)}
-                        {q.endTime ? ` • Fin : ${formatDate(q.endTime)}` : ''}
-                      </p>
-                      <p className="text-[11px] text-slate-500">
-                        {q.questionCount || 0} question(s)
-                        {q.timePerQuestion ? ` • ${q.timePerQuestion}s / question` : ''}
-                      </p>
-                    </div>
-
-                    {!q.questionCount ? (
-                      <div className="w-full text-center bg-slate-800 border border-slate-700 text-slate-400 text-xs font-bold py-2.5 rounded-xl">
-                        Questions en préparation
-                      </div>
-                    ) : isUpcoming ? (
-                      <div className="w-full text-center bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-bold py-2.5 rounded-xl">
-                        Ouverture le {formatDate(q.launchTime)}
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => handleStartQuiz(q.id, false, q.ue || q.id)}
-                        className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-black py-2.5 rounded-xl transition shadow-lg shadow-emerald-500/20"
-                      >
-                        Rejoindre maintenant
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
         {/* ── Section UEs et Démarrage rapide ── */}
-        <div className="bg-slate-800/50 border border-slate-700/60 rounded-3xl p-6">
+        <div className="bg-slate-800/50 border border-slate-700/60 rounded-3xl p-4 sm:p-6">
           <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
             <div>
               <h3 className="text-lg font-black text-white flex items-center gap-2">
@@ -966,7 +988,7 @@ export default function StudentDashboard() {
         </div>
 
         {/* ── Demandes de QCM & parrainage ── */}
-        <div className="bg-slate-800/50 border border-slate-700/60 rounded-3xl p-6 space-y-4">
+        <div className="bg-slate-800/50 border border-slate-700/60 rounded-3xl p-4 sm:p-6 space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div>
               <h3 className="text-lg font-black text-white flex items-center gap-2">
@@ -974,17 +996,23 @@ export default function StudentDashboard() {
                 Demandes de QCM & parrainage
               </h3>
               <p className="text-xs text-slate-400 mt-0.5">
-                Une épreuve manque pour votre parcours ? Demandez-la. À {requestThreshold} demandes
-                pour la même filière, le même niveau et la même UE, elle est validée auprès de l'administration.
+                Demandez une épreuve manquante ou partagez votre lien de parrainage.
               </p>
             </div>
-            {referral?.privileges?.badge && (
-              <span className="inline-flex items-center gap-1.5 bg-amber-500/15 text-amber-200 border border-amber-500/30 text-[11px] font-black px-3 py-1.5 rounded-full">
-                <Icon name="trophy" size={13} />
-                {referral.privileges.badge}
-              </span>
-            )}
+            <div className="flex items-center gap-2">
+              {referral?.privileges?.badge && (
+                <span className="inline-flex items-center gap-1.5 bg-amber-500/15 text-amber-200 border border-amber-500/30 text-[11px] font-black px-3 py-1.5 rounded-full">
+                  <Icon name="trophy" size={13} />
+                  {referral.privileges.badge}
+                </span>
+              )}
+              <button type="button" onClick={() => setShowRequests(v => !v)} className="text-xs font-bold text-blue-300 hover:text-white bg-slate-800 border border-slate-700 px-3 py-2 rounded-xl transition">
+                {showRequests ? 'Masquer' : 'Voir plus'}
+              </button>
+            </div>
           </div>
+          {showRequests && (<>
+
 
           {requestNotice && (
             <div className="bg-emerald-950/50 border border-emerald-800/70 text-emerald-200 text-xs rounded-xl p-3 flex items-start gap-2">
@@ -1076,10 +1104,12 @@ export default function StudentDashboard() {
               )}
             </div>
           </div>
+                  </>
+)}
         </div>
 
         {/* ── Les copies sont consultables dans leur UE ── */}
-        <div className="bg-slate-800/50 border border-slate-700/60 rounded-3xl p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="bg-slate-800/50 border border-slate-700/60 rounded-3xl p-4 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-start gap-3">
             <span className="w-10 h-10 rounded-xl bg-indigo-600/20 text-indigo-300 flex items-center justify-center shrink-0">
               <Icon name="check-circle" size={19} />
@@ -1115,7 +1145,7 @@ export default function StudentDashboard() {
         </div>
 
         {/* ── Classement de ma salle (chargé uniquement après clic) ── */}
-        <div className="bg-slate-800/50 border border-slate-700/60 rounded-3xl p-6">
+        <div className="bg-slate-800/50 border border-slate-700/60 rounded-3xl p-4 sm:p-6">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div>
               <h3 className="text-lg font-black text-white flex items-center gap-2">
