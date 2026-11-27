@@ -211,6 +211,7 @@ export default function DonationButton({ className = '', compact = false, varian
                         className={`w-full px-4 py-3 rounded-xl bg-slate-900 border text-sm text-white placeholder:text-slate-600 outline-none transition ${useCustom ? 'border-indigo-400/60' : 'border-slate-700 focus:border-slate-500'}`} />
                       <span className="text-sm font-bold text-slate-400 shrink-0">FCFA</span>
                     </div>
+                    <p className="text-[11px] text-slate-500 mt-2">Minimum {MIN_AMOUNT.toLocaleString('fr-FR')} FCFA.</p>
                   </div>
 
                   {error && <div className="text-sm text-red-300 bg-red-500/10 border border-red-500/25 rounded-xl px-4 py-3">{error}</div>}
