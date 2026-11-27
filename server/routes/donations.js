@@ -141,6 +141,13 @@ router.post('/initiate', async (req, res) => {
       if (sr.status === 401 || sr.status === 403) {
         return res.status(502).json({ error: 'Le service de don est mal configuré côté serveur. Contactez l’administrateur.' });
       }
+      if (sr.status === 429) {
+        return res.status(503).json({ error: 'Trop de demandes. Merci de patienter quelques instants puis réessayez.' });
+      }
+      if (sr.status === 422) {
+        const safeMsg = typeof msg === 'string' ? msg.slice(0, 180) : '';
+        return res.status(422).json({ error: safeMsg || 'Paiement impossible avec ces informations. Vérifiez le numéro et le réseau.' });
+      }
       const safeMsg = typeof msg === 'string' ? msg.slice(0, 180) : '';
       return res.status(502).json({
         error: safeMsg || 'Impossible d’initier le paiement. Vérifiez le numéro et réessayez.'
