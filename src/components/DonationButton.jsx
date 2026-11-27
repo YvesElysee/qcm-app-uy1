@@ -43,6 +43,7 @@ export default function DonationButton({ className = '', compact = false, varian
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
   const [paymentId, setPaymentId] = useState('');
   const [paymentStatus, setPaymentStatus] = useState('');
   const [lastCheck, setLastCheck] = useState('');
@@ -66,23 +67,33 @@ export default function DonationButton({ className = '', compact = false, varian
 
   function resetFlow() {
     stopPolling();
-    setStep(1); setError(''); setLoading(false);
+    setStep(1); setError(''); setInfo(''); setLoading(false);
     setPaymentId(''); setPaymentStatus(''); setLastCheck('');
   }
-  function openModal() { setError(''); setOpen(true); }
+  function openModal() { setError(''); setInfo(''); setOpen(true); }
   function closeModal() { if (loading) return; stopPolling(); setOpen(false); }
 
   async function verifyPayment(id = paymentId, silent = false) {
     if (!id) return;
-    if (!silent) setLoading(true);
+    if (!silent) { setLoading(true); setInfo(''); }
     try {
       const data = await api(`/donations/status/${encodeURIComponent(id)}`);
       const status = String(data?.status || 'PENDING').toUpperCase();
       setPaymentStatus(status);
       setLastCheck(new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-      if (isFinalSuccess(status)) { stopPolling(); setStep(4); setError(''); }
-      else if (isFinalFailure(status)) { stopPolling(); setError(data?.failureReason || 'Le paiement n’a pas abouti. Vous pouvez relancer un soutien.'); }
-      else setError('');
+      if (isFinalSuccess(status)) {
+        stopPolling();
+        setError('');
+        setInfo('');
+        setStep(4);
+      } else if (isFinalFailure(status)) {
+        stopPolling();
+        setInfo('');
+        setError(data?.failureReason || 'Le paiement n’a pas abouti. Vous pouvez relancer un soutien.');
+      } else {
+        setError('');
+        if (!silent) setInfo('Paiement toujours en attente. Confirmez la demande sur votre téléphone, puis réessayez.');
+      }
     } catch (err) {
       if (!silent) setError(err?.message || 'Impossible de vérifier le paiement pour le moment.');
     } finally {
@@ -98,6 +109,7 @@ export default function DonationButton({ className = '', compact = false, varian
   async function handleInitiate(e) {
     e.preventDefault();
     setError('');
+    setInfo('');
     if (!amountValid) { setError(`Montant invalide : entre ${MIN_AMOUNT.toLocaleString('fr-FR')} et ${MAX_AMOUNT.toLocaleString('fr-FR')} FCFA.`); return; }
     if (!phoneValid) { setError('Numéro Cameroun invalide. Exemple : 6XXXXXXXX ou +2376XXXXXXXX.'); return; }
     setLoading(true);
@@ -310,6 +322,7 @@ export default function DonationButton({ className = '', compact = false, varian
                   </div>
 
                   {error && <div className="text-sm text-red-300 bg-red-500/10 border border-red-500/25 rounded-xl px-4 py-3 text-center">{error}</div>}
+                  {info && !error && <div className="text-sm text-amber-200 bg-amber-500/10 border border-amber-500/25 rounded-xl px-4 py-3 text-center">{info}</div>}
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     <button type="button" onClick={() => verifyPayment(paymentId, false)} disabled={loading}
@@ -333,7 +346,7 @@ export default function DonationButton({ className = '', compact = false, varian
                   </details>
 
                   <div className="flex flex-col sm:flex-row gap-2 sm:justify-center">
-                    <button type="button" onClick={() => { stopPolling(); setError(''); setStep(2); }} className="text-sm font-bold text-slate-400 hover:text-white px-3 py-2 rounded-xl hover:bg-slate-800 transition">Modifier les infos</button>
+                    <button type="button" onClick={() => { stopPolling(); setError(''); setInfo(''); setStep(2); }} className="text-sm font-bold text-slate-400 hover:text-white px-3 py-2 rounded-xl hover:bg-slate-800 transition">Modifier les infos</button>
                     <button type="button" onClick={() => { stopPolling(); resetFlow(); }} className="text-sm font-bold text-indigo-300 hover:text-indigo-200 px-3 py-2 rounded-xl hover:bg-indigo-500/10 transition">Nouveau don</button>
                   </div>
                 </div>
