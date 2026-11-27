@@ -13,7 +13,7 @@ const router = Router();
 const SASPAY_BASE_URL = (process.env.SASPAY_BASE_URL || 'https://api.saspay.me/api/v1').replace(/\/$/, '');
 const SASPAY_CURRENCY = (process.env.SASPAY_CURRENCY || 'XAF').trim().toUpperCase();
 const SASPAY_COUNTRY = (process.env.SASPAY_COUNTRY || 'CM').trim().toUpperCase();
-const MIN_AMOUNT = 100;
+const MIN_AMOUNT = 200;
 const MAX_AMOUNT = 500000;
 
 const ALLOWED_NETWORKS = new Set(['mtn_cm', 'orange_cm']);
@@ -135,7 +135,13 @@ router.post('/initiate', async (req, res) => {
 
     const body = pickData(data);
     if (!sr.ok) {
-      const msg = body?.message || body?.detail || data?.message || data?.error?.message || data?.error?.detail || (typeof data?.error === 'string' ? data.error : '') || 'initiation échouée';
+      const fieldErr = data?.error && typeof data.error === 'object' && !Array.isArray(data.error)
+        ? Object.values(data.error).flat().find(v => typeof v === 'string')
+        : '';
+      const msg = body?.message || body?.detail || data?.message || data?.error?.message || data?.error?.detail
+        || (typeof data?.error === 'string' ? data.error : '')
+        || fieldErr
+        || 'initiation échouée';
       const code = body?.code || data?.code || data?.error?.code || '';
       const safeMsg = typeof msg === 'string' ? msg.slice(0, 220) : '';
       console.error('[donations] SasPay initiate error:', sr.status, code, safeMsg, 'payload=', JSON.stringify({ amount: payload.amount, currency: payload.currency, country: payload.country, network: payload.network, phone: payload.customer?.phone }));
