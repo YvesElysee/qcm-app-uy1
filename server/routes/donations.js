@@ -137,18 +137,18 @@ router.post('/initiate', async (req, res) => {
     if (!sr.ok) {
       const msg = body?.message || body?.detail || data?.message || data?.error?.message || data?.error?.detail || (typeof data?.error === 'string' ? data.error : '') || 'initiation échouée';
       const code = body?.code || data?.code || data?.error?.code || '';
-      console.error('[donations] SasPay initiate error:', sr.status, code, msg);
+      const safeMsg = typeof msg === 'string' ? msg.slice(0, 220) : '';
+      console.error('[donations] SasPay initiate error:', sr.status, code, safeMsg, 'payload=', JSON.stringify({ amount: payload.amount, currency: payload.currency, country: payload.country, network: payload.network, phone: payload.customer?.phone }));
+      console.error('[donations] SasPay initiate response:', JSON.stringify(data));
       if (sr.status === 401 || sr.status === 403) {
         return res.status(502).json({ error: 'Le service de don est mal configuré côté serveur. Contactez l’administrateur.' });
       }
       if (sr.status === 429) {
         return res.status(503).json({ error: 'Trop de demandes. Merci de patienter quelques instants puis réessayez.' });
       }
-      if (sr.status === 422) {
-        const safeMsg = typeof msg === 'string' ? msg.slice(0, 180) : '';
+      if (sr.status === 400 || sr.status === 422) {
         return res.status(422).json({ error: safeMsg || 'Paiement impossible avec ces informations. Vérifiez le numéro et le réseau.' });
       }
-      const safeMsg = typeof msg === 'string' ? msg.slice(0, 180) : '';
       return res.status(502).json({
         error: safeMsg || 'Impossible d’initier le paiement. Vérifiez le numéro et réessayez.'
       });
